@@ -39,6 +39,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
     private TerminalSession sesion;
     private TerminalView vista; // la de la activity visible, o null
     private Process sway;
+    private List<String> entornoSway; // el de sway, para los programas que se le conectan
 
     class Local extends Binder {
         TerminalService servicio() { return TerminalService.this; }
@@ -126,19 +127,15 @@ public class TerminalService extends Service implements TerminalSessionClient {
             Log.e(TAG, "falta sway en " + prefijo);
             return;
         }
-        String cargador = cargador();
-        ProcessBuilder pb = new ProcessBuilder(cargador, "/usr/bin/bash", "-lc",
+        entornoSway = entorno(prefijo, cargador());
+        ProcessBuilder pb = new ProcessBuilder(cargador(), "/usr/bin/bash", "-lc",
                 "exec sway > /tmp/sway.log 2>&1");
-        pb.directory(new File(prefijo, "home/user"));
-        pb.environment().clear();
-        for (String v : entorno(prefijo, cargador)) {
-            int i = v.indexOf('=');
-            pb.environment().put(v.substring(0, i), v.substring(i + 1));
-        }
+        entornoLinux(pb);
         try {
             Process p = pb.start();
             sway = p;
             Log.i(TAG, "sway iniciado");
+            Portapapeles.iniciar(this);
             new Thread(() -> {
                 try {
                     Log.i(TAG, "sway terminó: " + p.waitFor());
@@ -149,6 +146,31 @@ public class TerminalService extends Service implements TerminalSessionClient {
             }, "sway").start();
         } catch (java.io.IOException e) {
             Log.e(TAG, "sway", e);
+        }
+    }
+
+    boolean swayVivo() {
+        Process p = sway;
+        return p != null && p.isAlive();
+    }
+
+    // Un programa Linux conectado a sway (wayland-1: el socket que abre sway anidado).
+    ProcessBuilder linux(String... args) {
+        String[] todo = new String[args.length + 1];
+        todo[0] = cargador();
+        System.arraycopy(args, 0, todo, 1, args.length);
+        ProcessBuilder pb = new ProcessBuilder(todo);
+        entornoLinux(pb);
+        pb.environment().put("WAYLAND_DISPLAY", "wayland-1");
+        return pb;
+    }
+
+    private void entornoLinux(ProcessBuilder pb) {
+        pb.directory(new File(getFilesDir(), PREFIJO + "/home/user"));
+        pb.environment().clear();
+        for (String v : entornoSway) {
+            int i = v.indexOf('=');
+            pb.environment().put(v.substring(0, i), v.substring(i + 1));
         }
     }
 

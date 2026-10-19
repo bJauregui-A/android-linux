@@ -6,7 +6,7 @@ Documento de contexto del proyecto. Resume la idea, las decisiones tomadas (y po
 
 Que el teléfono (Redmi 15 5G, HyperOS, **sin root**) sea a la vez Android y un **Linux real y totalmente modificable**: programas de Arch Linux ARM sin recompilar corriendo nativos (glibc propia dentro de una app normal, sin proot ni emulación), con un **escritorio Wayland mínimo y modificable, tipo Hyprland adaptado al celular**, y **aceleración por GPU** (Turnip en la Adreno 619). Sin perder lo de Android que importa (apps bancarias chilenas, Play Store, cámara, pagos) y todo reversible: es una app, se desinstala y el teléfono queda igual. Más adelante: integrarlo con Mosaico (cada ventana Linux como ventana Android) y, si se puede, Steam.
 
-## Para retomar (estado al 2026-10-19, séptima sesión)
+## Para retomar (estado al 2026-10-19, octava sesión)
 
 | Frente | Estado |
 |---|---|
@@ -18,6 +18,17 @@ Que el teléfono (Redmi 15 5G, HyperOS, **sin root**) sea a la vez Android y un 
 | Escritorio | ✅ sway con los atajos y el aspecto de la config de Hyprland/HyDE del PC (`sway/`), waybar, fuzzel, kitty con la config del PC, modo inmersivo a pantalla completa (1080×2193 px reales). swayfx también funciona por GPU (`~/swayfx`, no es el por defecto); Hyprland instalado pero no arranca (ver "sway, swayfx y Hyprland") |
 | Escritorio por GPU | ✅ sway compone con el renderer **Vulkan** de wlroots (parchado, `wlroots/`) directo en AHardwareBuffers del anfitrión; sus clientes le pasan dmabufs. vkcube dentro de sway: CPU total 8,9 s → 2,1 s cada 10 s |
 
+**8ª sesión (2026-10-19), cerrada: ✅ portapapeles Android ↔ Linux, probado por el usuario en los dos sentidos.** El cursor está bien así (no tocar).
+- **Por qué no en el anfitrión**: el backend wayland de wlroots no reenvía el portapapeles al compositor padre (no usa `wl_data_device`), así que un `wl_data_device_manager` en `anfitrion.c` no le serviría a sway. El puente va **dentro de sway** con wl-clipboard (protocolo data-control, sin foco): `Portapapeles.java`.
+- **Linux → Android**: `TerminalService.iniciarSway()` llama a `Portapapeles.iniciar()`, que corre `wl-paste --type text --watch sh -c 'base64 -w0; echo'` en `wayland-1` (el socket de sway anidado): una línea base64 por cambio → `setPrimaryClip` (escribir sí se puede en segundo plano). Si wl-paste se cae (ej. el socket de sway aún no existe al arrancar) reintenta cada 2 s mientras sway viva.
+- **Android → Linux**: Android solo deja **leer** el portapapeles a la app enfocada → `WaylandActivity.onWindowFocusChanged` llama a `Portapapeles.foco()`: al ganar el foco lee el portapapeles y registra un `OnPrimaryClipChangedListener` (lo quita al perderlo) → `wl-copy -- <texto>`. **Por stdin desde Java llegaba vacío** (a mano por stdin sí funciona; causa no encontrada), por eso va como argumento; > 100 KB va por stdin (MAX_ARG_STRLEN). Errores de wl-copy en `/tmp/wl-copy.log`. `ultimo` evita rebotes entre los dos lados. Solo texto (imágenes: pendiente).
+- `TerminalService.linux(args...)`: ProcessBuilder de un programa Linux conectado a sway, con el entorno con que arrancó sway (`entornoSway`, para no reescribir `resolv.conf` en cada copia).
+- **SUPER+V (historial) no funciona y nunca funcionó**: `cliphist` es Go → syscalls directas sin la traducción de rutas de la glibc ("opening db: create cache dir: mkdir /home: read-only file system" en `sway.log`). Lo que se ve al abrirlo es el buscador de fuzzel con la lista vacía. Se arregla con la capa seccomp de "Compatibilidad completa" 1 (o, de parche, un historial propio en bash/python).
+- **Visto por ADB, sin confirmar**: con la app en segundo plano, `wl-paste`/`swaymsg` lanzados por `run-as` no recibían respuesta de sway (en primer plano sí). Revisar si sway se bloquea sin ventana del anfitrión (relacionado con "frame callbacks sin ventana", pendiente menor).
+- **Probar programas dentro de sway por ADB sin cerrar nada**: `scripts/wl.sh` (uso en su cabecera): `GLIBC_PREFIX=/data/data/<paquete>/files/archlinux GLIBC_LOADER=$N/libldp.so HOME=/home/user PATH=/usr/bin XDG_RUNTIME_DIR=/run/user/$(id -u) WAYLAND_DISPLAY=wayland-1 /system/bin/timeout 5 $N/libldp.so <programa>`, donde `$N` = `legacyNativeLibraryDir` de `dumpsys package` + `/arm64` (**cambia con cada `adb install`**; `run-as` no puede listar `/data/app`). Correr con `adb shell "run-as <paquete> env WL_LIB=$N sh /data/local/tmp/wl.sh ..."`. LD_PRELOAD no se puede poner afuera (rompe el `sh` de Android): pasarlo con `/usr/bin/env` de Arch.
+- Privacidad: `screencap` con la app en segundo plano captura lo que el usuario tenga abierto (pasó con un chat) → capturar solo cuando el escritorio esté al frente.
+- Hay ~60 `sway-ipc.*.sock` viejos en `run/user/<uid>/` (uno por cada arranque de sway): limpiar alguna vez.
+
 **7ª sesión (2026-10-19), cerrada:** el usuario probó: atajos ✅, girar ✅, **gestos de 3 dedos ✅**, kitty con zsh ✅ (portapapeles SUPER+V sin probar).
 - **Gestos**: el anfitrión ofrece `zwp_pointer_gestures_v1` v3 (solo manda swipe; pinch/hold se crean vacíos) y `WaylandActivity` pasa a "deslizar" con 3+ dedos (`Wayland.gesto`: fase 0 empieza, 1 avanza, 2 termina, 3 cancelado; al poner/levantar un dedo el siguiente MOVE solo recentra, también para el scroll de 2 dedos). sway: `bindgesture swipe:left/right` = escritorio siguiente/anterior, `up` = fuzzel, `down` = selector de ventanas (sin número de dedos: vale para 3 o 4). wlroots (backend wayland) ya los reenvía sin parche.
 - **HyperOS se quedaba con los toques de 3 dedos** (`enable_three_gesture=1`: abajo = captura, lados = pantalla dividida, mantener = captura parcial; la app recibía ACTION_CANCEL). Apagados por elección del usuario: `adb shell settings put system enable_three_gesture 0` (deshacer: `1`). Ajuste privado de HyperOS: una app no puede cambiarlo sola. La captura sigue con encendido + bajar volumen.
@@ -27,8 +38,8 @@ Que el teléfono (Redmi 15 5G, HyperOS, **sin root**) sea a la vez Android y un 
 
 **Empezar la próxima sesión por** (en orden; el usuario eligió escritorio cómodo primero y luego compatibilidad):
 1. **Ojo: el usuario suele estar usando el teléfono.** `scripts/correr.sh`, `correr-wl.sh` y `adb install -r` cierran sway y todo lo abierto: avisar antes. Para mirar sin cerrar nada: `adb exec-out screencap -p` y `adb shell "run-as dev.ben4shot.glibcprueba.sdk36 cat files/archlinux/tmp/sway.log"`.
-2. **Cursor más grande**: `seat * xcursor_theme <tema> 32` en `sway/config` + un tema (ej. `xcursor-...`/`adwaita-cursors` de Arch ARM). fastfetch dice "Cursor: Adwaita".
-3. **Portapapeles Android ↔ Wayland**: `wl_data_device_manager` en el anfitrión + `ClipboardManager` en Java (dentro de sway ya hay portapapeles entre apps Linux; probar también SUPER+V/cliphist).
+2. ~~Cursor más grande~~: el usuario dice que está bien. ~~Portapapeles Android ↔ Linux~~ ✅ (8ª sesión).
+3. **¿sway se bloquea con la app en segundo plano?** (ver 8ª sesión): confirmar con la app al frente vs. atrás; si es así, que el anfitrión siga atendiendo sin ventana.
 4. **Popups xdg y `wl_subcompositor`** en el anfitrión (solo clientes directos, sin sway en medio).
 5. Preguntar por la **escala** (`output * scale 2.5`; buffers ya nativos 1080 px) y confirmar la **opacidad de inactivas** (`opacidad.py`: probar `swaymsg '[app_id=kitty] opacity 0.3'` + captura).
 6. Luego lo grande de "Compatibilidad completa" (abajo): capa seccomp para Go/estáticos, audio, Xwayland.
@@ -46,7 +57,7 @@ Que el teléfono (Redmi 15 5G, HyperOS, **sin root**) sea a la vez Android y un 
 1. ~~Zink~~ ✅ (ver "GPU").
 2. ~~Evitar la copia por CPU~~ ✅ **cero copias** (2026-10-19, ver "GPU → Cero copias"): vkcube/es2gears directos al anfitrión pasan de ~50 % a ~11 % de un núcleo para todo el proceso de la app. Falta para los clientes dentro de sway (pendiente 3).
 3. ~~Escritorio por GPU~~ ✅ (2026-10-19, ver "Escritorio por GPU"). Hyprland: usa aquamarine (no wlroots) → habría que repetir los parches allí.
-4. **Escritorio cómodo en el celular**: ✅ gestos de 3 dedos (7ª sesión, probados), ✅ zsh/starship como el PC. ✅ config de sway con atajos y aspecto de HyDE, waybar, fuzzel, kitty, modo inmersivo (ver "Escritorio estilo HyDE"). Falta: confirmar que la opacidad de inactivas (0.75) se aplica; cursor más grande; popups xdg (hoy se cierran: menús GTK/Qt no andan); portapapeles Android ↔ Wayland; `wl_subcompositor` (libdecor lo pide para decoraciones). Keymap para clientes directos: ✅ (latam, `keymap.h`).
+4. **Escritorio cómodo en el celular**: ✅ gestos de 3 dedos (7ª sesión, probados), ✅ zsh/starship como el PC. ✅ config de sway con atajos y aspecto de HyDE, waybar, fuzzel, kitty, modo inmersivo (ver "Escritorio estilo HyDE"). Falta: confirmar que la opacidad de inactivas (0.75) se aplica; cursor más grande; popups xdg (hoy se cierran: menús GTK/Qt no andan); ~~portapapeles Android ↔ Wayland~~ ✅ (8ª sesión, `Portapapeles.java`); historial SUPER+V (cliphist es Go: espera la capa seccomp); `wl_subcompositor` (libdecor lo pide para decoraciones). Keymap para clientes directos: ✅ (latam, `keymap.h`).
 5. **Xwayland** (apps X11; Steam lo necesita).
 6. **Steam**: revisar el cliente oficial para ARM que menciona el usuario; si no sirve, FEX-Emu (ver abajo).
 7. Binarios estáticos (cargarlos en espacio de usuario desde `execve`).
@@ -364,6 +375,7 @@ Antecedente útil para ver qué parches hacen falta: el proyecto **glibc-package
 | `app/src/main/jniLibs/arm64-v8a/libldp.so` | Cargador de la glibc propia |
 | `wayland/compilar.sh` | libffi + libwayland-server para Android (NDK) y xdg-shell; salida en `wayland/salida/` (requisito del build de la app) |
 | `app/src/main/cpp/anfitrion.c` | Anfitrión Wayland (JNI); `Wayland.java` / `WaylandActivity.java` del lado Java |
+| `app/src/main/java/.../Portapapeles.java` | Puente de portapapeles Android ↔ sway (wl-paste --watch / wl-copy) |
 | `turnip/compilar-mesa.sh` | Compila Mesa/Turnip (KGSL) dentro del Arch de la app (copiar a `~/`) |
 | `wayland/generar-teclado.sh` | Genera `Distribucion.java` (tabla de teclado) y `app/src/main/cpp/keymap.h` (keymap xkb para el anfitrión) con xkbcommon del PC |
 | `turnip/egl-zink.c` | LD_PRELOAD para OpenGL por Zink en Wayland sin dmabuf (ver "GPU") |

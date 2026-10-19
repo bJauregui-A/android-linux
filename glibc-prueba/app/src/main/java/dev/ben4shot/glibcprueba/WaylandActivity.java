@@ -185,6 +185,7 @@ public class WaylandActivity extends Activity {
     public void onWindowFocusChanged(boolean foco) {
         super.onWindowFocusChanged(foco);
         if (foco) inmersivo();
+        Portapapeles.foco(this, foco);
     }
 
     // --- tacto ---
