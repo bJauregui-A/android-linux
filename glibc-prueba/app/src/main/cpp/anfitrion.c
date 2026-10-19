@@ -653,6 +653,18 @@ transaccion_completada (void *ctx, ASurfaceTransactionStats *stats)
 static struct wl_list para_vsync;
 static void pedir_vsync (void);
 
+/* Sin ventana (app en segundo plano) los frame callbacks esperan a que vuelva:
+   respondidos al tiro, sway y sus clientes dibujaban sin freno (~50 % de un
+   núcleo con vkcube).  Hilo del anfitrión.  */
+static struct wl_list sin_ventana;
+
+static void
+guardar_sin_ventana (struct wl_list *cbs)
+{
+  wl_list_insert_list (sin_ventana.prev, cbs);
+  wl_list_init (cbs);
+}
+
 static void
 responder_callbacks (struct wl_list *cbs)
 {
@@ -739,6 +751,7 @@ presentar (struct ahb *b, struct wl_list *cbs)
     {
       /* Sin ventana no hay nada que mostrar: se completa al tiro.  */
       pthread_mutex_unlock (&mtx);
+      guardar_sin_ventana (&t->callbacks);
       completada (t);
       return;
     }
@@ -953,6 +966,14 @@ surface_commit (struct wl_client *c, struct wl_resource *r)
   else if (s->toplevel != NULL && !s->configurado)
     enviar_configure (s);	/* commit inicial, sin buffer */
 
+  pthread_mutex_lock (&mtx);
+  bool hay_ventana = ventana != NULL;
+  pthread_mutex_unlock (&mtx);
+  if (!hay_ventana)
+    {
+      guardar_sin_ventana (&s->callbacks);
+      return;
+    }
   uint32_t t = ahora_ms ();
   struct wl_resource *cb, *tmp;
   wl_resource_for_each_safe (cb, tmp, &s->callbacks)
@@ -1655,6 +1676,12 @@ procesar_cola (int fd, uint32_t mask, void *data)
 	  struct wl_resource *r;
 	  wl_resource_for_each (r, &salidas)
 	    enviar_output (r);
+	  if (!wl_list_empty (&sin_ventana))
+	    {
+	      wl_list_insert_list (para_vsync.prev, &sin_ventana);
+	      wl_list_init (&sin_ventana);
+	      pedir_vsync ();
+	    }
 	  break;
 	}
       case EV_MOVER:
@@ -1786,6 +1813,7 @@ Java_dev_ben4shot_glibcprueba_Wayland_iniciar (JNIEnv *env, jclass cls, jstring 
   wl_global_create (display, &android_ahb_v1_interface, 1, NULL, android_ahb_bind);
 
   wl_list_init (&para_vsync);
+  wl_list_init (&sin_ventana);
   vsync_fd = eventfd (0, EFD_CLOEXEC | EFD_NONBLOCK);
   pthread_t tv;
   pthread_create (&tv, NULL, hilo_vsync, NULL);
