@@ -1,0 +1,93 @@
+diff --git a/types/wlr_linux_dmabuf_v1.c b/types/wlr_linux_dmabuf_v1.c
+index 3165e88..584be4b 100644
+--- a/types/wlr_linux_dmabuf_v1.c
++++ b/types/wlr_linux_dmabuf_v1.c
+@@ -891,14 +891,14 @@ static bool set_default_feedback(struct wlr_linux_dmabuf_v1 *linux_dmabuf,
+ 		return false;
+ 	}
+ 
++	int main_device_fd = -1;
+ 	drmDevice *device = NULL;
+-	if (drmGetDeviceFromDevId(feedback->main_device, 0, &device) != 0) {
++	if (feedback->main_device == 0) {
++		// No DRM device (Android): skip DMA-BUF import checks
++	} else if (drmGetDeviceFromDevId(feedback->main_device, 0, &device) != 0) {
+ 		wlr_log_errno(WLR_ERROR, "drmGetDeviceFromDevId failed");
+ 		goto error_compiled;
+-	}
+-
+-	int main_device_fd = -1;
+-	if (device->available_nodes & (1 << DRM_NODE_RENDER)) {
++	} else if (device->available_nodes & (1 << DRM_NODE_RENDER)) {
+ 		const char *name = device->nodes[DRM_NODE_RENDER];
+ 		main_device_fd = open(name, O_RDWR | O_CLOEXEC);
+ 		drmFreeDevice(&device);
+@@ -951,6 +951,10 @@ error_compiled:
+ struct wlr_linux_dmabuf_v1 *wlr_linux_dmabuf_v1_create(struct wl_display *display,
+ 		uint32_t version, const struct wlr_linux_dmabuf_feedback_v1 *default_feedback) {
+ 	assert(version <= LINUX_DMABUF_VERSION);
++	if (default_feedback->main_device == 0 &&
++			version >= ZWP_LINUX_DMABUF_V1_GET_DEFAULT_FEEDBACK_SINCE_VERSION) {
++		version = ZWP_LINUX_DMABUF_V1_GET_DEFAULT_FEEDBACK_SINCE_VERSION - 1;
++	}
+ 
+ 	struct wlr_linux_dmabuf_v1 *linux_dmabuf = calloc(1, sizeof(*linux_dmabuf));
+ 	if (linux_dmabuf == NULL) {
+@@ -1091,16 +1095,17 @@ bool wlr_linux_dmabuf_feedback_v1_init_with_options(struct wlr_linux_dmabuf_feed
+ 
+ 	int renderer_drm_fd = wlr_renderer_get_drm_fd(options->main_renderer);
+ 	if (renderer_drm_fd < 0) {
+-		wlr_log(WLR_ERROR, "Failed to get renderer DRM FD");
+-		goto error;
+-	}
+-	dev_t renderer_dev;
+-	if (!devid_from_fd(renderer_drm_fd, &renderer_dev)) {
+-		goto error;
++		// Android: no DRM node. main_device stays 0 and the global is
++		// limited to version 3 (formats without feedback)
++		wlr_log(WLR_INFO, "Renderer has no DRM FD, linux-dmabuf without feedback");
++	} else {
++		dev_t renderer_dev;
++		if (!devid_from_fd(renderer_drm_fd, &renderer_dev)) {
++			goto error;
++		}
++		feedback->main_device = renderer_dev;
+ 	}
+ 
+-	feedback->main_device = renderer_dev;
+-
+ 	const struct wlr_drm_format_set *renderer_formats =
+ 		wlr_renderer_get_texture_formats(options->main_renderer, WLR_BUFFER_CAP_DMABUF);
+ 	if (renderer_formats == NULL) {
+@@ -1162,7 +1167,7 @@ bool wlr_linux_dmabuf_feedback_v1_init_with_options(struct wlr_linux_dmabuf_feed
+ 		goto error;
+ 	}
+ 
+-	tranche->target_device = renderer_dev;
++	tranche->target_device = feedback->main_device;
+ 	if (!wlr_drm_format_set_copy(&tranche->formats, renderer_formats)) {
+ 		goto error;
+ 	}
+--- a/render/wlr_renderer.c
++++ b/render/wlr_renderer.c
+@@ -75,7 +75,19 @@
+ 
+ bool wlr_renderer_init_wl_shm(struct wlr_renderer *r,
+ 		struct wl_display *wl_display) {
+-	return wlr_shm_create_with_renderer(wl_display, 2, r) != NULL;
++	if (wlr_shm_create_with_renderer(wl_display, 2, r) == NULL) {
++		return false;
++	}
++
++	// Android: compositors (sway) only create linux-dmabuf when the renderer
++	// has a DRM FD. Without one, offer it here (version 3, no feedback) so
++	// clients can hand GPU buffers to a renderer that imports DMA-BUFs.
++	if (wlr_renderer_get_drm_fd(r) < 0 &&
++			wlr_renderer_get_texture_formats(r, WLR_BUFFER_CAP_DMABUF) != NULL &&
++			wlr_linux_dmabuf_v1_create_with_renderer(wl_display, 3, r) == NULL) {
++		return false;
++	}
++	return true;
+ }
+ 
+ bool wlr_renderer_init_wl_display(struct wlr_renderer *r,

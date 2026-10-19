@@ -1,0 +1,400 @@
+diff --git a/backend/wayland/ahb.c b/backend/wayland/ahb.c
+new file mode 100644
+index 0000000..7ddc317
+--- /dev/null
++++ b/backend/wayland/ahb.c
+@@ -0,0 +1,218 @@
++/*
++ * Allocator for the Android host compositor (android-ahb-v1): the host
++ * allocates an AHardwareBuffer and hands back its dmabuf. The renderer draws
++ * into it and the buffer reaches SurfaceFlinger without copies.
++ */
++#include <assert.h>
++#include <drm_fourcc.h>
++#include <stdlib.h>
++#include <unistd.h>
++
++#include <wlr/backend/multi.h>
++#include <wlr/interfaces/wlr_buffer.h>
++#include <wlr/render/allocator.h>
++#include <wlr/util/log.h>
++
++#include "backend/wayland.h"
++#include "render/drm_format_set.h"
++
++#include "android-ahb-v1-client-protocol.h"
++
++struct wlr_wl_ahb_allocator {
++	struct wlr_allocator base;
++	struct wlr_wl_backend *wl;
++};
++
++struct wlr_wl_ahb_buffer {
++	struct wlr_buffer base;
++	struct wlr_dmabuf_attributes dmabuf;
++	// Owned until create_wl_buffer() takes it
++	struct wl_buffer *wl_buffer;
++};
++
++struct ahb_pending {
++	struct wl_buffer *wl_buffer;
++	bool done, ok;
++	int fd;
++	uint32_t offset, stride;
++};
++
++static void ahb_handle_listo(void *data, struct android_ahb_v1 *ahb,
++		struct wl_buffer *wl_buffer, int32_t fd, uint32_t offset, uint32_t stride) {
++	struct wlr_wl_backend *wl = data;
++	struct ahb_pending *pending = wl->ahb_pending;
++	if (pending == NULL || pending->wl_buffer != wl_buffer) {
++		close(fd);
++		return;
++	}
++	pending->done = pending->ok = true;
++	pending->fd = fd;
++	pending->offset = offset;
++	pending->stride = stride;
++}
++
++static void ahb_handle_fallo(void *data, struct android_ahb_v1 *ahb,
++		struct wl_buffer *wl_buffer) {
++	struct wlr_wl_backend *wl = data;
++	struct ahb_pending *pending = wl->ahb_pending;
++	if (pending != NULL && pending->wl_buffer == wl_buffer) {
++		pending->done = true;
++	}
++}
++
++static const struct android_ahb_v1_listener ahb_listener = {
++	.listo = ahb_handle_listo,
++	.fallo = ahb_handle_fallo,
++};
++
++void init_wl_ahb(struct wlr_wl_backend *wl, struct wl_registry *registry,
++		uint32_t name) {
++	wl->android_ahb_v1 = wl_registry_bind(registry, name,
++		&android_ahb_v1_interface, 1);
++	// Events are only dispatched while allocating
++	wl_proxy_set_queue((struct wl_proxy *)wl->android_ahb_v1, wl->busy_loop_queue);
++	android_ahb_v1_add_listener(wl->android_ahb_v1, &ahb_listener, wl);
++}
++
++void finish_wl_ahb(struct wlr_wl_backend *wl) {
++	if (wl->android_ahb_v1) {
++		android_ahb_v1_destroy(wl->android_ahb_v1);
++	}
++}
++
++static const struct wlr_buffer_impl buffer_impl;
++
++static struct wlr_wl_ahb_buffer *get_ahb_buffer(struct wlr_buffer *wlr_buffer) {
++	if (wlr_buffer->impl != &buffer_impl) {
++		return NULL;
++	}
++	struct wlr_wl_ahb_buffer *buffer = wl_container_of(wlr_buffer, buffer, base);
++	return buffer;
++}
++
++static bool buffer_get_dmabuf(struct wlr_buffer *wlr_buffer,
++		struct wlr_dmabuf_attributes *dmabuf) {
++	struct wlr_wl_ahb_buffer *buffer = get_ahb_buffer(wlr_buffer);
++	*dmabuf = buffer->dmabuf;
++	return true;
++}
++
++static void buffer_destroy(struct wlr_buffer *wlr_buffer) {
++	struct wlr_wl_ahb_buffer *buffer = get_ahb_buffer(wlr_buffer);
++	wlr_buffer_finish(wlr_buffer);
++	wlr_dmabuf_attributes_finish(&buffer->dmabuf);
++	if (buffer->wl_buffer != NULL) {
++		wl_buffer_destroy(buffer->wl_buffer);
++	}
++	free(buffer);
++}
++
++static const struct wlr_buffer_impl buffer_impl = {
++	.destroy = buffer_destroy,
++	.get_dmabuf = buffer_get_dmabuf,
++};
++
++struct wl_buffer *wlr_wl_ahb_buffer_take(struct wlr_buffer *wlr_buffer) {
++	struct wlr_wl_ahb_buffer *buffer = get_ahb_buffer(wlr_buffer);
++	if (buffer == NULL) {
++		return NULL;
++	}
++	struct wl_buffer *wl_buffer = buffer->wl_buffer;
++	buffer->wl_buffer = NULL;
++	return wl_buffer;
++}
++
++static struct wlr_buffer *allocator_create_buffer(
++		struct wlr_allocator *wlr_allocator, int width, int height,
++		const struct wlr_drm_format *format) {
++	struct wlr_wl_ahb_allocator *allocator =
++		wl_container_of(wlr_allocator, allocator, base);
++	struct wlr_wl_backend *wl = allocator->wl;
++
++	if (!wlr_drm_format_has(format, DRM_FORMAT_MOD_LINEAR) &&
++			!wlr_drm_format_has(format, DRM_FORMAT_MOD_INVALID)) {
++		wlr_log(WLR_ERROR, "android-ahb-v1 buffers are LINEAR only");
++		return NULL;
++	}
++
++	struct ahb_pending pending = { .fd = -1 };
++	pending.wl_buffer = android_ahb_v1_crear(wl->android_ahb_v1,
++		width, height, format->format);
++	wl->ahb_pending = &pending;
++	while (!pending.done) {
++		if (wl_display_dispatch_queue(wl->remote_display, wl->busy_loop_queue) < 0) {
++			wlr_log(WLR_ERROR, "wl_display_dispatch_queue() failed");
++			break;
++		}
++	}
++	wl->ahb_pending = NULL;
++
++	if (!pending.ok) {
++		wlr_log(WLR_ERROR, "Host failed to allocate a %dx%d buffer", width, height);
++		wl_buffer_destroy(pending.wl_buffer);
++		return NULL;
++	}
++
++	struct wlr_wl_ahb_buffer *buffer = calloc(1, sizeof(*buffer));
++	if (buffer == NULL) {
++		close(pending.fd);
++		wl_buffer_destroy(pending.wl_buffer);
++		return NULL;
++	}
++	wlr_buffer_init(&buffer->base, &buffer_impl, width, height);
++
++	struct wl_event_queue *display_queue =
++		wl_proxy_get_queue((struct wl_proxy *)wl->remote_display);
++	wl_proxy_set_queue((struct wl_proxy *)pending.wl_buffer, display_queue);
++	buffer->wl_buffer = pending.wl_buffer;
++	buffer->dmabuf = (struct wlr_dmabuf_attributes){
++		.width = width,
++		.height = height,
++		.format = format->format,
++		.modifier = DRM_FORMAT_MOD_LINEAR,
++		.n_planes = 1,
++		.offset[0] = pending.offset,
++		.stride[0] = pending.stride,
++		.fd[0] = pending.fd,
++	};
++	return &buffer->base;
++}
++
++static void allocator_destroy(struct wlr_allocator *wlr_allocator) {
++	struct wlr_wl_ahb_allocator *allocator =
++		wl_container_of(wlr_allocator, allocator, base);
++	free(allocator);
++}
++
++static const struct wlr_allocator_interface allocator_impl = {
++	.destroy = allocator_destroy,
++	.create_buffer = allocator_create_buffer,
++};
++
++static void find_wl_backend(struct wlr_backend *backend, void *data) {
++	struct wlr_wl_backend **wl = data;
++	if (*wl == NULL && wlr_backend_is_wl(backend)) {
++		*wl = get_wl_backend_from_backend(backend);
++	}
++}
++
++struct wlr_allocator *wlr_wl_ahb_allocator_create(struct wlr_backend *backend) {
++	struct wlr_wl_backend *wl = NULL;
++	if (wlr_backend_is_multi(backend)) {
++		wlr_multi_for_each_backend(backend, find_wl_backend, &wl);
++	} else {
++		find_wl_backend(backend, &wl);
++	}
++	if (wl == NULL || wl->android_ahb_v1 == NULL) {
++		return NULL;
++	}
++
++	struct wlr_wl_ahb_allocator *allocator = calloc(1, sizeof(*allocator));
++	if (allocator == NULL) {
++		return NULL;
++	}
++	wlr_allocator_init(&allocator->base, &allocator_impl, WLR_BUFFER_CAP_DMABUF);
++	allocator->wl = wl;
++	wlr_log(WLR_INFO, "Using android-ahb-v1 allocator");
++	return &allocator->base;
++}
+diff --git a/backend/wayland/backend.c b/backend/wayland/backend.c
+index 14a783b..0f7d3a6 100644
+--- a/backend/wayland/backend.c
++++ b/backend/wayland/backend.c
+@@ -30,6 +30,7 @@
+ #include "tablet-v2-client-protocol.h"
+ #include "relative-pointer-unstable-v1-client-protocol.h"
+ #include "viewporter-client-protocol.h"
++#include "android-ahb-v1-client-protocol.h"
+ 
+ struct wlr_wl_linux_dmabuf_feedback_v1 {
+ 	struct wlr_wl_backend *backend;
+@@ -394,6 +395,8 @@ static void registry_global(void *data, struct wl_registry *registry,
+ 			&zwp_linux_dmabuf_v1_interface, version >= 4 ? 4 : version);
+ 		zwp_linux_dmabuf_v1_add_listener(wl->zwp_linux_dmabuf_v1,
+ 			&linux_dmabuf_v1_listener, wl);
++	} else if (strcmp(iface, android_ahb_v1_interface.name) == 0) {
++		init_wl_ahb(wl, registry, name);
+ 	} else if (strcmp(iface, zwp_relative_pointer_manager_v1_interface.name) == 0) {
+ 		wl->zwp_relative_pointer_manager_v1 = wl_registry_bind(registry, name,
+ 			&zwp_relative_pointer_manager_v1_interface, 1);
+@@ -531,6 +534,7 @@ static void backend_destroy(struct wlr_backend *backend) {
+ 	if (wl->zwp_linux_dmabuf_v1) {
+ 		zwp_linux_dmabuf_v1_destroy(wl->zwp_linux_dmabuf_v1);
+ 	}
++	finish_wl_ahb(wl);
+ 	if (wl->drm_syncobj_manager_v1) {
+ 		wp_linux_drm_syncobj_manager_v1_destroy(wl->drm_syncobj_manager_v1);
+ 	}
+diff --git a/backend/wayland/meson.build b/backend/wayland/meson.build
+index b606a9b..321311c 100644
+--- a/backend/wayland/meson.build
++++ b/backend/wayland/meson.build
+@@ -9,9 +9,11 @@ wlr_files += files(
+ 	'seat.c',
+ 	'pointer.c',
+ 	'tablet_v2.c',
++	'ahb.c',
+ )
+ 
+ client_protos = [
++	'android-ahb-v1',
+ 	'drm',
+ 	'linux-dmabuf-v1',
+ 	'linux-drm-syncobj-v1',
+diff --git a/backend/wayland/output.c b/backend/wayland/output.c
+index fb4d1f9..bd3246c 100644
+--- a/backend/wayland/output.c
++++ b/backend/wayland/output.c
+@@ -286,7 +286,9 @@ static struct wlr_wl_buffer *create_wl_buffer(struct wlr_wl_backend *wl,
+ 	struct wlr_dmabuf_attributes dmabuf;
+ 	struct wlr_shm_attributes shm;
+ 	struct wl_buffer *wl_buffer;
+-	if (wlr_buffer_get_dmabuf(wlr_buffer, &dmabuf)) {
++	if ((wl_buffer = wlr_wl_ahb_buffer_take(wlr_buffer)) != NULL) {
++		// android-ahb-v1: the host already has this buffer
++	} else if (wlr_buffer_get_dmabuf(wlr_buffer, &dmabuf)) {
+ 		wl_buffer = import_dmabuf(wl, &dmabuf);
+ 	} else if (wlr_buffer_get_shm(wlr_buffer, &shm)) {
+ 		wl_buffer = import_shm(wl, &shm);
+diff --git a/include/backend/wayland.h b/include/backend/wayland.h
+index e24eb9f..9c6e148 100644
+--- a/include/backend/wayland.h
++++ b/include/backend/wayland.h
+@@ -54,6 +54,8 @@ struct wlr_wl_backend {
+ 	struct wl_subcompositor *subcompositor;
+ 	struct wp_viewporter *viewporter;
+ 	char *drm_render_name;
++	struct android_ahb_v1 *android_ahb_v1;
++	struct ahb_pending *ahb_pending; // allocation in progress
+ };
+ 
+ struct wlr_wl_buffer {
+@@ -210,6 +212,12 @@ void destroy_wl_seat(struct wlr_wl_seat *seat);
+ void destroy_wl_buffer(struct wlr_wl_buffer *buffer);
+ void destroy_wl_drm_syncobj_timeline(struct wlr_wl_drm_syncobj_timeline *timeline);
+ 
++void init_wl_ahb(struct wlr_wl_backend *wl, struct wl_registry *registry,
++	uint32_t name);
++void finish_wl_ahb(struct wlr_wl_backend *wl);
++struct wl_buffer *wlr_wl_ahb_buffer_take(struct wlr_buffer *buffer);
++struct wlr_allocator *wlr_wl_ahb_allocator_create(struct wlr_backend *backend);
++
+ extern const struct wlr_pointer_impl wl_pointer_impl;
+ extern const struct wlr_tablet_pad_impl wl_tablet_pad_impl;
+ extern const struct wlr_tablet_impl wl_tablet_impl;
+diff --git a/protocol/android-ahb-v1.xml b/protocol/android-ahb-v1.xml
+new file mode 100644
+index 0000000..16f4308
+--- /dev/null
++++ b/protocol/android-ahb-v1.xml
+@@ -0,0 +1,47 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<protocol name="android_ahb_v1">
++  <description summary="buffers reservados por el anfitrión (AHardwareBuffer)">
++    Protocolo propio del anfitrión Wayland de la app.  El cliente le pide al
++    anfitrión un wl_buffer; el anfitrión reserva un AHardwareBuffer (gralloc) y
++    le devuelve su dmabuf.  El cliente dibuja en el dmabuf con la GPU (Turnip lo
++    importa) y lo adjunta como cualquier wl_buffer: el anfitrión se lo entrega
++    tal cual a SurfaceFlinger, sin copias.
++
++    Sincronización implícita, como linux-dmabuf: el cliente le pega al dmabuf la
++    fence de su render (DMA_BUF_IOCTL_IMPORT_SYNC_FILE) antes del commit, y el
++    anfitrión le pega la fence de liberación de SurfaceFlinger antes de mandar
++    wl_buffer.release.
++  </description>
++
++  <interface name="android_ahb_v1" version="1">
++    <request name="destroy" type="destructor"/>
++
++    <request name="crear">
++      <description summary="reservar un buffer">
++        Formato: fourcc de DRM (ABGR8888, XBGR8888, ARGB8888, XRGB8888).  La
++        respuesta es el evento listo o fallo con el mismo wl_buffer.
++      </description>
++      <arg name="buffer" type="new_id" interface="wl_buffer"/>
++      <arg name="width" type="int"/>
++      <arg name="height" type="int"/>
++      <arg name="format" type="uint"/>
++    </request>
++
++    <event name="listo">
++      <description summary="buffer reservado">
++        Un plano, modificador LINEAR.  stride en bytes.
++      </description>
++      <arg name="buffer" type="object" interface="wl_buffer"/>
++      <arg name="fd" type="fd"/>
++      <arg name="offset" type="uint"/>
++      <arg name="stride" type="uint"/>
++    </event>
++
++    <event name="fallo">
++      <description summary="no se pudo reservar">
++        El wl_buffer queda inutilizable; el cliente debe destruirlo.
++      </description>
++      <arg name="buffer" type="object" interface="wl_buffer"/>
++    </event>
++  </interface>
++</protocol>
+diff --git a/protocol/meson.build b/protocol/meson.build
+index 30aeb68..9a74727 100644
+--- a/protocol/meson.build
++++ b/protocol/meson.build
+@@ -64,6 +64,7 @@ protocols = {
+ 	'ext-transient-seat-v1': wl_protocol_dir / 'staging/ext-transient-seat/ext-transient-seat-v1.xml',
+ 
+ 	# Other protocols
++	'android-ahb-v1': 'android-ahb-v1.xml',
+ 	'drm': 'drm.xml',
+ 	'input-method-unstable-v2': 'input-method-unstable-v2.xml',
+ 	'kde-server-decoration': 'server-decoration.xml',
+diff --git a/render/allocator/allocator.c b/render/allocator/allocator.c
+index b7dbf3d..dbf81f6 100644
+--- a/render/allocator/allocator.c
++++ b/render/allocator/allocator.c
+@@ -12,6 +12,7 @@
+ #include "render/allocator/drm_dumb.h"
+ #include "render/allocator/shm.h"
+ #include "render/wlr_renderer.h"
++#include "backend/wayland.h"
+ 
+ #if WLR_HAS_GBM_ALLOCATOR
+ #include "render/allocator/gbm.h"
+@@ -108,6 +109,12 @@ struct wlr_allocator *wlr_allocator_autocreate(struct wlr_backend *backend,
+ 
+ 	struct wlr_allocator *alloc = NULL;
+ 
++	// Android host compositor: buffers come from the host (AHardwareBuffer)
++	if ((renderer_caps & WLR_BUFFER_CAP_DMABUF) &&
++			(alloc = wlr_wl_ahb_allocator_create(backend)) != NULL) {
++		return alloc;
++	}
++
+ 	uint32_t gbm_caps = WLR_BUFFER_CAP_DMABUF;
+ 	if ((backend_caps & gbm_caps) && (renderer_caps & gbm_caps)
+ 			&& drm_fd >= 0) {

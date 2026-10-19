@@ -702,6 +702,17 @@ completada (struct transaccion *t)
   free (t);
 }
 
+/* Estira b a w×h.  Recorte, posición y escala explícitos en cada transacción:
+   con setGeometry, SurfaceFlinger se quedaba con la escala del primer buffer
+   (sway manda uno de 1280×720 antes del configure) aunque cambiara el tamaño.  */
+static void
+geometria (ASurfaceTransaction *tr, ASurfaceControl *capa, struct ahb *b, int w, int h)
+{
+  ASurfaceTransaction_setCrop (tr, capa, &(ARect) { 0, 0, b->w, b->h });
+  ASurfaceTransaction_setPosition (tr, capa, 0, 0);
+  ASurfaceTransaction_setScale (tr, capa, (float) w / b->w, (float) h / b->h);
+}
+
 /* Muestra b en la capa (NULL: la oculta, para volver al SurfaceView).  Los
    frame callbacks de cbs se responden al completarse.  */
 static void
@@ -739,8 +750,7 @@ presentar (struct ahb *b, struct wl_list *cbs)
       struct dma_buf_export_sync_file exp = { DMA_BUF_SYNC_READ, -1 };
       int fence = ioctl (b->fd, DMA_BUF_IOCTL_EXPORT_SYNC_FILE, &exp) == 0 ? exp.fd : -1;
       ASurfaceTransaction_setBuffer (tr, capa, b->ahb, fence);
-      ASurfaceTransaction_setGeometry (tr, capa, &(ARect) { 0, 0, b->w, b->h },
-				       &(ARect) { 0, 0, vent_w, vent_h }, 0);
+      geometria (tr, capa, b, vent_w, vent_h);
       ASurfaceTransaction_setBufferTransparency (tr, capa, ASURFACE_TRANSACTION_TRANSPARENCY_OPAQUE);
       ASurfaceTransaction_setVisibility (tr, capa, ASURFACE_TRANSACTION_VISIBILITY_SHOW);
     }
@@ -1708,9 +1718,7 @@ Java_dev_ben4shot_glibcprueba_Wayland_ventana (JNIEnv *env, jclass cls, jobject 
 	  /* Volver a mostrar el último cuadro (SurfaceFlinger aún lo retiene).  */
 	  ASurfaceTransaction *tr = ASurfaceTransaction_create ();
 	  ASurfaceTransaction_setBuffer (tr, capa, en_pantalla->ahb, -1);
-	  ASurfaceTransaction_setGeometry (tr, capa,
-					   &(ARect) { 0, 0, en_pantalla->w, en_pantalla->h },
-					   &(ARect) { 0, 0, w, h }, 0);
+	  geometria (tr, capa, en_pantalla, w, h);
 	  ASurfaceTransaction_setBufferTransparency (tr, capa, ASURFACE_TRANSACTION_TRANSPARENCY_OPAQUE);
 	  ASurfaceTransaction_apply (tr);
 	  ASurfaceTransaction_delete (tr);

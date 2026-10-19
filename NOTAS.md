@@ -56,7 +56,8 @@ Estado al cerrar la 2ª sesión (2026-10-19): ✅ pacman, ✅ terminal, ✅ Wayl
 ✅ Vulkan con Turnip (vkcube en la Adreno 619). 3ª sesión: ✅ OpenGL 4.6 / GLES 3.2 por GPU (Zink sobre Turnip) en ventanas Wayland; un solo ícono "Arch Linux" que abre sway directo (terminal de rescate: mantener pulsado el ícono).
 4ª sesión: ✅ cero copias (AHardwareBuffer + ASurfaceControl + parche a la WSI de Mesa) para clientes directos: CPU de la app de ~50 % a ~11 % de un núcleo.
 Probado a mano: cambiar tamaño ✅, salir y volver (sigue en segundo plano) ✅.
-**Siguiente: escritorio por GPU (lo de dentro de sway sigue por CPU). Instrucciones paso a paso en PROYECTO.md → "Para retomar" → "Instrucciones para esa sesión".**
+5ª sesión: ✅ escritorio por GPU: wlroots parchado (`glibc-prueba/wlroots/`: renderer Vulkan sin DRM, allocator android-ahb-v1, linux-dmabuf v3) → sway compone con Turnip directo en el AHardwareBuffer y sus clientes le pasan dmabufs. vkcube dentro de sway: CPU total ~89 % → ~21 % de un núcleo. El servicio lo usa solo si existe `~/wlroots`.
+**Siguiente: escritorio cómodo en el celular (pendiente 4 en PROYECTO.md); antes, probar a mano sway por GPU (teclado, girar, salir y volver).**
 Root temporal descartado: lo necesario vive en particiones verificadas, y desbloquear/bloquear borra `/data`.
 
 Probado en el teléfono (glibc 2.43, bash 5.3, coreutils 9.12 de Arch ARM):
@@ -87,7 +88,8 @@ Siguiente:
 - [x] Keymap xkb real (latam) para clientes conectados directo al anfitrión (2026-10-19)
 - [x] dmabuf: el anfitrión implementa linux-dmabuf; Turnip compilado con `kgsl,msm` (si no, sin dmabuf en la WSI). El cliente ya no copia; el anfitrión aún lee por CPU (2026-10-19)
 - [x] Cero copias: protocolo propio `android-ahb-v1` (el anfitrión reserva AHardwareBuffer y da su dmabuf), capa ASurfaceControl, fences implícitas, frame callbacks con AChoreographer; parche `turnip/parches/0001` a la WSI de Mesa (vkcube y GL por Zink lo usan solos) (2026-10-19)
-- [ ] **← siguiente:** escritorio por GPU (sway/Hyprland: dentro de sway todo sigue por CPU); resto: popups/portapapeles, Xwayland, Steam
+- [x] Escritorio por GPU: wlroots 0.20.2 parchado (`wlroots/parches/0001`–`0003`), sway con renderer Vulkan + buffers del anfitrión + linux-dmabuf para sus clientes (2026-10-19)
+- [ ] **← siguiente:** escritorio cómodo (gestos, lanzador, popups, portapapeles); luego Xwayland, Steam
 - [ ] Binarios estáticos (ej. `ldconfig`): cargarlos en espacio de usuario desde `execve`
 
 En el teléfono: app sdk36 con `files/archlinux` (Arch + pacman + sway/foot + gcc/meson + Turnip en `~/turnip`, varios GB) y carpetas de pruebas anteriores (`files/arch`, `files/glibc`, `files/glibcp`).

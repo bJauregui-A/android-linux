@@ -179,14 +179,21 @@ public class TerminalService extends Service implements TerminalSessionClient {
                 "TZ=" + java.util.TimeZone.getDefault().getID(),
                 "XDG_RUNTIME_DIR=" + Wayland.runtimeDir(),
                 "WAYLAND_DISPLAY=wayland-0",
-                "WLR_RENDERER=pixman", // sin GPU por ahora (Turnip pendiente)
                 "WLR_NO_HARDWARE_CURSORS=1", // el anfitrión no dibuja cursor: lo pinta sway
-                // Vulkan: Turnip (KGSL) compilado en el teléfono (turnip/compilar-mesa.sh);
-                // sin dmabuf (dma_heap bloqueado), el cuadro sale por wl_shm
+                // Vulkan: Turnip (KGSL) compilado en el teléfono (turnip/compilar-mesa.sh)
                 "VK_ICD_FILENAMES=/home/user/turnip/share/vulkan/icd.d/freedreno_icd.aarch64.json",
-                "MESA_VK_WSI_DEBUG=sw",
                 // OpenGL: Zink (mesa de Arch) sobre Turnip
                 "MESA_LOADER_DRIVER_OVERRIDE=zink"));
+        // Escritorio por GPU: wlroots parchado (wlroots/compilar-wlroots.sh) con renderer
+        // Vulkan, buffers android-ahb-v1 hacia el anfitrión y linux-dmabuf para los clientes.
+        // Sin él, sway por CPU (pixman) y los clientes Vulkan por wl_shm.
+        if (new File(home, "wlroots/lib/libwlroots-0.20.so").exists()) {
+            env.add("WLR_RENDERER=vulkan");
+            env.add("LD_LIBRARY_PATH=/home/user/wlroots/lib");
+        } else {
+            env.add("WLR_RENDERER=pixman");
+            env.add("MESA_VK_WSI_DEBUG=sw");
+        }
         // EGL en Wayland sin dmabuf: Zink + kopper por wl_shm (turnip/egl-zink.c)
         if (new File(home, "turnip/lib/libegl-zink.so").exists())
             env.add("LD_PRELOAD=/home/user/turnip/lib/libegl-zink.so");

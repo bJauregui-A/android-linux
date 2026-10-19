@@ -6,7 +6,7 @@ Documento de contexto del proyecto. Resume la idea, las decisiones tomadas (y po
 
 Que el teléfono (Redmi 15 5G, HyperOS, **sin root**) sea a la vez Android y un **Linux real y totalmente modificable**: programas de Arch Linux ARM sin recompilar corriendo nativos (glibc propia dentro de una app normal, sin proot ni emulación), con un **escritorio Wayland mínimo y modificable, tipo Hyprland adaptado al celular**, y **aceleración por GPU** (Turnip en la Adreno 619). Sin perder lo de Android que importa (apps bancarias chilenas, Play Store, cámara, pagos) y todo reversible: es una app, se desinstala y el teléfono queda igual. Más adelante: integrarlo con Mosaico (cada ventana Linux como ventana Android) y, si se puede, Steam.
 
-## Para retomar (estado al 2026-10-19, cuarta sesión)
+## Para retomar (estado al 2026-10-19, quinta sesión)
 
 | Frente | Estado |
 |---|---|
@@ -15,28 +15,28 @@ Que el teléfono (Redmi 15 5G, HyperOS, **sin root**) sea a la vez Android y un 
 | Terminal | ✅ bash interactivo, htop, nano, `sudo pacman` (foot dentro de sway, o la de rescate) |
 | Wayland | ✅ anfitrión propio + sway 1.12 anidado + foot; tacto, scroll, teclado latam; keymap xkb para clientes directos |
 | GPU | ✅ Vulkan: Turnip (KGSL) compilado en el teléfono. ✅ OpenGL 4.6 / GLES 3.2: Zink sobre Turnip. ✅ **Cero copias** para clientes directos: `AHardwareBuffer` + `ASurfaceControl` (protocolo propio `android-ahb-v1` + parche a la WSI de Mesa) |
+| Escritorio por GPU | ✅ sway compone con el renderer **Vulkan** de wlroots (parchado, `wlroots/`) directo en AHardwareBuffers del anfitrión; sus clientes le pasan dmabufs. vkcube dentro de sway: CPU total 8,9 s → 2,1 s cada 10 s |
 
-**Empezar la próxima sesión por:** el pendiente 3 (escritorio por GPU). Cero copias ya funciona, pero solo para clientes conectados directo al anfitrión; dentro de sway todo sigue por CPU (sway con pixman: sus clientes le dan shm y él le manda shm al anfitrión).
+**Empezar la próxima sesión por:** el pendiente 4 (escritorio cómodo en el celular). El escritorio por GPU ya funciona (ver "Escritorio por GPU" en "Detalle por frente"); falta probar a mano con sway por GPU: abrir/cerrar el teclado, girar, salir y volver. Hyprland ya no está bloqueado por falta de GPU, pero usa aquamarine en vez de wlroots: habría que repetir allí los mismos tres cambios.
 
-Instrucciones para esa sesión (hipótesis a verificar, en orden):
-1. Leer cómo wlroots 0.20.2 elige renderer y allocator con el backend wayland (`render/wlr_renderer.c` `wlr_renderer_autocreate`, `backend/wayland/backend.c`, `render/allocator/allocator.c`): necesita un fd DRM (`wlr_backend_get_drm_fd`, que el backend wayland saca de la feedback de linux-dmabuf / `main_device`). El anfitrión no manda feedback y no hay `/dev/dri` → por eso cae a pixman.
-2. Opción A (preferida): renderer **Vulkan de wlroots** (`WLR_RENDERER=vulkan`) con Turnip. Ver qué le pide al fd DRM (elige el `VkPhysicalDevice` por `VK_EXT_physical_device_drm`, que Turnip con KGSL no tiene) y parchar wlroots para que acepte Turnip sin DRM (compilar wlroots en el teléfono como Mesa, con parches en `wlroots/parches/` o similar; sway enlaza wlroots dinámico → reemplazar solo `libwlroots-0.20.so` en un prefijo propio con `LD_LIBRARY_PATH`).
-3. Allocator: con Vulkan los buffers de salida de sway hacia el anfitrión tendrían que ser de `android-ahb-v1` (allocator nuevo en el backend wayland de wlroots que pida buffers al anfitrión) → sway compone en la GPU directo en el AHardwareBuffer: cero copias también para el escritorio. Para los clientes de sway: sway ofrece linux-dmabuf solo si tiene renderer GPU (sus clientes reservan en `/dev/dma_heap`, sway los importa en Vulkan).
-4. Si wlroots resulta muy cuesta arriba: evaluar un escritorio propio mínimo (compositor tiling en el anfitrión mismo, cada cliente su capa ASurfaceControl; encaja con el pendiente 8, Mosaico). Preguntar al usuario antes de cambiar de camino.
-5. Medir con `scripts/test-cpu-ahb.sh` (adaptarlo para correr vkcube dentro de sway) y comparar con hoy. Para probar por ADB: `scripts/correr-wl.sh` (abre el escritorio y corre un script dentro de la app; captura de pantalla), `scripts/test-cpu-ahb.sh` (CPU cero copias vs dmabuf) y `scripts/test-ahb.sh` (cliente de prueba mínimo).
+Instrucciones para esa sesión (en orden):
+1. Pedirle al usuario que pruebe a mano sway por GPU: abrir/cerrar el teclado (cambia el tamaño: sway pide buffers nuevos al anfitrión), girar la pantalla, salir de la app y volver, abrir varias foot. Si algo se ve mal: `adb shell dumpsys SurfaceFlinger | grep -A14 "linux#"` (tamaño del buffer, crop y escala de la capa) y `/tmp/sway.log` (el servicio corre sway sin `-d`; para depurar, `scripts/test-sway-vulkan.sh` lo arranca con `-d` en `/tmp/sway-vk.log`).
+2. Si el usuario quiere Hyprland: revisar primero si el Arch ARM lo tiene y cómo elige renderer/allocator aquamarine (backend wayland, `IBackendImplementation`); repetir los tres cambios de `wlroots/parches/`. Si no, seguir con sway.
+3. Escritorio cómodo (pendiente 4), de lo que más se nota a lo que menos: popups xdg en el anfitrión (hoy se cierran: menús GTK/Qt) — con sway en medio los popups los maneja sway, así que solo importan para clientes directos; config de sway para el celular (barra más útil, `wmenu`/`fuzzel` como lanzador, cursor más grande, gestos para cambiar de escritorio con `bindgesture`); portapapeles Android ↔ Wayland (`wl_data_device` en el anfitrión + `ClipboardManager`).
+4. Pendiente menor (de la 4ª sesión): los frame callbacks sin ventana se responden al tiro (vkcube sigue dibujando en segundo plano: batería). Con sway por GPU pasa lo mismo: ver si conviene frenarlos cuando la actividad no está visible.
 
 **Cómo se usa hoy:**
 1. Un solo ícono, **"Arch Linux"** (`WaylandActivity`): abre el escritorio y el servicio en primer plano (`TerminalService`) arranca sway solo si no está corriendo (log en `/tmp/sway.log`; el servicio vive mientras haya sway o bash). SUPER y luego Enter → foot (hereda todo el entorno: Wayland, Turnip, Zink).
 2. Terminal de rescate (si sway no arranca): mantener pulsado el ícono → "Terminal" (`TerminalActivity`, tarea aparte). Paquetes: `sudo pacman -S <paquete>` (`sudo` = modo fakeroot de la glibc). **No correr `sway` a mano**: ya corre (dos sways se pelean la pantalla). En el escritorio, fila de abajo: ⌨ (teclado Android), ESC, TAB, CTRL/ALT/SUPER (valen para la tecla siguiente), flechas.
-3. Vulkan: desde una foot de sway, `vkcube` (la terminal ya exporta `VK_ICD_FILENAMES` y `MESA_VK_WSI_DEBUG=sw`).
+3. Vulkan: desde una foot de sway, `vkcube` (la terminal exporta `VK_ICD_FILENAMES`). Si existe `~/wlroots/lib/libwlroots-0.20.so`, el servicio arranca sway con `WLR_RENDERER=vulkan` y `LD_LIBRARY_PATH=/home/user/wlroots/lib` (escritorio por GPU); si no, `WLR_RENDERER=pixman` y `MESA_VK_WSI_DEBUG=sw` como antes.
 4. OpenGL: `es2gears_wayland`, `eglinfo -B -p wayland` (la terminal exporta `MESA_LOADER_DRIVER_OVERRIDE=zink` y `LD_PRELOAD=~/turnip/lib/libegl-zink.so`).
 
-**Probar a mano (no se pudo por ADB):** `es2gears_wayland` dentro de sway (probado solo conectado directo al anfitrión), teclado físico (US) en el escritorio, scroll con dos dedos, clic derecho (mantener), ñ/tildes desde Gboard, nano/htop a pantalla completa, girar la pantalla.
+**Probar a mano (no se pudo por ADB):** sway por GPU: abrir/cerrar el teclado, girar, salir y volver; teclado físico (US) en el escritorio, scroll con dos dedos, clic derecho (mantener), ñ/tildes desde Gboard, nano/htop a pantalla completa, girar la pantalla.
 
 **Pendientes, en el orden sugerido:**
 1. ~~Zink~~ ✅ (ver "GPU").
 2. ~~Evitar la copia por CPU~~ ✅ **cero copias** (2026-10-19, ver "GPU → Cero copias"): vkcube/es2gears directos al anfitrión pasan de ~50 % a ~11 % de un núcleo para todo el proceso de la app. Falta para los clientes dentro de sway (pendiente 3).
-3. **Escritorio por GPU**: los renderers de wlroots (GLES2/Vulkan) buscan un nodo DRM que no existe → adaptar (p. ej. renderer Vulkan de wlroots con Turnip sin DRM). Requisito para Hyprland, que no tiene renderer por CPU.
+3. ~~Escritorio por GPU~~ ✅ (2026-10-19, ver "Escritorio por GPU"). Hyprland: usa aquamarine (no wlroots) → habría que repetir los parches allí.
 4. **Escritorio cómodo en el celular**: config de sway propia (gestos para escritorios, barra útil, cursor más grande, lanzador `wmenu`/`fuzzel`); popups xdg (hoy se cierran: menús GTK/Qt no andan); portapapeles Android ↔ Wayland; `wl_subcompositor` (libdecor lo pide para decoraciones). Keymap para clientes directos: ✅ (latam, `keymap.h`).
 5. **Xwayland** (apps X11; Steam lo necesita).
 6. **Steam**: revisar el cliente oficial para ARM que menciona el usuario; si no sirve, FEX-Emu (ver abajo).
@@ -78,7 +78,14 @@ Instrucciones para esa sesión (hipótesis a verificar, en orden):
   - Probado a mano por el usuario: cambiar el tamaño (abrir/cerrar el teclado: la swapchain se recrea y pide buffers nuevos) ✅; salir de la app y volver: el programa sigue corriendo en segundo plano y se vuelve a ver ✅. Sin ventana, los frame callbacks se responden al tiro (el cliente sigue dibujando: gasta batería en segundo plano, a revisar).
 - Depurar clientes: `gdb` instalado en el Arch de la app; `info sharedlibrary` no ve las bibliotecas (cargador propio): leer `/proc/<pid>/maps` desde python de gdb y simbolizar en el PC con `llvm-symbolizer` del NDK.
 - Keymap: `es2gears_wayland` (eglut) abortaba con `NO_KEYMAP`; el anfitrión ahora manda el keymap xkb latam compilado (`app/src/main/cpp/keymap.h`, generado por `wayland/generar-teclado.sh`) en un memfd sellado. wlroots lo ignora igual.
-- Siguiente: evitar la copia (AHardwareBuffer: `AHardwareBuffer_sendHandleToUnixSocket` da el dmabuf de gralloc, que KGSL puede importar); sway/Hyprland por GPU necesitan EGL/GBM o el renderer Vulkan de wlroots, que buscan un nodo DRM (no hay) → habría que adaptarlos.
+
+**Escritorio por GPU (2026-10-19, funciona): wlroots 0.20.2 parchado.** Se compila en el teléfono (`wlroots/compilar-wlroots.sh`, ~30 s) y se instala en `~/wlroots`; sway de Arch lo usa tal cual con `LD_LIBRARY_PATH` (el script comprueba que la biblioteca exporte todos los símbolos de la de Arch: sway se enlaza con `-z now`). Parches en `wlroots/parches/`:
+- `0001-vulkan-sin-drm`: con `WLR_RENDERER=vulkan` y sin fd DRM, `renderer_autocreate` crea igual el renderer Vulkan y `vulkan_find_drm_phdev(-1)` toma el primer dispositivo (Turnip; no tiene `VK_EXT_physical_device_drm`, las otras 7 extensiones que pide wlroots sí). El renderer queda sin fd DRM (sin timeline/syncobj; sincronización implícita sí: "Implicit sync interop supported").
+- `0002-allocator-ahb`: allocator en el backend wayland (`backend/wayland/ahb.c`) que pide cada buffer al anfitrión por `android-ahb-v1` (roundtrip en la `busy_loop_queue`, LINEAR). `wlr_allocator_autocreate` lo prueba primero si el renderer usa dmabuf; `create_wl_buffer` reutiliza el `wl_buffer` del anfitrión en vez de importarlo por linux-dmabuf. sway compone en la GPU directo en el AHardwareBuffer que va a SurfaceFlinger.
+- `0003-dmabuf-sin-drm`: sway solo crea linux-dmabuf si el renderer tiene fd DRM → sin él, la WSI de Mesa (fuera de modo `sw`) no encuentra formatos y `vkCreateSwapchainKHR` falla (vkcube daba segfault en `vkGetSwapchainImagesKHR`). Ahora `wlr_renderer_init_wl_shm` crea además linux-dmabuf **v3** (formatos por eventos `modifier`, sin feedback ni `main_device`) cuando el renderer no tiene fd DRM pero importa dmabuf. Formatos: LINEAR y UBWC (`0x0500000000000001`).
+- Anfitrión: `setGeometry` dejaba la escala del primer buffer (sway manda uno de 1280×720 antes del configure → se veía estirado); ahora `geometria()` usa `setCrop` + `setPosition` + `setScale` en cada transacción.
+- Medido (`scripts/test-cpu-sway.sh`, vkcube dentro de sway, 10 s): pixman + shm: app 3,73 s + sway 3,96 s + vkcube 1,20 s = 8,9 s; GPU: 1,21 + 0,63 + 0,29 = 2,1 s. es2gears (Zink) dentro de sway ✅.
+- Editar los parches: árbol con git en `trabajo/wlroots/wlroots-0.20.2` (commit base = tarball), `git diff` por archivos; los parches se aplican en orden (0003 se generó contra el árbol con 0001). Para recompilar desde cero en el teléfono, borrar `~/src/wlroots-0.20.2`.
 
 **Steam (idea, sin empezar):** no hay multilib en ARM (multilib = libs i686 del Arch x86_64) y Steam es solo x86. Camino: FEX-Emu (emulador x86/x86_64 con JIT, en espacio de usuario; lo que usa Valve en ARM) + rootfs x86_64 con Steam. El teléfono es solo 64 bits (`ro.product.cpu.abilist32` vacío) → box86 descartado. El usuario dice que ya hay cliente oficial de Steam para ARM (a revisar). Requisitos antes: Xwayland, GPU (Turnip; FEX pasa GL/Vulkan al Mesa nativo con thunks). Ojo: FEX hace las syscalls del invitado directo (no pasan por el traductor de rutas de la glibc), usa su propio RootFS. Repos de Arch ARM: core, extra, alarm, aur (no hay fex/box64; sí qemu-user).
 
@@ -88,6 +95,7 @@ Instrucciones para esa sesión (hipótesis a verificar, en orden):
 - Tabla de teclado: `wayland/generar-teclado.sh [distribución]` (y cambiar `xkb_layout` en la config de sway).
 - Turnip: `turnip/compilar-mesa.sh` se copia a `~/` del Arch de la app junto con `~/src/mesa-26.2.5.tar.xz` y se corre desde la terminal (ver "GPU"). `scripts/subir-mesa.sh` copia el script, `egl-zink.c` y `turnip/parches/`; `TIEMPO=900 scripts/correr.sh sdk36 scripts/test-compilar-mesa.sh` lo corre por ADB (incremental). Editar el parche: árbol de Mesa con git en `trabajo/mesa/mesa-26.2.5` (commit base = original), `git diff > turnip/parches/0001-...patch`.
 - Cero copias: `scripts/subir-ahb.sh` + `scripts/correr-wl.sh scripts/test-ahb.sh x.png` (cliente mínimo), `ESPERA=55 TIEMPO=150 scripts/correr-wl.sh scripts/test-cpu-ahb.sh x.png` (vkcube/es2gears, ahb vs dmabuf).
+- wlroots: `scripts/subir-wlroots.sh [sin-tarball]` y `TIEMPO=600 scripts/correr.sh sdk36 scripts/test-compilar-wlroots.sh`. Probar: `ESPERA=30 TIEMPO=90 scripts/correr-wl.sh scripts/test-sway-vulkan.sh x.png` (reemplaza el sway del servicio, abre foot y vkcube), `ESPERA=45 TIEMPO=120 scripts/correr-wl.sh scripts/test-cpu-sway.sh x.png` (pixman vs GPU).
 - Recompilar glibc: `glibc/compilar.sh` (Docker; incremental; baja el tarball y aplica los parches si falta el árbol). **Si se agregan archivos `.c` nuevos a sysdeps, borrar `glibc/build/` antes** (la lista de stubs de syscalls se genera una vez).
 - Verificar que ninguna syscall con rutas se escape del traductor: `glibc/verificar.sh`.
 - Instalar la glibc nueva en el teléfono: `scripts/instalar-glibc.sh sdk36 archlinux` (APK con `libldp.so` + bibliotecas en el prefijo).
@@ -322,6 +330,9 @@ Antecedente útil para ver qué parches hacen falta: el proyecto **glibc-package
 | `scripts/correr-wl.sh` | Como `correr.sh` pero con el anfitrión Wayland corriendo (abre el escritorio, corre el script, captura). Para probar clientes Wayland por ADB |
 | `scripts/test-cpu-dmabuf.sh` | CPU del anfitrión y de vkcube: dmabuf contra `MESA_VK_WSI_DEBUG=sw` |
 | `turnip/prueba-dmabuf.c` | Prueba: memoria Vulkan exportable → dmabuf → mmap (compilar en la app con `-lvulkan`, necesita `vulkan-headers`) |
+| `wlroots/compilar-wlroots.sh`, `wlroots/parches/` | wlroots 0.20.2 parchado (Vulkan sin DRM, allocator `android-ahb-v1`, linux-dmabuf sin DRM); se compila en el teléfono, sway lo usa con `LD_LIBRARY_PATH` (ver "Escritorio por GPU") |
+| `scripts/subir-wlroots.sh`, `scripts/test-compilar-wlroots.sh` | Copian script, tarball y parches de wlroots a la app y lo compilan |
+| `scripts/test-sway-vulkan.sh`, `scripts/test-cpu-sway.sh` | sway por GPU con foot y vkcube; CPU pixman contra GPU |
 
 `instalar-glibc.sh sdk36 archlinux` actualiza solo la glibc (APK + bibliotecas del prefijo) tras recompilar.
 

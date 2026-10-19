@@ -1,0 +1,58 @@
+diff --git a/render/vulkan/vulkan.c b/render/vulkan/vulkan.c
+index 0c0445d..04d4312 100644
+--- a/render/vulkan/vulkan.c
++++ b/render/vulkan/vulkan.c
+@@ -357,7 +357,8 @@ VkPhysicalDevice vulkan_find_drm_phdev(struct wlr_vk_instance *ini, int drm_fd)
+ 			dev_t render_devid = makedev(drm_props.renderMajor, drm_props.renderMinor);
+ 			found = primary_devid == drm_stat.st_rdev || render_devid == drm_stat.st_rdev;
+ 		} else {
+-			found = phdev_props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU;
++			// No DRM FD (Android): any device will do
++			found = true;
+ 		}
+ 
+ 		if (found) {
+@@ -371,8 +372,19 @@ VkPhysicalDevice vulkan_find_drm_phdev(struct wlr_vk_instance *ini, int drm_fd)
+ }
+ 
+ int vulkan_open_phdev_drm_fd(VkPhysicalDevice phdev) {
+-	// vulkan_find_drm_phdev() already checks that VK_EXT_physical_device_drm
+-	// is supported
++	// Without a DRM FD, vulkan_find_drm_phdev() accepts devices lacking
++	// VK_EXT_physical_device_drm
++	uint32_t avail_extc = 0;
++	if (vkEnumerateDeviceExtensionProperties(phdev, NULL, &avail_extc, NULL) != VK_SUCCESS) {
++		return -1;
++	}
++	VkExtensionProperties avail_ext_props[avail_extc + 1];
++	if (vkEnumerateDeviceExtensionProperties(phdev, NULL, &avail_extc, avail_ext_props) != VK_SUCCESS ||
++			!check_extension(avail_ext_props, avail_extc, VK_EXT_PHYSICAL_DEVICE_DRM_EXTENSION_NAME)) {
++		wlr_log(WLR_INFO, "Physical device has no DRM node");
++		return -1;
++	}
++
+ 	VkPhysicalDeviceDrmPropertiesEXT drm_props = {
+ 		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRM_PROPERTIES_EXT,
+ 	};
+diff --git a/render/wlr_renderer.c b/render/wlr_renderer.c
+index e65314c..fdcf49d 100644
+--- a/render/wlr_renderer.c
++++ b/render/wlr_renderer.c
+@@ -249,9 +249,16 @@ static struct wlr_renderer *renderer_autocreate(struct wlr_backend *backend, int
+ 	}
+ 
+ 	if ((is_auto && WLR_HAS_VULKAN_RENDERER) || strcmp(renderer_name, "vulkan") == 0) {
+-		if (!open_preferred_drm_fd(backend, &drm_fd, &own_drm_fd)) {
++		bool has_drm_fd = open_preferred_drm_fd(backend, &drm_fd, &own_drm_fd);
++		if (!has_drm_fd && is_auto) {
+ 			log_creation_failure(is_auto, "Cannot create Vulkan renderer: no DRM FD available");
+ 		} else {
++			// Android: no DRM node; with WLR_RENDERER=vulkan, use the first
++			// Vulkan device (Turnip on KGSL)
++			if (!has_drm_fd) {
++				wlr_log(WLR_INFO, "No DRM FD available, picking any Vulkan device");
++				drm_fd = -1;
++			}
+ #if WLR_HAS_VULKAN_RENDERER
+ 			renderer = wlr_vk_renderer_create_with_drm_fd(drm_fd);
+ #else
