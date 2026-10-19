@@ -6,7 +6,7 @@ Documento de contexto del proyecto. Resume la idea, las decisiones tomadas (y po
 
 Que el teléfono (Redmi 15 5G, HyperOS, **sin root**) sea a la vez Android y un **Linux real y totalmente modificable**: programas de Arch Linux ARM sin recompilar corriendo nativos (glibc propia dentro de una app normal, sin proot ni emulación), con un **escritorio Wayland mínimo y modificable, tipo Hyprland adaptado al celular**, y **aceleración por GPU** (Turnip en la Adreno 619). Sin perder lo de Android que importa (apps bancarias chilenas, Play Store, cámara, pagos) y todo reversible: es una app, se desinstala y el teléfono queda igual. Más adelante: integrarlo con Mosaico (cada ventana Linux como ventana Android) y, si se puede, Steam.
 
-## Para retomar (estado al 2026-10-19, sexta sesión)
+## Para retomar (estado al 2026-10-19, séptima sesión)
 
 | Frente | Estado |
 |---|---|
@@ -18,7 +18,11 @@ Que el teléfono (Redmi 15 5G, HyperOS, **sin root**) sea a la vez Android y un 
 | Escritorio | ✅ sway con los atajos y el aspecto de la config de Hyprland/HyDE del PC (`sway/`), waybar, fuzzel, kitty con la config del PC, modo inmersivo a pantalla completa (1080×2193 px reales). swayfx también funciona por GPU (`~/swayfx`, no es el por defecto); Hyprland instalado pero no arranca (ver "sway, swayfx y Hyprland") |
 | Escritorio por GPU | ✅ sway compone con el renderer **Vulkan** de wlroots (parchado, `wlroots/`) directo en AHardwareBuffers del anfitrión; sus clientes le pasan dmabufs. vkcube dentro de sway: CPU total 8,9 s → 2,1 s cada 10 s |
 
-**Empezar la próxima sesión por:** que el usuario pruebe a mano el escritorio nuevo (6ª sesión: config estilo HyDE, kitty, modo inmersivo) y arreglar lo que falle; después, lo que falta del pendiente 4. El usuario eligió **quedarse con sway** (no swayfx ni Hyprland).
+**7ª sesión (2026-10-19):** el usuario probó: atajos ✅, girar ✅ (portapapeles sin probar). Hecho: (a) **gestos**: el anfitrión ofrece `zwp_pointer_gestures_v1` v3 (solo manda swipe; pinch/hold se crean vacíos) y `WaylandActivity` pasa a "deslizar" con 3+ dedos (`Wayland.gesto`); sway: `bindgesture swipe:left/right` = escritorio siguiente/anterior, `up` = fuzzel, `down` = selector de ventanas. **Sin probar a mano** (ADB no simula multitáctil). (b) **zsh como en el PC** (los colores "de kitty" eran de zsh+starship de HyDE): `sway/zsh/.zshrc` (starship con el `starship.toml` del PC, autosuggestions, syntax-highlighting, fastfetch angosto) y `TerminalService` exporta `SHELL=/usr/bin/zsh` si existe; probado ✅. (c) **Límite de procesos hijos de Android 12+ (phantom process killer)**: estaba activo (32 en total para todas las apps; la app usa ~14 en reposo) → desactivado con `adb shell settings put global settings_enable_monitor_phantom_procs false` (persiste; deshacer: `settings delete global settings_enable_monitor_phantom_procs`). fastfetch muestra Shell/WM = `libldp.so`: el parche 0007 solo arregla `/proc/self/exe`, no `/proc/<otro pid>/exe`.
+
+**Empezar la próxima sesión por:** preguntar si los gestos de 3 dedos funcionan; luego, cursor, portapapeles Android ↔ Wayland y popups; después lo grande para compatibilidad: capa seccomp para programas sin glibc (Go/estáticos), audio, Xwayland (ver "Compatibilidad completa").
+
+**Antes (6ª sesión) decía:** que el usuario pruebe a mano el escritorio nuevo (6ª sesión: config estilo HyDE, kitty, modo inmersivo) y arreglar lo que falle; después, lo que falta del pendiente 4. El usuario eligió **quedarse con sway** (no swayfx ni Hyprland).
 
 Instrucciones para esa sesión (en orden):
 1. **Ojo: el usuario suele estar usando el teléfono.** `scripts/correr.sh` y `correr-wl.sh` hacen `force-stop` (cierran sway y todo lo abierto): avisar antes de correrlos. Para mirar sin cerrar nada: `adb exec-out screencap -p`, y `adb shell "run-as dev.ben4shot.glibcprueba.sdk36 cat files/archlinux/tmp/sway.log"`.
@@ -40,12 +44,25 @@ Instrucciones para esa sesión (en orden):
 1. ~~Zink~~ ✅ (ver "GPU").
 2. ~~Evitar la copia por CPU~~ ✅ **cero copias** (2026-10-19, ver "GPU → Cero copias"): vkcube/es2gears directos al anfitrión pasan de ~50 % a ~11 % de un núcleo para todo el proceso de la app. Falta para los clientes dentro de sway (pendiente 3).
 3. ~~Escritorio por GPU~~ ✅ (2026-10-19, ver "Escritorio por GPU"). Hyprland: usa aquamarine (no wlroots) → habría que repetir los parches allí.
-4. **Escritorio cómodo en el celular**: ✅ config de sway con atajos y aspecto de HyDE, waybar, fuzzel, kitty, modo inmersivo (ver "Escritorio estilo HyDE"). Falta: confirmar que la opacidad de inactivas (0.75) se aplica; gestos para escritorios (el anfitrión no manda gestos de puntero); cursor más grande; popups xdg (hoy se cierran: menús GTK/Qt no andan); portapapeles Android ↔ Wayland; `wl_subcompositor` (libdecor lo pide para decoraciones). Keymap para clientes directos: ✅ (latam, `keymap.h`).
+4. **Escritorio cómodo en el celular**: ✅ gestos de 3 dedos (7ª sesión, sin probar a mano), ✅ zsh/starship como el PC. ✅ config de sway con atajos y aspecto de HyDE, waybar, fuzzel, kitty, modo inmersivo (ver "Escritorio estilo HyDE"). Falta: confirmar que la opacidad de inactivas (0.75) se aplica; gestos para escritorios (el anfitrión no manda gestos de puntero); cursor más grande; popups xdg (hoy se cierran: menús GTK/Qt no andan); portapapeles Android ↔ Wayland; `wl_subcompositor` (libdecor lo pide para decoraciones). Keymap para clientes directos: ✅ (latam, `keymap.h`).
 5. **Xwayland** (apps X11; Steam lo necesita).
 6. **Steam**: revisar el cliente oficial para ARM que menciona el usuario; si no sirve, FEX-Emu (ver abajo).
 7. Binarios estáticos (cargarlos en espacio de usuario desde `execve`).
 8. Integración con Mosaico: cada ventana Linux = ventana Android (recientes, dividida, flotante). El usuario anotó que más adelante se puede saltar el `SurfaceView`.
 9. Menores: `/dev/shm` es carpeta en disco (¿memfd?); re-ejecutar `instalar-arch.sh` desde cero para validar el bootstrap con todos los arreglos.
+
+### Compatibilidad completa (lista de la 7ª sesión, de más a menos impacto)
+1. Programas que no pasan por la glibc (Go, estáticos, `syscall()` directo): filtro seccomp propio (`SECCOMP_RET_TRAP` para syscalls con rutas cuyo `instruction_pointer` está fuera de libc) → el manejador de SIGSYS de la glibc traduce; estáticos cargados en espacio de usuario desde `execve`.
+2. Audio: PipeWire/PulseAudio con salida a pipe → AAudio en la app (luego micrófono).
+3. Xwayland (sin glamor/DRM: `-shm`), MIT-SHM necesita SysV IPC.
+4. ~~Phantom process killer~~ ✅ desactivado.
+5. Integración: notificaciones (D-Bus → Android), `xdg-open` → intents, `/sdcard`.
+6. SysV IPC emulado (memfd + registro), mutex robustos compartidos, `/dev/shm` en memfd.
+7. Teclado de Android de verdad: `text-input-v3` ↔ `InputConnection` (autocorrector, predicción).
+8. Hardware sintético: batería (`BatteryManager`), red (`getifaddrs`/netlink), sensores.
+9. Mantener la glibc al día (rebase de los parches con cada glibc de Arch ARM).
+10. x86 (Steam) con FEX. 11. Mosaico.
+Imposible sin root: namespaces (Docker/Flatpak/bwrap, sandbox de Chromium → `--no-sandbox`), systemd PID 1, módulos, KVM, ver procesos de otras apps.
 
 ### Detalle por frente
 

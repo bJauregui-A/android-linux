@@ -2,8 +2,9 @@
 P=$APP_FILES/archlinux; L=$NATIVE_DIR/libldp.so
 GLIBC_PREFIX=$P GLIBC_LOADER=$L HOME=/home/user PATH=/usr/bin LANG=C.UTF-8 TERM=dumb \
 $L /usr/bin/bash -c '
-  GLIBC_FAKEROOT=1 pacman -S --needed --noconfirm waybar fuzzel swaybg wl-clipboard cliphist autotiling jq ttf-jetbrains-mono-nerd kitty ttf-cascadia-code-nerd 2>&1 | tail -3
-  pacman -Q waybar fuzzel swaybg wl-clipboard cliphist autotiling jq python-i3ipc ttf-jetbrains-mono-nerd kitty ttf-cascadia-code-nerd
+  GLIBC_FAKEROOT=1 pacman -S --needed --noconfirm waybar fuzzel swaybg wl-clipboard cliphist autotiling jq ttf-jetbrains-mono-nerd kitty ttf-cascadia-code-nerd zsh starship zsh-autosuggestions zsh-syntax-highlighting fastfetch eza 2>&1 | tail -3
+  pacman -Q waybar fuzzel swaybg wl-clipboard cliphist autotiling jq python-i3ipc ttf-jetbrains-mono-nerd kitty ttf-cascadia-code-nerd zsh starship zsh-autosuggestions zsh-syntax-highlighting fastfetch eza
+  zsh -ic "echo zsh ok; starship --version | head -1" 2>&1 | tail -3
   export XDG_RUNTIME_DIR=/run/user/$(id -u)
   sway -C -c ~/.config/sway/config 2>&1 | tail -10 && echo "config válida"
 ' 2>&1 | sed s/error/ERR/g; echo "=== fin"

@@ -53,11 +53,12 @@ if [ ! -f "$OUT/lib/libwayland-server.a" ]; then
     -Dlibraries=true -Dscanner=false -Dtests=false -Ddocumentation=false -Ddtd_validation=false
   ninja -C build/wl install
 fi
-# Código de servidor de los protocolos extra (xdg-shell, linux-dmabuf y el
+# Código de servidor de los protocolos extra (xdg-shell, linux-dmabuf, gestos y el
 # propio android-ahb-v1; para los clientes de prueba también el de cliente)
 mkdir -p "$OUT/proto"
 for X in /usr/share/wayland-protocols/stable/xdg-shell/xdg-shell \
-         /usr/share/wayland-protocols/stable/linux-dmabuf/linux-dmabuf-v1 $PWD/android-ahb-v1; do
+         /usr/share/wayland-protocols/stable/linux-dmabuf/linux-dmabuf-v1 \
+         /usr/share/wayland-protocols/unstable/pointer-gestures/pointer-gestures-unstable-v1 $PWD/android-ahb-v1; do
   N=$(basename $X)
   wayland-scanner server-header $X.xml "$OUT/proto/$N-server-protocol.h"
   wayland-scanner client-header $X.xml "$OUT/proto/$N-client-protocol.h"

@@ -46,6 +46,10 @@ final class Wayland {
     // Scroll (unidades de rueda de Wayland); 0, 0 termina el gesto.
     static native void eje(float dx, float dy);
 
+    // Deslizar con varios dedos (zwp_pointer_gestures_v1): fase 0 empieza,
+    // 1 avanza (dx, dy en píxeles de la vista), 2 termina, 3 se cancela.
+    static native void gesto(int fase, int dedos, float dx, float dy);
+
     // Código evdev (linux/input-event-codes.h).
     static native void tecla(int codigo, boolean pulsada);
 }

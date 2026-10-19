@@ -34,7 +34,7 @@ import java.util.List;
 
 // Pantalla Wayland: SurfaceView donde el anfitrión dibuja la ventana Linux.
 // Tacto: toque = clic, arrastrar = clic sostenido, mantener = clic derecho,
-// dos dedos = scroll. Teclado: caracteres -> teclas de la distribución de
+// dos dedos = scroll, tres o más = deslizar (gesto de sway: cambiar de escritorio). Teclado: caracteres -> teclas de la distribución de
 // Distribucion.java (latam, generada con xkbcommon; la misma que usa sway).
 public class WaylandActivity extends Activity {
     // evdev (linux/input-event-codes.h)
@@ -51,7 +51,9 @@ public class WaylandActivity extends Activity {
     // Gesto en curso
     private final Handler handler = new Handler(Looper.getMainLooper());
     private float inicioX, inicioY, ultX, ultY;
-    private boolean arrastrando, desplazando, gestoUsado;
+    private boolean arrastrando, desplazando, deslizando, gestoUsado;
+    // Al levantar o poner un dedo el centro salta: el siguiente MOVE solo lo toma
+    private boolean recentrar;
     private final Runnable mantener = () -> {
         if (arrastrando || desplazando) return;
         gestoUsado = true;
@@ -193,7 +195,7 @@ public class WaylandActivity extends Activity {
             case MotionEvent.ACTION_DOWN:
                 inicioX = ultX = e.getX();
                 inicioY = ultY = e.getY();
-                arrastrando = desplazando = gestoUsado = false;
+                arrastrando = desplazando = deslizando = recentrar = gestoUsado = false;
                 Wayland.mover(ultX, ultY);
                 handler.postDelayed(mantener, MANTENER_MS);
                 break;
@@ -201,15 +203,30 @@ public class WaylandActivity extends Activity {
                 handler.removeCallbacks(mantener);
                 if (arrastrando) Wayland.boton(BTN_IZQ, false);
                 arrastrando = false;
-                desplazando = true;
-                ultX = centroX(e);
-                ultY = centroY(e);
+                if (e.getPointerCount() >= 3 && !deslizando) {
+                    if (desplazando) Wayland.eje(0, 0);
+                    desplazando = false;
+                    deslizando = true;
+                    Wayland.gesto(0, e.getPointerCount(), 0, 0);
+                } else if (!deslizando) {
+                    desplazando = true;
+                }
+                recentrar = true;
+                break;
+            case MotionEvent.ACTION_POINTER_UP:
+                recentrar = true;
                 break;
             case MotionEvent.ACTION_MOVE:
-                if (desplazando) {
+                if (desplazando || deslizando) {
                     float cx = centroX(e), cy = centroY(e);
-                    // natural: el dedo sube -> el contenido sube (scroll hacia abajo)
-                    Wayland.eje((ultX - cx) * SCROLL, (ultY - cy) * SCROLL);
+                    if (recentrar) {
+                        recentrar = false;
+                    } else if (deslizando) {
+                        Wayland.gesto(1, 0, cx - ultX, cy - ultY);
+                    } else {
+                        // natural: el dedo sube -> el contenido sube (scroll hacia abajo)
+                        Wayland.eje((ultX - cx) * SCROLL, (ultY - cy) * SCROLL);
+                    }
                     ultX = cx;
                     ultY = cy;
                 } else if (!gestoUsado) {
@@ -225,19 +242,22 @@ public class WaylandActivity extends Activity {
                 handler.removeCallbacks(mantener);
                 if (arrastrando) {
                     Wayland.boton(BTN_IZQ, false);
+                } else if (deslizando) {
+                    Wayland.gesto(2, 0, 0, 0);
                 } else if (desplazando) {
                     Wayland.eje(0, 0);
                 } else if (!gestoUsado) {
                     Wayland.boton(BTN_IZQ, true);
                     Wayland.boton(BTN_IZQ, false);
                 }
-                arrastrando = desplazando = false;
+                arrastrando = desplazando = deslizando = false;
                 break;
             case MotionEvent.ACTION_CANCEL:
                 handler.removeCallbacks(mantener);
                 if (arrastrando) Wayland.boton(BTN_IZQ, false);
                 if (desplazando) Wayland.eje(0, 0);
-                arrastrando = desplazando = false;
+                if (deslizando) Wayland.gesto(3, 0, 0, 0);
+                arrastrando = desplazando = deslizando = false;
                 break;
         }
     }

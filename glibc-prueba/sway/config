@@ -138,6 +138,12 @@ bindsym $mod+Ctrl+Mod1+Left move container to workspace prev
 bindsym --whole-window $mod+button4 workspace prev
 bindsym --whole-window $mod+button5 workspace next
 
+# Gestos táctiles (3 dedos o más, los manda la app): como el workspace_swipe de Hyprland
+bindgesture swipe:left workspace next
+bindgesture swipe:right workspace prev
+bindgesture swipe:up exec $menu
+bindgesture swipe:down exec $s/ventanas.sh
+
 # escritorio especial de Hyprland = scratchpad
 bindsym $mod+s scratchpad show
 bindsym $mod+Shift+s move scratchpad

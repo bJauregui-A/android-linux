@@ -170,7 +170,8 @@ public class TerminalService extends Service implements TerminalSessionClient {
                 "GLIBC_LOADER=" + cargador,
                 "HOME=/home/user",
                 "USER=user",
-                "SHELL=/usr/bin/bash",
+                // kitty y foot abren $SHELL: zsh como en el PC (sway/zsh/), si está instalada
+                "SHELL=" + (new File(prefijo, "usr/bin/zsh").exists() ? "/usr/bin/zsh" : "/usr/bin/bash"),
                 "PATH=/usr/local/bin:/usr/bin",
                 "TERM=xterm-256color",
                 "COLORTERM=truecolor",

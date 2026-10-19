@@ -60,7 +60,8 @@ Probado a mano: cambiar tamaño ✅, salir y volver (sigue en segundo plano) ✅
 6ª sesión: medidos sway (19 MB) / swayfx (~60 MB, funciona por GPU) / Hyprland (no arranca: todo supone DRM) → se queda sway.
 Escritorio con la config de Hyprland/HyDE del PC llevada a sway (`glibc-prueba/sway/`): atajos, aspecto, waybar, fuzzel, kitty con la config del PC;
 app en modo inmersivo (pantalla completa, 1080×2193 px reales); glibc `0007` (`/proc/self/exe` = el programa, kitty lo necesitaba).
-**Siguiente: que el usuario pruebe a mano el escritorio nuevo; confirmar la opacidad de inactivas; gestos, cursor, portapapeles (pendiente 4 en PROYECTO.md).
+7ª sesión: gestos de 3 dedos (sin probar a mano), zsh+starship como el PC, phantom process killer desactivado por ADB (`settings_enable_monitor_phantom_procs false`).
+**Siguiente: confirmar gestos; confirmar la opacidad de inactivas; gestos, cursor, portapapeles (pendiente 4 en PROYECTO.md).
 Avisar antes de correr scripts que cierran la app (force-stop): el usuario suele estar usándola.**
 Root temporal descartado: lo necesario vive en particiones verificadas, y desbloquear/bloquear borra `/data`.
 

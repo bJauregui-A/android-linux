@@ -42,6 +42,7 @@
 #include "android-ahb-v1-server-protocol.h"
 #include "keymap.h"
 #include "linux-dmabuf-v1-server-protocol.h"
+#include "pointer-gestures-unstable-v1-server-protocol.h"
 #include "xdg-shell-server-protocol.h"
 
 #define LOG(...) __android_log_print (ANDROID_LOG_INFO, "WAYLAND", __VA_ARGS__)
@@ -60,7 +61,7 @@ struct superficie
 };
 
 static struct wl_display *display;
-static struct wl_list toplevels, punteros, teclados, salidas;
+static struct wl_list toplevels, punteros, teclados, salidas, deslizar;
 static struct superficie *foco, *foco_puntero;
 static uint32_t mods;
 
@@ -85,7 +86,7 @@ static struct
 #define VENTANA_BGRA 5
 
 /* Cola Java -> hilo del anfitrión.  */
-enum { EV_VENTANA, EV_MOVER, EV_BOTON, EV_EJE, EV_TECLA, EV_TOMADA, EV_COMPLETADA, EV_VSYNC };
+enum { EV_VENTANA, EV_MOVER, EV_BOTON, EV_EJE, EV_GESTO, EV_TECLA, EV_TOMADA, EV_COMPLETADA, EV_VSYNC };
 struct evento { int tipo, a; float x, y; void *p; };
 static struct evento cola[512];
 static int ncola, evfd = -1;
@@ -1336,6 +1337,75 @@ seat_bind (struct wl_client *c, void *data, uint32_t version, uint32_t id)
     wl_seat_send_name (r, "android");
 }
 
+/* ---------- zwp_pointer_gestures_v1 ---------- */
+
+/* Solo deslizar (sway: bindgesture swipe:3:left ...); pellizcar y mantener se
+   crean para que el cliente no falle, pero no mandan eventos.  */
+static const struct zwp_pointer_gesture_swipe_v1_interface swipe_impl = {
+  .destroy = destruir_recurso,
+};
+
+static const struct zwp_pointer_gesture_pinch_v1_interface pinch_impl = {
+  .destroy = destruir_recurso,
+};
+
+static const struct zwp_pointer_gesture_hold_v1_interface hold_impl = {
+  .destroy = destruir_recurso,
+};
+
+static void
+gestos_get_swipe (struct wl_client *c, struct wl_resource *r, uint32_t id,
+		  struct wl_resource *pointer)
+{
+  struct wl_resource *g = wl_resource_create (c, &zwp_pointer_gesture_swipe_v1_interface,
+					      wl_resource_get_version (r), id);
+  if (g == NULL)
+    {
+      wl_client_post_no_memory (c);
+      return;
+    }
+  wl_resource_set_implementation (g, &swipe_impl, NULL, quitar_de_lista);
+  wl_list_insert (&deslizar, wl_resource_get_link (g));
+}
+
+static void
+gestos_get_pinch (struct wl_client *c, struct wl_resource *r, uint32_t id,
+		  struct wl_resource *pointer)
+{
+  struct wl_resource *g = wl_resource_create (c, &zwp_pointer_gesture_pinch_v1_interface,
+					      wl_resource_get_version (r), id);
+  if (g == NULL)
+    wl_client_post_no_memory (c);
+  else
+    wl_resource_set_implementation (g, &pinch_impl, NULL, NULL);
+}
+
+static void
+gestos_get_hold (struct wl_client *c, struct wl_resource *r, uint32_t id,
+		 struct wl_resource *pointer)
+{
+  struct wl_resource *g = wl_resource_create (c, &zwp_pointer_gesture_hold_v1_interface,
+					      wl_resource_get_version (r), id);
+  if (g == NULL)
+    wl_client_post_no_memory (c);
+  else
+    wl_resource_set_implementation (g, &hold_impl, NULL, NULL);
+}
+
+static const struct zwp_pointer_gestures_v1_interface gestos_impl = {
+  .get_swipe_gesture = gestos_get_swipe,
+  .get_pinch_gesture = gestos_get_pinch,
+  .release = destruir_recurso,
+  .get_hold_gesture = gestos_get_hold,
+};
+
+static void
+gestos_bind (struct wl_client *c, void *data, uint32_t version, uint32_t id)
+{
+  struct wl_resource *r = wl_resource_create (c, &zwp_pointer_gestures_v1_interface, version, id);
+  wl_resource_set_implementation (r, &gestos_impl, NULL, NULL);
+}
+
 /* ---------- wl_output ---------- */
 
 static const struct wl_output_interface output_impl = {
@@ -1489,6 +1559,42 @@ puntero_eje (float dx, float dy)
     }
 }
 
+/* Deslizar con varios dedos: fase 0 empieza, 1 avanza (dx, dy en px de la
+   vista), 2 termina, 3 se cancela.  */
+static void
+puntero_gesto (int fase, int dedos, float dx, float dy)
+{
+  bool entrar;
+  struct superficie *s = foco_para_puntero (&entrar);
+  if (s == NULL)
+    return;
+  struct wl_resource *p;
+  if (entrar)
+    PARA_CADA_PUNTERO (p, s)
+      {
+	wl_pointer_send_enter (p, wl_display_next_serial (display), s->res,
+			       ultimo_x, ultimo_y);
+	fin_de_evento (p);
+      }
+  wl_fixed_t fx, fy;
+  a_superficie (s, dx, dy, &fx, &fy);
+  uint32_t t = ahora_ms ();
+  struct wl_resource *g;
+  wl_resource_for_each (g, &deslizar)
+    {
+      if (wl_resource_get_client (g) != wl_resource_get_client (s->res))
+	continue;
+      if (fase == 0)
+	zwp_pointer_gesture_swipe_v1_send_begin (g, wl_display_next_serial (display), t,
+						 s->res, dedos);
+      else if (fase == 1)
+	zwp_pointer_gesture_swipe_v1_send_update (g, t, fx, fy);
+      else
+	zwp_pointer_gesture_swipe_v1_send_end (g, wl_display_next_serial (display), t,
+					       fase == 3);
+    }
+}
+
 static uint32_t
 mascara_mod (uint32_t code)
 {
@@ -1559,6 +1665,9 @@ procesar_cola (int fd, uint32_t mask, void *data)
 	break;
       case EV_EJE:
 	puntero_eje (ev[i].x, ev[i].y);
+	break;
+      case EV_GESTO:
+	puntero_gesto (ev[i].a & 0xff, ev[i].a >> 8, ev[i].x, ev[i].y);
 	break;
       case EV_TECLA:
 	tecla (ev[i].a & 0xffff, ev[i].a >> 16);
@@ -1656,6 +1765,7 @@ Java_dev_ben4shot_glibcprueba_Wayland_iniciar (JNIEnv *env, jclass cls, jstring 
   wl_list_init (&punteros);
   wl_list_init (&teclados);
   wl_list_init (&salidas);
+  wl_list_init (&deslizar);
   display = wl_display_create ();
   if (wl_display_add_socket (display, "wayland-0") != 0)
     {
@@ -1671,6 +1781,7 @@ Java_dev_ben4shot_glibcprueba_Wayland_iniciar (JNIEnv *env, jclass cls, jstring 
   wl_global_create (display, &xdg_wm_base_interface, 2, NULL, wm_base_bind);
   wl_global_create (display, &wl_seat_interface, 7, NULL, seat_bind);
   wl_global_create (display, &wl_output_interface, 4, NULL, output_bind);
+  wl_global_create (display, &zwp_pointer_gestures_v1_interface, 3, NULL, gestos_bind);
   wl_global_create (display, &zwp_linux_dmabuf_v1_interface, 3, NULL, linux_dmabuf_bind);
   wl_global_create (display, &android_ahb_v1_interface, 1, NULL, android_ahb_bind);
 
@@ -1753,4 +1864,11 @@ Java_dev_ben4shot_glibcprueba_Wayland_tecla (JNIEnv *env, jclass cls, jint code,
 					     jboolean pulsada)
 {
   encolar ((struct evento) { .tipo = EV_TECLA, .a = (code & 0xffff) | (pulsada ? 1 << 16 : 0) });
+}
+
+JNIEXPORT void JNICALL
+Java_dev_ben4shot_glibcprueba_Wayland_gesto (JNIEnv *env, jclass cls, jint fase, jint dedos,
+					     jfloat dx, jfloat dy)
+{
+  encolar ((struct evento) { .tipo = EV_GESTO, .a = (fase & 0xff) | (dedos << 8), .x = dx, .y = dy });
 }
