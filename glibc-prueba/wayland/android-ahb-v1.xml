@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="android_ahb_v1">
+  <description summary="buffers reservados por el anfitrión (AHardwareBuffer)">
+    Protocolo propio del anfitrión Wayland de la app.  El cliente le pide al
+    anfitrión un wl_buffer; el anfitrión reserva un AHardwareBuffer (gralloc) y
+    le devuelve su dmabuf.  El cliente dibuja en el dmabuf con la GPU (Turnip lo
+    importa) y lo adjunta como cualquier wl_buffer: el anfitrión se lo entrega
+    tal cual a SurfaceFlinger, sin copias.
+
+    Sincronización implícita, como linux-dmabuf: el cliente le pega al dmabuf la
+    fence de su render (DMA_BUF_IOCTL_IMPORT_SYNC_FILE) antes del commit, y el
+    anfitrión le pega la fence de liberación de SurfaceFlinger antes de mandar
+    wl_buffer.release.
+  </description>
+
+  <interface name="android_ahb_v1" version="1">
+    <request name="destroy" type="destructor"/>
+
+    <request name="crear">
+      <description summary="reservar un buffer">
+        Formato: fourcc de DRM (ABGR8888, XBGR8888, ARGB8888, XRGB8888).  La
+        respuesta es el evento listo o fallo con el mismo wl_buffer.
+      </description>
+      <arg name="buffer" type="new_id" interface="wl_buffer"/>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+      <arg name="format" type="uint"/>
+    </request>
+
+    <event name="listo">
+      <description summary="buffer reservado">
+        Un plano, modificador LINEAR.  stride en bytes.
+      </description>
+      <arg name="buffer" type="object" interface="wl_buffer"/>
+      <arg name="fd" type="fd"/>
+      <arg name="offset" type="uint"/>
+      <arg name="stride" type="uint"/>
+    </event>
+
+    <event name="fallo">
+      <description summary="no se pudo reservar">
+        El wl_buffer queda inutilizable; el cliente debe destruirlo.
+      </description>
+      <arg name="buffer" type="object" interface="wl_buffer"/>
+    </event>
+  </interface>
+</protocol>

@@ -9,13 +9,18 @@
    de la config de sway, los clientes directos lo usan).
 
    Protocolos: wl_compositor, wl_shm, zwp_linux_dmabuf_v1 (v3, solo LINEAR:
-   el anfitrión lee el dmabuf por mmap), xdg_wm_base, wl_seat, wl_output.  Todo
+   el anfitrión lee el dmabuf por mmap), android_ahb_v1 (propio, cero copias:
+   wayland/android-ahb-v1.xml), xdg_wm_base, wl_seat, wl_output.  Todo
    corre en un hilo propio (wl_display_run); lo que llega de Java pasa por una
    cola y un eventfd.  */
 
 #define _GNU_SOURCE
+#include <android/choreographer.h>
+#include <android/hardware_buffer.h>
+#include <android/looper.h>
 #include <android/log.h>
 #include <android/native_window_jni.h>
+#include <android/surface_control.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <jni.h>
@@ -29,10 +34,12 @@
 #include <sys/eventfd.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
 #include <wayland-server.h>
 
+#include "android-ahb-v1-server-protocol.h"
 #include "keymap.h"
 #include "linux-dmabuf-v1-server-protocol.h"
 #include "xdg-shell-server-protocol.h"
@@ -78,8 +85,8 @@ static struct
 #define VENTANA_BGRA 5
 
 /* Cola Java -> hilo del anfitrión.  */
-enum { EV_VENTANA, EV_MOVER, EV_BOTON, EV_EJE, EV_TECLA };
-struct evento { int tipo, a; float x, y; };
+enum { EV_VENTANA, EV_MOVER, EV_BOTON, EV_EJE, EV_TECLA, EV_TOMADA, EV_COMPLETADA, EV_VSYNC };
+struct evento { int tipo, a; float x, y; void *p; };
 static struct evento cola[512];
 static int ncola, evfd = -1;
 
@@ -446,6 +453,324 @@ linux_dmabuf_bind (struct wl_client *c, void *data, uint32_t version, uint32_t i
     }
 }
 
+/* ---------- android-ahb-v1: cero copias ----------
+   El cliente pide un wl_buffer y el anfitrión reserva un AHardwareBuffer;
+   le devuelve su dmabuf (gralloc), el cliente dibuja ahí con la GPU y al hacer
+   commit el AHardwareBuffer va tal cual a SurfaceFlinger, en una capa hija
+   (ASurfaceControl) del SurfaceView.  Nadie toca los píxeles con la CPU.
+   Sincronización implícita en el dmabuf: la fence del render (que la WSI le
+   pega) es la acquire fence de SurfaceFlinger, y su release fence se le pega al
+   dmabuf antes de mandar wl_buffer.release.  Los frame callbacks se responden
+   en el primer vsync (AChoreographer) después de que SurfaceFlinger tomó la
+   transacción (OnCommit): con OnComplete el cliente iba a la mitad de la
+   frecuencia, y con OnCommit solo, sin freno (SurfaceFlinger descarta cuadros).  */
+
+struct ahb
+{
+  struct wl_resource *res;	/* NULL si el cliente ya lo destruyó */
+  AHardwareBuffer *ahb;
+  int fd;			/* dmabuf del AHardwareBuffer */
+  int w, h, refs;		/* refs: el recurso + cada transacción que lo nombra */
+};
+
+/* Una transacción en vuelo; al completarse vuelve al hilo del anfitrión.  */
+struct transaccion
+{
+  ASurfaceControl *capa;
+  struct ahb *anterior;		/* el que reemplaza: se libera con la release fence */
+  struct wl_list callbacks;	/* frame callbacks de este cuadro */
+  int fence;
+};
+
+/* capa = hija del SurfaceView, en_pantalla = lo que muestra.  Protegidos por
+   mtx; en_pantalla solo se escribe en el hilo del anfitrión.  */
+static ASurfaceControl *capa;
+static struct ahb *en_pantalla;
+static int ahb_vistos;
+
+static void
+ahb_soltar_ref (struct ahb *b)
+{
+  if (b == NULL || --b->refs > 0)
+    return;
+  AHardwareBuffer_release (b->ahb);
+  close (b->fd);
+  free (b);
+}
+
+static const struct wl_buffer_interface ahb_buffer_impl = {
+  .destroy = destruir_recurso,
+};
+
+static void
+ahb_destruido (struct wl_resource *r)
+{
+  struct ahb *b = wl_resource_get_user_data (r);
+  if (b == NULL)	/* falló la reserva */
+    return;
+  b->res = NULL;
+  ahb_soltar_ref (b);
+}
+
+static struct ahb *
+ahb_de (struct wl_resource *buffer)
+{
+  if (!wl_resource_instance_of (buffer, &wl_buffer_interface, &ahb_buffer_impl))
+    return NULL;
+  return wl_resource_get_user_data (buffer);
+}
+
+/* El dmabuf de un AHardwareBuffer: la API pública solo lo entrega serializado
+   por un socket (como GraphicBuffer::flatten: 13 enteros de cabecera y luego
+   los del native_handle; los fd van aparte).  Con gralloc de Qualcomm el
+   primer fd es el buffer y el segundo, los metadatos.  */
+static int
+fd_de_ahb (AHardwareBuffer *ahb)
+{
+  int sv[2];
+  if (socketpair (AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, sv) != 0)
+    return -1;
+  int fd = -1;
+  if (AHardwareBuffer_sendHandleToUnixSocket (ahb, sv[0]) == 0)
+    {
+      uint32_t datos[256];
+      char control[CMSG_SPACE (16 * sizeof (int))];
+      struct iovec iov = { datos, sizeof datos };
+      struct msghdr msg = { .msg_iov = &iov, .msg_iovlen = 1,
+			    .msg_control = control, .msg_controllen = sizeof control };
+      ssize_t n = recvmsg (sv[1], &msg, MSG_CMSG_CLOEXEC);
+      struct cmsghdr *cm = n > 0 ? CMSG_FIRSTHDR (&msg) : NULL;
+      if (cm != NULL && cm->cmsg_type == SCM_RIGHTS)
+	{
+	  int nfds = (cm->cmsg_len - CMSG_LEN (0)) / sizeof (int);
+	  int *fds = (int *) CMSG_DATA (cm);
+	  fd = fds[0];
+	  for (int i = 1; i < nfds; i++)
+	    close (fds[i]);
+	  if (ahb_vistos++ == 0 && n >= 13 * 4)
+	    {
+	      /* Primera vez: mostrar el handle para saber cómo es (UBWC, offset).  */
+	      char linea[512];
+	      int len = 0, nints = datos[11];
+	      for (int i = 0; i < nints && 13 + i < n / 4 && len < 480; i++)
+		len += snprintf (linea + len, sizeof linea - len, " %x", datos[13 + i]);
+	      LOG ("AHardwareBuffer: %dx%d stride %d formato %d, %d fd, ints:%s",
+		   datos[1], datos[2], datos[3], datos[4], nfds, linea);
+	    }
+	}
+    }
+  close (sv[0]);
+  close (sv[1]);
+  return fd;
+}
+
+static void
+ahb_crear (struct wl_client *c, struct wl_resource *r, uint32_t id,
+	   int32_t w, int32_t h, uint32_t formato)
+{
+  struct wl_resource *res = wl_resource_create (c, &wl_buffer_interface, 1, id);
+  if (res == NULL)
+    {
+      wl_client_post_no_memory (c);
+      return;
+    }
+  wl_resource_set_implementation (res, &ahb_buffer_impl, NULL, ahb_destruido);
+
+  AHardwareBuffer_Desc desc = {
+    .width = w, .height = h, .layers = 1,
+    .usage = AHARDWAREBUFFER_USAGE_GPU_COLOR_OUTPUT
+	     | AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE
+	     | AHARDWAREBUFFER_USAGE_COMPOSER_OVERLAY,
+  };
+  switch (formato)
+    {
+    case DRM_ABGR8888: desc.format = AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM; break;
+    case DRM_XBGR8888: desc.format = AHARDWAREBUFFER_FORMAT_R8G8B8X8_UNORM; break;
+    case DRM_ARGB8888: case DRM_XRGB8888: desc.format = VENTANA_BGRA; break;
+    }
+  AHardwareBuffer *ahb = NULL;
+  int fd = -1;
+  if (w <= 0 || h <= 0 || w > 8192 || h > 8192 || desc.format == 0
+      || AHardwareBuffer_allocate (&desc, &ahb) != 0
+      || (fd = fd_de_ahb (ahb)) < 0)
+    {
+      LOG ("AHardwareBuffer %dx%d formato 0x%x: no se pudo reservar", w, h, formato);
+      if (ahb != NULL)
+	AHardwareBuffer_release (ahb);
+      android_ahb_v1_send_fallo (r, res);
+      return;
+    }
+  AHardwareBuffer_describe (ahb, &desc);
+  struct ahb *b = calloc (1, sizeof *b);
+  b->res = res;
+  b->ahb = ahb;
+  b->fd = fd;
+  b->w = w;
+  b->h = h;
+  b->refs = 1;
+  wl_resource_set_user_data (res, b);
+  android_ahb_v1_send_listo (r, res, fd, 0, desc.stride * 4);
+}
+
+static const struct android_ahb_v1_interface android_ahb_impl = {
+  .destroy = destruir_recurso,
+  .crear = ahb_crear,
+};
+
+static void
+android_ahb_bind (struct wl_client *c, void *data, uint32_t version, uint32_t id)
+{
+  struct wl_resource *r = wl_resource_create (c, &android_ahb_v1_interface, version, id);
+  if (r == NULL)
+    {
+      wl_client_post_no_memory (c);
+      return;
+    }
+  wl_resource_set_implementation (r, &android_ahb_impl, NULL, NULL);
+}
+
+/* Hilo de binder de SurfaceFlinger: solo junta la release fence y lo pasa a la
+   cola (el resto, en el hilo del anfitrión).  */
+static void encolar_transaccion (int tipo, struct transaccion *t);
+
+static void
+transaccion_tomada (void *ctx, ASurfaceTransactionStats *stats)
+{
+  encolar_transaccion (EV_TOMADA, ctx);
+}
+
+static void
+transaccion_completada (void *ctx, ASurfaceTransactionStats *stats)
+{
+  struct transaccion *t = ctx;
+  t->fence = t->anterior != NULL
+	     ? ASurfaceTransactionStats_getPreviousReleaseFenceFd (stats, t->capa) : -1;
+  encolar_transaccion (EV_COMPLETADA, t);
+}
+
+/* Frame callbacks de transacciones ya tomadas, esperando el próximo vsync.  */
+static struct wl_list para_vsync;
+static void pedir_vsync (void);
+
+static void
+responder_callbacks (struct wl_list *cbs)
+{
+  uint32_t ms = ahora_ms ();
+  struct wl_resource *cb, *tmp;
+  wl_resource_for_each_safe (cb, tmp, cbs)
+    {
+      wl_callback_send_done (cb, ms);
+      wl_resource_destroy (cb);
+    }
+}
+
+/* OnCommit llega siempre antes que OnComplete (misma cola).  */
+static void
+tomada (struct transaccion *t)
+{
+  if (wl_list_empty (&t->callbacks))
+    return;
+  wl_list_insert_list (para_vsync.prev, &t->callbacks);
+  wl_list_init (&t->callbacks);
+  pedir_vsync ();
+}
+
+static void
+completada (struct transaccion *t)
+{
+  responder_callbacks (&t->callbacks);	/* sin capa no hubo OnCommit */
+  struct ahb *b = t->anterior;
+  if (b != NULL)
+    {
+      if (t->fence >= 0)
+	{
+	  struct dma_buf_import_sync_file imp = { DMA_BUF_SYNC_READ, t->fence };
+	  if (ioctl (b->fd, DMA_BUF_IOCTL_IMPORT_SYNC_FILE, &imp) != 0)
+	    {
+	      struct pollfd pfd = { t->fence, POLLIN, 0 };	/* sin dma_resv: esperar */
+	      poll (&pfd, 1, 100);
+	    }
+	  close (t->fence);
+	}
+      /* en_pantalla solo cambia en este hilo.  */
+      if (b->res != NULL && b != en_pantalla)
+	wl_buffer_send_release (b->res);
+      ahb_soltar_ref (b);
+    }
+  if (t->capa != NULL)
+    ASurfaceControl_release (t->capa);
+  free (t);
+}
+
+/* Muestra b en la capa (NULL: la oculta, para volver al SurfaceView).  Los
+   frame callbacks de cbs se responden al completarse.  */
+static void
+presentar (struct ahb *b, struct wl_list *cbs)
+{
+  struct transaccion *t = calloc (1, sizeof *t);
+  wl_list_init (&t->callbacks);
+  t->fence = -1;
+  if (cbs != NULL)
+    {
+      wl_list_insert_list (&t->callbacks, cbs);
+      wl_list_init (cbs);
+    }
+  pthread_mutex_lock (&mtx);
+  if (b != en_pantalla)
+    {
+      t->anterior = en_pantalla;	/* su referencia pasa a la transacción */
+      en_pantalla = b;
+      if (b != NULL)
+	b->refs++;
+    }
+  if (capa == NULL)
+    {
+      /* Sin ventana no hay nada que mostrar: se completa al tiro.  */
+      pthread_mutex_unlock (&mtx);
+      completada (t);
+      return;
+    }
+  ASurfaceControl_acquire (capa);
+  t->capa = capa;
+  ASurfaceTransaction *tr = ASurfaceTransaction_create ();
+  if (b != NULL)
+    {
+      /* Acquire fence: la del render que la WSI le pegó al dmabuf.  */
+      struct dma_buf_export_sync_file exp = { DMA_BUF_SYNC_READ, -1 };
+      int fence = ioctl (b->fd, DMA_BUF_IOCTL_EXPORT_SYNC_FILE, &exp) == 0 ? exp.fd : -1;
+      ASurfaceTransaction_setBuffer (tr, capa, b->ahb, fence);
+      ASurfaceTransaction_setGeometry (tr, capa, &(ARect) { 0, 0, b->w, b->h },
+				       &(ARect) { 0, 0, vent_w, vent_h }, 0);
+      ASurfaceTransaction_setBufferTransparency (tr, capa, ASURFACE_TRANSACTION_TRANSPARENCY_OPAQUE);
+      ASurfaceTransaction_setVisibility (tr, capa, ASURFACE_TRANSACTION_VISIBILITY_SHOW);
+    }
+  else
+    ASurfaceTransaction_setVisibility (tr, capa, ASURFACE_TRANSACTION_VISIBILITY_HIDE);
+  ASurfaceTransaction_setOnCommit (tr, t, transaccion_tomada);
+  ASurfaceTransaction_setOnComplete (tr, t, transaccion_completada);
+  ASurfaceTransaction_apply (tr);
+  ASurfaceTransaction_delete (tr);
+  pthread_mutex_unlock (&mtx);
+}
+
+/* Cambio de camino (shm/dmabuf por CPU <-> capa): uno oculta al otro.  */
+static void
+ocultar_capa (void)
+{
+  if (en_pantalla != NULL)
+    presentar (NULL, NULL);
+}
+
+static void
+liberar_cpu (void)
+{
+  pthread_mutex_lock (&mtx);
+  soltar_retenido ();
+  fuente.datos = NULL;
+  fuente.fd = -1;
+  pthread_mutex_unlock (&mtx);
+}
+
 /* ---------- foco ---------- */
 
 static void
@@ -590,10 +915,26 @@ surface_commit (struct wl_client *c, struct wl_resource *r)
 	      elegir_foco ();
 	    }
 	  struct dmabuf *dmabuf = shm == NULL ? dmabuf_de (buffer) : NULL;
+	  struct ahb *ahb = shm == NULL && dmabuf == NULL ? ahb_de (buffer) : NULL;
+	  if (ahb != NULL && s == foco)
+	    {
+	      /* Lo libera SurfaceFlinger; los frame callbacks, al mostrarse.  */
+	      s->buf_w = ahb->w;
+	      s->buf_h = ahb->h;
+	      liberar_cpu ();
+	      presentar (ahb, &s->callbacks);
+	      return;
+	    }
 	  if (shm != NULL && s == foco)
-	    copiar_shm (s, shm);
+	    {
+	      ocultar_capa ();
+	      copiar_shm (s, shm);
+	    }
 	  if (dmabuf != NULL && s == foco)
-	    mostrar_dmabuf (s, dmabuf);	/* lo libera al llegar el siguiente */
+	    {
+	      ocultar_capa ();
+	      mostrar_dmabuf (s, dmabuf);	/* lo libera al llegar el siguiente */
+	    }
 	  else
 	    wl_buffer_send_release (buffer);
 	}
@@ -1212,6 +1553,15 @@ procesar_cola (int fd, uint32_t mask, void *data)
       case EV_TECLA:
 	tecla (ev[i].a & 0xffff, ev[i].a >> 16);
 	break;
+      case EV_TOMADA:
+	tomada (ev[i].p);
+	break;
+      case EV_COMPLETADA:
+	completada (ev[i].p);
+	break;
+      case EV_VSYNC:
+	responder_callbacks (&para_vsync);
+	break;
       }
   return 0;
 }
@@ -1226,6 +1576,51 @@ encolar (struct evento e)
   uint64_t uno = 1;
   if (evfd >= 0)
     write (evfd, &uno, sizeof uno);
+}
+
+static void
+encolar_transaccion (int tipo, struct transaccion *t)
+{
+  encolar ((struct evento) { .tipo = tipo, .p = t });
+}
+
+/* ---------- vsync ----------
+   AChoreographer solo se usa desde un hilo con ALooper: el hilo del anfitrión
+   le pide un vsync escribiendo en un eventfd que ese looper vigila.  */
+
+static int vsync_fd = -1;
+
+static void
+vsync (int64_t ns, void *data)
+{
+  encolar ((struct evento) { .tipo = EV_VSYNC });
+}
+
+static int
+vsync_pedido (int fd, int events, void *data)
+{
+  uint64_t n;
+  read (fd, &n, sizeof n);
+  AChoreographer_postFrameCallback64 (AChoreographer_getInstance (), vsync, NULL);
+  return 1;
+}
+
+static void *
+hilo_vsync (void *arg)
+{
+  ALooper *looper = ALooper_prepare (0);
+  ALooper_addFd (looper, vsync_fd, 0, ALOOPER_EVENT_INPUT, vsync_pedido, NULL);
+  AChoreographer_getInstance ();
+  for (;;)
+    ALooper_pollOnce (-1, NULL, NULL, NULL);
+  return NULL;
+}
+
+static void
+pedir_vsync (void)
+{
+  uint64_t uno = 1;
+  write (vsync_fd, &uno, sizeof uno);
 }
 
 /* ---------- arranque y JNI ---------- */
@@ -1267,7 +1662,13 @@ Java_dev_ben4shot_glibcprueba_Wayland_iniciar (JNIEnv *env, jclass cls, jstring 
   wl_global_create (display, &wl_seat_interface, 7, NULL, seat_bind);
   wl_global_create (display, &wl_output_interface, 4, NULL, output_bind);
   wl_global_create (display, &zwp_linux_dmabuf_v1_interface, 3, NULL, linux_dmabuf_bind);
+  wl_global_create (display, &android_ahb_v1_interface, 1, NULL, android_ahb_bind);
 
+  wl_list_init (&para_vsync);
+  vsync_fd = eventfd (0, EFD_CLOEXEC | EFD_NONBLOCK);
+  pthread_t tv;
+  pthread_create (&tv, NULL, hilo_vsync, NULL);
+  pthread_detach (tv);
   evfd = eventfd (0, EFD_CLOEXEC | EFD_NONBLOCK);
   wl_event_loop_add_fd (wl_display_get_event_loop (display), evfd,
 			WL_EVENT_READABLE, procesar_cola, NULL);
@@ -1282,6 +1683,15 @@ Java_dev_ben4shot_glibcprueba_Wayland_ventana (JNIEnv *env, jclass cls, jobject 
 					       jint w, jint h, jint mmw, jint mmh)
 {
   pthread_mutex_lock (&mtx);
+  if (capa != NULL)
+    {
+      ASurfaceTransaction *tr = ASurfaceTransaction_create ();
+      ASurfaceTransaction_reparent (tr, capa, NULL);
+      ASurfaceTransaction_apply (tr);
+      ASurfaceTransaction_delete (tr);
+      ASurfaceControl_release (capa);
+      capa = NULL;
+    }
   if (ventana != NULL)
     ANativeWindow_release (ventana);
   ventana = surface != NULL ? ANativeWindow_fromSurface (env, surface) : NULL;
@@ -1292,6 +1702,19 @@ Java_dev_ben4shot_glibcprueba_Wayland_ventana (JNIEnv *env, jclass cls, jobject 
       mm_w = mmw;
       mm_h = mmh;
       mostrar ();
+      capa = ASurfaceControl_createFromWindow (ventana, "linux");
+      if (capa != NULL && en_pantalla != NULL)
+	{
+	  /* Volver a mostrar el último cuadro (SurfaceFlinger aún lo retiene).  */
+	  ASurfaceTransaction *tr = ASurfaceTransaction_create ();
+	  ASurfaceTransaction_setBuffer (tr, capa, en_pantalla->ahb, -1);
+	  ASurfaceTransaction_setGeometry (tr, capa,
+					   &(ARect) { 0, 0, en_pantalla->w, en_pantalla->h },
+					   &(ARect) { 0, 0, w, h }, 0);
+	  ASurfaceTransaction_setBufferTransparency (tr, capa, ASURFACE_TRANSACTION_TRANSPARENCY_OPAQUE);
+	  ASurfaceTransaction_apply (tr);
+	  ASurfaceTransaction_delete (tr);
+	}
     }
   pthread_mutex_unlock (&mtx);
   if (ventana != NULL)

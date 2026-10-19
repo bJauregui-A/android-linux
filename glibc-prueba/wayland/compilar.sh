@@ -53,11 +53,14 @@ if [ ! -f "$OUT/lib/libwayland-server.a" ]; then
     -Dlibraries=true -Dscanner=false -Dtests=false -Ddocumentation=false -Ddtd_validation=false
   ninja -C build/wl install
 fi
-# Código de servidor de los protocolos extra (xdg-shell, linux-dmabuf)
+# Código de servidor de los protocolos extra (xdg-shell, linux-dmabuf y el
+# propio android-ahb-v1; para los clientes de prueba también el de cliente)
 mkdir -p "$OUT/proto"
-for X in stable/xdg-shell/xdg-shell stable/linux-dmabuf/linux-dmabuf-v1; do
+for X in /usr/share/wayland-protocols/stable/xdg-shell/xdg-shell \
+         /usr/share/wayland-protocols/stable/linux-dmabuf/linux-dmabuf-v1 $PWD/android-ahb-v1; do
   N=$(basename $X)
-  wayland-scanner server-header /usr/share/wayland-protocols/$X.xml "$OUT/proto/$N-server-protocol.h"
-  wayland-scanner private-code /usr/share/wayland-protocols/$X.xml "$OUT/proto/$N-protocol.c"
+  wayland-scanner server-header $X.xml "$OUT/proto/$N-server-protocol.h"
+  wayland-scanner client-header $X.xml "$OUT/proto/$N-client-protocol.h"
+  wayland-scanner private-code $X.xml "$OUT/proto/$N-protocol.c"
 done
 ls -la "$OUT/lib/"*.a "$OUT/proto"

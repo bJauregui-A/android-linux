@@ -1,0 +1,382 @@
+diff --git a/src/vulkan/wsi/android-ahb-v1.xml b/src/vulkan/wsi/android-ahb-v1.xml
+new file mode 100644
+index 0000000..16f4308
+--- /dev/null
++++ b/src/vulkan/wsi/android-ahb-v1.xml
+@@ -0,0 +1,47 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<protocol name="android_ahb_v1">
++  <description summary="buffers reservados por el anfitrión (AHardwareBuffer)">
++    Protocolo propio del anfitrión Wayland de la app.  El cliente le pide al
++    anfitrión un wl_buffer; el anfitrión reserva un AHardwareBuffer (gralloc) y
++    le devuelve su dmabuf.  El cliente dibuja en el dmabuf con la GPU (Turnip lo
++    importa) y lo adjunta como cualquier wl_buffer: el anfitrión se lo entrega
++    tal cual a SurfaceFlinger, sin copias.
++
++    Sincronización implícita, como linux-dmabuf: el cliente le pega al dmabuf la
++    fence de su render (DMA_BUF_IOCTL_IMPORT_SYNC_FILE) antes del commit, y el
++    anfitrión le pega la fence de liberación de SurfaceFlinger antes de mandar
++    wl_buffer.release.
++  </description>
++
++  <interface name="android_ahb_v1" version="1">
++    <request name="destroy" type="destructor"/>
++
++    <request name="crear">
++      <description summary="reservar un buffer">
++        Formato: fourcc de DRM (ABGR8888, XBGR8888, ARGB8888, XRGB8888).  La
++        respuesta es el evento listo o fallo con el mismo wl_buffer.
++      </description>
++      <arg name="buffer" type="new_id" interface="wl_buffer"/>
++      <arg name="width" type="int"/>
++      <arg name="height" type="int"/>
++      <arg name="format" type="uint"/>
++    </request>
++
++    <event name="listo">
++      <description summary="buffer reservado">
++        Un plano, modificador LINEAR.  stride en bytes.
++      </description>
++      <arg name="buffer" type="object" interface="wl_buffer"/>
++      <arg name="fd" type="fd"/>
++      <arg name="offset" type="uint"/>
++      <arg name="stride" type="uint"/>
++    </event>
++
++    <event name="fallo">
++      <description summary="no se pudo reservar">
++        El wl_buffer queda inutilizable; el cliente debe destruirlo.
++      </description>
++      <arg name="buffer" type="object" interface="wl_buffer"/>
++    </event>
++  </interface>
++</protocol>
+diff --git a/src/vulkan/wsi/meson.build b/src/vulkan/wsi/meson.build
+index 80925d1..2b38362 100644
+--- a/src/vulkan/wsi/meson.build
++++ b/src/vulkan/wsi/meson.build
+@@ -25,6 +25,8 @@ if with_platform_wayland
+   links_vulkan_wsi += libloader_wayland_helper
+   files_vulkan_wsi += wp_files['linux-drm-syncobj-v1']
+   files_vulkan_wsi += wp_files['color-management-v1']
++  # Protocolo propio del anfitrión Android de glibc-prueba (cero copias)
++  files_vulkan_wsi += mod_wl.scan_xml(files('android-ahb-v1.xml'), include_core_only : false)
+ endif
+ 
+ if with_platform_windows
+diff --git a/src/vulkan/wsi/wsi_common_wayland.c b/src/vulkan/wsi/wsi_common_wayland.c
+index 33a4059..ee2a240 100644
+--- a/src/vulkan/wsi/wsi_common_wayland.c
++++ b/src/vulkan/wsi/wsi_common_wayland.c
+@@ -49,6 +49,10 @@
+ #include "linux-drm-syncobj-v1-client-protocol.h"
+ #include "tearing-control-v1-client-protocol.h"
+ #include "color-management-v1-client-protocol.h"
++#include "android-ahb-v1-client-protocol.h"
++#include <util/log.h>
++#include <util/os_file.h>
++#include <util/u_debug.h>
+ 
+ #include <util/cnd_monotonic.h>
+ #include <util/compiler.h>
+@@ -115,6 +119,10 @@ struct wsi_wl_display {
+ 
+    struct wp_color_manager_v1 *color_manager;
+ 
++   /* Anfitrión de la app glibc-prueba en Android: buffers AHardwareBuffer
++    * (cero copias).  MESA_WSI_AHB=0 lo desactiva. */
++   struct android_ahb_v1 *android_ahb;
++
+    struct dmabuf_feedback_format_table format_table;
+ 
+    struct u_vector color_primaries;
+@@ -167,10 +175,17 @@ struct wsi_wl_image {
+    unsigned shm_size;
+ 
+    struct wp_linux_drm_syncobj_timeline_v1 *wl_syncobj_timeline[WSI_ES_COUNT];
++
++   /* WSI_WL_BUFFER_AHB: el wl_buffer y su dmabuf, pedidos al anfitrión antes
++    * de crear la imagen (estado: 0 esperando, 1 listo, -1 falló). */
++   struct wl_buffer *ahb_buffer;
++   int ahb_fd, ahb_estado;
++   uint32_t ahb_offset, ahb_stride;
+ };
+ 
+ enum wsi_wl_buffer_type {
+    WSI_WL_BUFFER_NATIVE,
++   WSI_WL_BUFFER_AHB,
+    WSI_WL_BUFFER_GPU_SHM,
+    WSI_WL_BUFFER_SHM_MEMCPY,
+ };
+@@ -200,6 +215,10 @@ struct wsi_wl_swapchain {
+ 
+    struct wl_callback *frame;
+ 
++   /* WSI_WL_BUFFER_AHB */
++   VkImageDrmFormatModifierExplicitCreateInfoEXT ahb_explicito;
++   VkSubresourceLayout ahb_plano;
++
+    VkExtent2D extent;
+    VkFormat vk_format;
+    enum wsi_wl_buffer_type buffer_type;
+@@ -1482,6 +1501,29 @@ static const struct wp_presentation_listener presentation_listener = {
+ #define MESA_WL_FIXES_VERSION 1
+ #endif
+ 
++static void
++android_ahb_listo(void *data, struct android_ahb_v1 *ahb, struct wl_buffer *buffer,
++                  int32_t fd, uint32_t offset, uint32_t stride)
++{
++   struct wsi_wl_image *image = wl_buffer_get_user_data(buffer);
++   image->ahb_fd = fd;
++   image->ahb_offset = offset;
++   image->ahb_stride = stride;
++   image->ahb_estado = 1;
++}
++
++static void
++android_ahb_fallo(void *data, struct android_ahb_v1 *ahb, struct wl_buffer *buffer)
++{
++   struct wsi_wl_image *image = wl_buffer_get_user_data(buffer);
++   image->ahb_estado = -1;
++}
++
++static const struct android_ahb_v1_listener android_ahb_listener = {
++   android_ahb_listo,
++   android_ahb_fallo,
++};
++
+ static void
+ registry_handle_global(void *data, struct wl_registry *registry,
+                        uint32_t name, const char *interface, uint32_t version)
+@@ -1500,6 +1542,11 @@ registry_handle_global(void *data, struct wl_registry *registry,
+                              MIN2(version, ZWP_LINUX_DMABUF_V1_GET_DEFAULT_FEEDBACK_SINCE_VERSION));
+          zwp_linux_dmabuf_v1_add_listener(display->wl_dmabuf,
+                                           &dmabuf_listener, display);
++      } else if (strcmp(interface, android_ahb_v1_interface.name) == 0 &&
++                 debug_get_bool_option("MESA_WSI_AHB", true)) {
++         display->android_ahb =
++            wl_registry_bind(registry, name, &android_ahb_v1_interface, 1);
++         android_ahb_v1_add_listener(display->android_ahb, &android_ahb_listener, display);
+       } else if (strcmp(interface, wp_linux_drm_syncobj_manager_v1_interface.name) == 0) {
+          display->wl_syncobj =
+             wl_registry_bind(registry, name, &wp_linux_drm_syncobj_manager_v1_interface, 1);
+@@ -1584,6 +1631,8 @@ wsi_wl_display_finish(struct wsi_wl_display *display)
+       wp_linux_drm_syncobj_manager_v1_destroy(display->wl_syncobj);
+    if (display->wl_dmabuf)
+       zwp_linux_dmabuf_v1_destroy(display->wl_dmabuf);
++   if (display->android_ahb)
++      android_ahb_v1_destroy(display->android_ahb);
+    if (display->wp_presentation_notwrapped)
+       wp_presentation_destroy(display->wp_presentation_notwrapped);
+    if (display->fifo_manager)
+@@ -3554,6 +3603,141 @@ wsi_wl_alloc_image_shm(struct wsi_image *imagew, unsigned size)
+    return ptr;
+ }
+ 
++/* WSI_WL_BUFFER_AHB: la memoria de la imagen es el dmabuf del AHardwareBuffer
++ * que reservó el anfitrión (pedido en wsi_wl_ahb_pedir).  El anfitrión se lo
++ * entrega tal cual a SurfaceFlinger: ni el cliente ni el anfitrión copian. */
++static VkResult
++wsi_wl_ahb_create_mem(const struct wsi_swapchain *chain,
++                      const struct wsi_image_info *info,
++                      struct wsi_image *image)
++{
++   struct wsi_wl_image *wl_image = container_of(image, struct wsi_wl_image, base);
++   const struct wsi_device *wsi = chain->wsi;
++
++   VkMemoryRequirements reqs;
++   wsi->GetImageMemoryRequirements(chain->device, image->image, &reqs);
++
++   int fd = os_dupfd_cloexec(wl_image->ahb_fd);
++   if (fd < 0)
++      return VK_ERROR_OUT_OF_HOST_MEMORY;
++
++   const struct wsi_memory_allocate_info memory_wsi_info = {
++      .sType = VK_STRUCTURE_TYPE_WSI_MEMORY_ALLOCATE_INFO_MESA,
++      .implicit_sync = !info->explicit_sync && !chain->dma_buf_semaphore,
++      .dma_buf_sync_file = chain->dma_buf_semaphore,
++   };
++   const VkImportMemoryFdInfoKHR import_info = {
++      .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR,
++      .pNext = &memory_wsi_info,
++      .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
++      .fd = fd,
++   };
++   const VkMemoryDedicatedAllocateInfo memory_dedicated_info = {
++      .sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO,
++      .pNext = &import_info,
++      .image = image->image,
++   };
++   const VkMemoryAllocateInfo memory_info = {
++      .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
++      .pNext = &memory_dedicated_info,
++      .allocationSize = reqs.size,
++      .memoryTypeIndex = wsi_select_device_memory_type(wsi, reqs.memoryTypeBits),
++   };
++   VkResult result = wsi->AllocateMemory(chain->device, &memory_info,
++                                         &chain->alloc, &image->memory);
++   if (result != VK_SUCCESS) {
++      close(fd);
++      return result;
++   }
++
++   /* La sincronización implícita de la WSI usa este fd. */
++   image->dma_buf_fd = wl_image->ahb_fd;
++   wl_image->ahb_fd = -1;
++   image->drm_modifier = DRM_FORMAT_MOD_LINEAR;
++   image->num_planes = 1;
++   image->sizes[0] = reqs.size;
++   image->row_pitches[0] = wl_image->ahb_stride;
++   image->offsets[0] = wl_image->ahb_offset;
++   return VK_SUCCESS;
++}
++
++static bool
++wsi_wl_ahb_formato_ok(uint32_t drm_format)
++{
++   return drm_format == DRM_FORMAT_ARGB8888 || drm_format == DRM_FORMAT_XRGB8888 ||
++          drm_format == DRM_FORMAT_ABGR8888 || drm_format == DRM_FORMAT_XBGR8888;
++}
++
++static void
++wsi_wl_ahb_soltar(struct wsi_wl_swapchain *chain)
++{
++   for (uint32_t i = 0; i < chain->base.image_count; i++) {
++      struct wsi_wl_image *image = &chain->images[i];
++      if (image->ahb_buffer)
++         wl_buffer_destroy(image->ahb_buffer);
++      image->ahb_buffer = NULL;
++      if (image->ahb_fd >= 0)
++         close(image->ahb_fd);
++      image->ahb_fd = -1;
++   }
++}
++
++/* Pide al anfitrión un buffer por imagen y cambia la configuración de imagen
++ * para que use su stride (modificador LINEAR explícito) y su memoria. */
++static VkResult
++wsi_wl_ahb_pedir(struct wsi_wl_swapchain *chain)
++{
++   struct wsi_wl_display *display = chain->wsi_wl_surface->display;
++   struct wsi_image_info *info = &chain->base.image_info;
++
++   for (uint32_t i = 0; i < chain->base.image_count; i++) {
++      struct wsi_wl_image *image = &chain->images[i];
++      image->ahb_fd = -1;
++      image->ahb_estado = 0;
++      image->ahb_buffer = android_ahb_v1_crear(display->android_ahb,
++                                               chain->extent.width,
++                                               chain->extent.height,
++                                               chain->drm_format);
++      if (!image->ahb_buffer)
++         goto fail;
++      wl_buffer_set_user_data(image->ahb_buffer, image);
++   }
++   if (wl_display_roundtrip_queue(display->wl_display, display->queue) < 0)
++      goto fail;
++   for (uint32_t i = 0; i < chain->base.image_count; i++) {
++      if (chain->images[i].ahb_estado != 1 ||
++          chain->images[i].ahb_stride != chain->images[0].ahb_stride ||
++          chain->images[i].ahb_offset != chain->images[0].ahb_offset)
++         goto fail;
++   }
++
++   /* Lista de modificadores (solo LINEAR) -> layout explícito. */
++   for (VkBaseOutStructure *s = (VkBaseOutStructure *)&info->create; s->pNext; s = s->pNext) {
++      if (s->pNext == (VkBaseOutStructure *)&info->drm_mod_list) {
++         s->pNext = s->pNext->pNext;
++         break;
++      }
++   }
++   chain->ahb_plano = (VkSubresourceLayout) {
++      .offset = chain->images[0].ahb_offset,
++      .rowPitch = chain->images[0].ahb_stride,
++   };
++   chain->ahb_explicito = (VkImageDrmFormatModifierExplicitCreateInfoEXT) {
++      .sType = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_EXPLICIT_CREATE_INFO_EXT,
++      .drmFormatModifier = DRM_FORMAT_MOD_LINEAR,
++      .drmFormatModifierPlaneCount = 1,
++      .pPlaneLayouts = &chain->ahb_plano,
++   };
++   __vk_append_struct(&info->create, &chain->ahb_explicito);
++   info->create_mem = wsi_wl_ahb_create_mem;
++   return VK_SUCCESS;
++
++fail:
++   mesa_loge("MESA: el anfitrión no entregó los AHardwareBuffer (MESA_WSI_AHB=0 lo desactiva)");
++   wsi_wl_ahb_soltar(chain);
++   return VK_ERROR_OUT_OF_HOST_MEMORY;
++}
++
+ static VkResult
+ wsi_wl_image_init(struct wsi_wl_swapchain *chain,
+                   struct wsi_wl_image *image,
+@@ -3632,6 +3816,11 @@ wsi_wl_image_init(struct wsi_wl_swapchain *chain,
+       break;
+    }
+ 
++   case WSI_WL_BUFFER_AHB:
++      loader_wayland_wrap_buffer(&image->wayland_buffer, image->ahb_buffer);
++      image->ahb_buffer = NULL;
++      break;
++
+    default:
+       UNREACHABLE("Invalid buffer type");
+    }
+@@ -3911,6 +4100,24 @@ wsi_wl_surface_create_swapchain(VkIcdSurfaceBase *icd_surface,
+       }
+       buffer_type = WSI_WL_BUFFER_NATIVE;
+       image_params = &drm_image_params.base;
++
++      /* Anfitrión con AHardwareBuffer: imágenes LINEAR con su memoria. */
++      bool alpha_ahb = pCreateInfo->compositeAlpha ==
++                       VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR;
++      if (wsi_wl_surface->display->android_ahb && wsi_device->supports_modifiers &&
++          !drm_image_params.explicit_sync &&
++          wsi_wl_ahb_formato_ok(wl_drm_format_for_vk_format(wsi_device,
++                                                            pCreateInfo->imageFormat,
++                                                            alpha_ahb))) {
++         static const uint64_t lineal[] = { DRM_FORMAT_MOD_LINEAR };
++         static const uint64_t *const lineal_lista[] = { lineal };
++         static const uint32_t uno = 1;
++         drm_image_params.num_modifier_lists = 1;
++         drm_image_params.num_modifiers = &uno;
++         drm_image_params.modifiers = lineal_lista;
++         num_drm_modifiers = 0;
++         buffer_type = WSI_WL_BUFFER_AHB;
++      }
+    }
+ 
+    result = wsi_swapchain_init(wsi_device, &chain->base, device,
+@@ -3948,7 +4155,7 @@ wsi_wl_surface_create_swapchain(VkIcdSurfaceBase *icd_surface,
+    chain->extent = pCreateInfo->imageExtent;
+    chain->vk_format = pCreateInfo->imageFormat;
+    chain->buffer_type = buffer_type;
+-   if (buffer_type == WSI_WL_BUFFER_NATIVE) {
++   if (buffer_type == WSI_WL_BUFFER_NATIVE || buffer_type == WSI_WL_BUFFER_AHB) {
+       chain->drm_format = wl_drm_format_for_vk_format(wsi_device,
+                                                       chain->vk_format, alpha);
+    } else {
+@@ -4044,11 +4251,20 @@ wsi_wl_surface_create_swapchain(VkIcdSurfaceBase *icd_surface,
+       }
+    }
+ 
++   if (buffer_type == WSI_WL_BUFFER_AHB) {
++      result = wsi_wl_ahb_pedir(chain);
++      if (result != VK_SUCCESS)
++         goto fail_free_wl_chain;
++   }
++
+    for (uint32_t i = 0; i < chain->base.image_count; i++) {
+       result = wsi_wl_image_init(chain, &chain->images[i],
+                                  pCreateInfo, pAllocator);
+-      if (result != VK_SUCCESS)
++      if (result != VK_SUCCESS) {
++         if (buffer_type == WSI_WL_BUFFER_AHB)
++            wsi_wl_ahb_soltar(chain);
+          goto fail_free_wl_images;
++      }
+       chain->images[i].busy = false;
+    }
+ 
