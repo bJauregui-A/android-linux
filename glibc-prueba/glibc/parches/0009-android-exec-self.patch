@@ -1,0 +1,37 @@
+--- a/sysdeps/unix/sysv/linux/aarch64/android-path.c
++++ b/sysdeps/unix/sysv/linux/aarch64/android-path.c
+@@ -412,6 +412,22 @@
+   if (!glibc || LOADER[0] == '\0')
+     return RAW (__NR_execve, t, argv, envp);
+ 
++  /* Ruta absoluta para el cargador: queda en AT_EXECFN, y /proc/self/exe
++     (own_exe) solo la usa si empieza con /.  */
++  char abs[PATH_MAX];
++  if (t[0] != '/')
++    {
++      long int c = RAW (__NR_getcwd, abs, PATH_MAX);
++      size_t n = slen (t);
++      if (c > 0 && (size_t) c + n + 1 <= PATH_MAX)
++	{
++	  c = slen (abs);
++	  abs[c] = '/';
++	  mcopy (abs + c + 1, t, n + 1);
++	  t = abs;
++	}
++    }
++
+   /* cargador --argv0 <argv[0]> <programa> <argumentos...>  */
+   char *nargv[argc + 4];
+   size_t k = 0;
+@@ -431,6 +447,11 @@
+ execve_x (const char *path, char *const argv[], char *const envp[],
+ 	  char *buf)
+ {
++  /* /proc/self/exe es el cargador: relanzarse (Steam lo hace) ejecuta el
++     programa.  */
++  const char *exe = own_exe (path);
++  if (exe != NULL)
++    path = exe;
+   size_t envc = count (envp);
+   int hasp = 0, hasl = 0;
+   for (size_t i = 0; i < envc; i++)

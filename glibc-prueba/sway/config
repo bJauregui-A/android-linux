@@ -41,6 +41,8 @@ exec python $s/opacidad.py
 # historial del portapapeles (SUPER+V)
 exec wl-paste --type text --watch cliphist store
 exec wl-paste --type image --watch cliphist store
+# servidor SSH en el puerto 8022 (/etc/ssh/sshd_config.d/10-android.conf); sin sudo: como no-root no hace privsep
+exec /usr/bin/sshd
 
 ### Programas
 bindsym $mod+t exec $term
