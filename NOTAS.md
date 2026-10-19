@@ -60,8 +60,10 @@ Probado a mano: cambiar tamaño ✅, salir y volver (sigue en segundo plano) ✅
 6ª sesión: medidos sway (19 MB) / swayfx (~60 MB, funciona por GPU) / Hyprland (no arranca: todo supone DRM) → se queda sway.
 Escritorio con la config de Hyprland/HyDE del PC llevada a sway (`glibc-prueba/sway/`): atajos, aspecto, waybar, fuzzel, kitty con la config del PC;
 app en modo inmersivo (pantalla completa, 1080×2193 px reales); glibc `0007` (`/proc/self/exe` = el programa, kitty lo necesitaba).
-7ª sesión: gestos de 3 dedos (sin probar a mano), zsh+starship como el PC, phantom process killer desactivado por ADB (`settings_enable_monitor_phantom_procs false`).
-**Siguiente: confirmar gestos; confirmar la opacidad de inactivas; gestos, cursor, portapapeles (pendiente 4 en PROYECTO.md).
+7ª sesión: ✅ gestos de 3 dedos (izq/der = escritorios, arriba = fuzzel, abajo = ventanas), ✅ zsh + starship como el PC en kitty.
+Cambios hechos en el teléfono por ADB (reversibles): gestos de 3 dedos de HyperOS apagados (`settings put system enable_three_gesture 0`, volver con `1`)
+y límite de procesos hijos de Android desactivado (`settings put global settings_enable_monitor_phantom_procs false`, volver con `settings delete ...`).
+**Siguiente: cursor más grande, portapapeles Android ↔ Linux, popups (pendiente 4 en PROYECTO.md); después compatibilidad: Go/estáticos (seccomp), audio, Xwayland.
 Avisar antes de correr scripts que cierran la app (force-stop): el usuario suele estar usándola.**
 Root temporal descartado: lo necesario vive en particiones verificadas, y desbloquear/bloquear borra `/data`.
 
@@ -94,7 +96,8 @@ Siguiente:
 - [x] dmabuf: el anfitrión implementa linux-dmabuf; Turnip compilado con `kgsl,msm` (si no, sin dmabuf en la WSI). El cliente ya no copia; el anfitrión aún lee por CPU (2026-10-19)
 - [x] Cero copias: protocolo propio `android-ahb-v1` (el anfitrión reserva AHardwareBuffer y da su dmabuf), capa ASurfaceControl, fences implícitas, frame callbacks con AChoreographer; parche `turnip/parches/0001` a la WSI de Mesa (vkcube y GL por Zink lo usan solos) (2026-10-19)
 - [x] Escritorio por GPU: wlroots 0.20.2 parchado (`wlroots/parches/0001`–`0003`), sway con renderer Vulkan + buffers del anfitrión + linux-dmabuf para sus clientes (2026-10-19)
-- [ ] **← siguiente:** escritorio cómodo (gestos, lanzador, popups, portapapeles); luego Xwayland, Steam
+- [x] Escritorio estilo HyDE, zsh como el PC, gestos de 3 dedos (2026-10-19)
+- [ ] **← siguiente:** cursor, portapapeles Android ↔ Linux, popups; luego programas Go/estáticos (seccomp), audio, Xwayland, Steam
 - [ ] Binarios estáticos (ej. `ldconfig`): cargarlos en espacio de usuario desde `execve`
 
 En el teléfono: app sdk36 con `files/archlinux` (Arch + pacman + sway/foot + gcc/meson + Turnip en `~/turnip`, varios GB) y carpetas de pruebas anteriores (`files/arch`, `files/glibc`, `files/glibcp`).
