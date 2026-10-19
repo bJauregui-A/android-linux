@@ -5,26 +5,36 @@
    (wl_shm).  El anfitrión muestra a pantalla completa el último xdg_toplevel
    mapeado: copia el buffer a una ANativeWindow (el SurfaceView de
    WaylandActivity) y le devuelve el tacto (gestos -> puntero y scroll) y el teclado
-   (códigos evdev; sin keymap: wlroots usa el de la config de sway).
+   (códigos evdev + keymap xkb latam de keymap.h; wlroots lo ignora y usa el
+   de la config de sway, los clientes directos lo usan).
 
-   Protocolos: wl_compositor, wl_shm, xdg_wm_base, wl_seat, wl_output.  Todo
+   Protocolos: wl_compositor, wl_shm, zwp_linux_dmabuf_v1 (v3, solo LINEAR:
+   el anfitrión lee el dmabuf por mmap), xdg_wm_base, wl_seat, wl_output.  Todo
    corre en un hilo propio (wl_display_run); lo que llega de Java pasa por una
    cola y un eventfd.  */
 
+#define _GNU_SOURCE
 #include <android/log.h>
 #include <android/native_window_jni.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <jni.h>
+#include <linux/dma-buf.h>
 #include <linux/input-event-codes.h>
+#include <poll.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/eventfd.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <time.h>
 #include <unistd.h>
 #include <wayland-server.h>
 
+#include "keymap.h"
+#include "linux-dmabuf-v1-server-protocol.h"
 #include "xdg-shell-server-protocol.h"
 
 #define LOG(...) __android_log_print (ANDROID_LOG_INFO, "WAYLAND", __VA_ARGS__)
@@ -47,12 +57,25 @@ static struct wl_list toplevels, punteros, teclados, salidas;
 static struct superficie *foco, *foco_puntero;
 static uint32_t mods;
 
-/* Ventana Android y último cuadro (RGBX), protegidos por mtx.  */
+/* Ventana Android y lo que se muestra en ella, protegidos por mtx.  La fuente
+   es el cuadro (copia de un buffer wl_shm) o el último dmabuf, que se retiene
+   (sin wl_buffer.release) para poder redibujar si la ventana se recrea.  */
 static pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER;
 static ANativeWindow *ventana;
 static int vent_w, vent_h, mm_w, mm_h;
 static uint32_t *cuadro;
 static int cuadro_w, cuadro_h;
+static struct
+{
+  const uint8_t *datos;
+  int stride, w, h;
+  bool bgra;	/* XRGB/ARGB de Wayland: BGRA en memoria */
+  int fd;	/* dmabuf (para DMA_BUF_IOCTL_SYNC) o -1 */
+} fuente = { .fd = -1 };
+
+/* HAL_PIXEL_FORMAT_BGRA_8888: no está en el NDK, pero gralloc lo acepta para
+   ventanas; evita convertir píxel a píxel los clientes XRGB/ARGB.  */
+#define VENTANA_BGRA 5
 
 /* Cola Java -> hilo del anfitrión.  */
 enum { EV_VENTANA, EV_MOVER, EV_BOTON, EV_EJE, EV_TECLA };
@@ -82,57 +105,30 @@ quitar_de_lista (struct wl_resource *r)
 
 /* ---------- dibujo ---------- */
 
-/* Copia el último cuadro a la ventana (con mtx tomado).  */
+/* Copia la fuente a la ventana (con mtx tomado): una pasada, memcpy por fila
+   si la ventana tiene el mismo orden de bytes.  */
 static void
 mostrar (void)
 {
-  if (ventana == NULL || cuadro == NULL)
+  if (ventana == NULL || fuente.datos == NULL)
     return;
-  ANativeWindow_setBuffersGeometry (ventana, cuadro_w, cuadro_h,
-				    WINDOW_FORMAT_RGBX_8888);
+  int formato = fuente.bgra ? VENTANA_BGRA : WINDOW_FORMAT_RGBX_8888;
+  if (ANativeWindow_setBuffersGeometry (ventana, fuente.w, fuente.h, formato) != 0)
+    ANativeWindow_setBuffersGeometry (ventana, fuente.w, fuente.h, WINDOW_FORMAT_RGBX_8888);
   ANativeWindow_Buffer out;
   if (ANativeWindow_lock (ventana, &out, NULL) != 0)
     return;
-  int w = out.width < cuadro_w ? out.width : cuadro_w;
-  int h = out.height < cuadro_h ? out.height : cuadro_h;
-  for (int y = 0; y < h; y++)
-    memcpy ((uint32_t *) out.bits + (size_t) y * out.stride,
-	    cuadro + (size_t) y * cuadro_w, (size_t) w * 4);
-  ANativeWindow_unlockAndPost (ventana);
-}
-
-/* Buffer wl_shm -> cuadro (los formatos XRGB/ARGB de Wayland son BGRA en
-   memoria; Android quiere RGBA).  */
-static void
-copiar_buffer (struct superficie *s, struct wl_shm_buffer *b)
-{
-  uint32_t fmt = wl_shm_buffer_get_format (b);
-  bool cambiar = fmt == WL_SHM_FORMAT_ARGB8888 || fmt == WL_SHM_FORMAT_XRGB8888;
-  if (!cambiar && fmt != WL_SHM_FORMAT_ABGR8888 && fmt != WL_SHM_FORMAT_XBGR8888)
-    {
-      LOG ("formato wl_shm no soportado: 0x%x", fmt);
-      return;
-    }
-  int w = wl_shm_buffer_get_width (b), h = wl_shm_buffer_get_height (b);
-  int stride = wl_shm_buffer_get_stride (b);
-  s->buf_w = w;
-  s->buf_h = h;
-
-  pthread_mutex_lock (&mtx);
-  if (cuadro == NULL || cuadro_w != w || cuadro_h != h)
-    {
-      free (cuadro);
-      cuadro = malloc ((size_t) w * h * 4);
-      cuadro_w = w;
-      cuadro_h = h;
-    }
-  wl_shm_buffer_begin_access (b);
-  const uint8_t *datos = wl_shm_buffer_get_data (b);
+  bool convertir = fuente.bgra && out.format != VENTANA_BGRA;
+  int w = out.width < fuente.w ? out.width : fuente.w;
+  int h = out.height < fuente.h ? out.height : fuente.h;
+  struct dma_buf_sync sync = { DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ };
+  if (fuente.fd >= 0)
+    ioctl (fuente.fd, DMA_BUF_IOCTL_SYNC, &sync);
   for (int y = 0; y < h; y++)
     {
-      const uint32_t *src = (const uint32_t *) (datos + (size_t) y * stride);
-      uint32_t *dst = cuadro + (size_t) y * w;
-      if (cambiar)
+      const uint32_t *src = (const uint32_t *) (fuente.datos + (size_t) y * fuente.stride);
+      uint32_t *dst = (uint32_t *) out.bits + (size_t) y * out.stride;
+      if (convertir)
 	for (int x = 0; x < w; x++)
 	  {
 	    uint32_t p = src[x];
@@ -142,9 +138,312 @@ copiar_buffer (struct superficie *s, struct wl_shm_buffer *b)
       else
 	memcpy (dst, src, (size_t) w * 4);
     }
-  wl_shm_buffer_end_access (b);
+  if (fuente.fd >= 0)
+    {
+      sync.flags = DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ;
+      ioctl (fuente.fd, DMA_BUF_IOCTL_SYNC, &sync);
+    }
+  ANativeWindow_unlockAndPost (ventana);
+}
+
+/* dmabuf retenido como fuente (ver más abajo).  */
+static struct wl_resource *retenido;
+
+static void
+soltar_retenido (void)
+{
+  if (retenido != NULL)
+    wl_buffer_send_release (retenido);
+  retenido = NULL;
+}
+
+/* Buffer wl_shm -> cuadro (el cliente puede reusarlo apenas se libera).  */
+static void
+copiar_pixeles (struct superficie *s, const uint8_t *datos, int stride, int w, int h,
+		bool bgra)
+{
+  s->buf_w = w;
+  s->buf_h = h;
+
+  pthread_mutex_lock (&mtx);
+  soltar_retenido ();
+  if (cuadro == NULL || cuadro_w != w || cuadro_h != h)
+    {
+      free (cuadro);
+      cuadro = malloc ((size_t) w * h * 4);
+      cuadro_w = w;
+      cuadro_h = h;
+    }
+  for (int y = 0; y < h; y++)
+    memcpy (cuadro + (size_t) y * w, datos + (size_t) y * stride, (size_t) w * 4);
+  fuente.datos = (const uint8_t *) cuadro;
+  fuente.stride = w * 4;
+  fuente.w = w;
+  fuente.h = h;
+  fuente.bgra = bgra;
+  fuente.fd = -1;
   mostrar ();
   pthread_mutex_unlock (&mtx);
+}
+
+static void
+copiar_shm (struct superficie *s, struct wl_shm_buffer *b)
+{
+  uint32_t fmt = wl_shm_buffer_get_format (b);
+  bool bgra = fmt == WL_SHM_FORMAT_ARGB8888 || fmt == WL_SHM_FORMAT_XRGB8888;
+  if (!bgra && fmt != WL_SHM_FORMAT_ABGR8888 && fmt != WL_SHM_FORMAT_XBGR8888)
+    {
+      LOG ("formato wl_shm no soportado: 0x%x", fmt);
+      return;
+    }
+  wl_shm_buffer_begin_access (b);
+  copiar_pixeles (s, wl_shm_buffer_get_data (b), wl_shm_buffer_get_stride (b),
+		  wl_shm_buffer_get_width (b), wl_shm_buffer_get_height (b), bgra);
+  wl_shm_buffer_end_access (b);
+}
+
+/* ---------- linux-dmabuf (v3) ----------
+   Los clientes Vulkan/GL (Turnip, Zink) mandan sus imágenes como dmabuf
+   (reservadas en /dev/dma_heap/system).  Solo LINEAR y un plano: el anfitrión
+   espera la fence implícita (poll), lo lee por mmap y lo copia como un shm.  */
+
+/* Códigos fourcc de DRM (drm_fourcc.h); coinciden con los de wl_shm salvo
+   ARGB/XRGB, que en wl_shm son 0 y 1.  */
+#define DRM_ARGB8888 0x34325241
+#define DRM_XRGB8888 0x34325258
+#define DRM_ABGR8888 0x34324241
+#define DRM_XBGR8888 0x34324258
+#define MOD_LINEAR 0ULL
+#define MOD_INVALID 0x00ffffffffffffffULL
+
+static const uint32_t formatos_dmabuf[] = {
+  DRM_ARGB8888, DRM_XRGB8888, DRM_ABGR8888, DRM_XBGR8888,
+};
+
+struct dmabuf
+{
+  struct wl_resource *res;
+  int fd;
+  uint32_t formato, offset, stride;
+  int32_t w, h;
+  uint64_t modificador;
+  void *mapa;
+  size_t tam_mapa;
+};
+
+static const struct wl_buffer_interface dmabuf_buffer_impl = {
+  .destroy = destruir_recurso,
+};
+
+static void
+dmabuf_destruido (struct wl_resource *r)
+{
+  struct dmabuf *d = wl_resource_get_user_data (r);
+  if (d == NULL)
+    return;
+  pthread_mutex_lock (&mtx);
+  if (retenido == r)
+    {
+      retenido = NULL;
+      fuente.datos = NULL;	/* la ventana conserva el último cuadro mostrado */
+      fuente.fd = -1;
+    }
+  pthread_mutex_unlock (&mtx);
+  if (d->mapa != NULL)
+    munmap (d->mapa, d->tam_mapa);
+  if (d->fd >= 0)
+    close (d->fd);
+  free (d);
+}
+
+static struct dmabuf *
+dmabuf_de (struct wl_resource *buffer)
+{
+  if (!wl_resource_instance_of (buffer, &wl_buffer_interface, &dmabuf_buffer_impl))
+    return NULL;
+  return wl_resource_get_user_data (buffer);
+}
+
+/* Muestra el dmabuf leyéndolo directo (una sola copia, a la ventana) y lo
+   retiene hasta que llegue otro: se libera el anterior.  */
+static void
+mostrar_dmabuf (struct superficie *s, struct dmabuf *d)
+{
+  if (d->mapa == NULL)
+    {
+      d->tam_mapa = (size_t) d->offset + (size_t) d->stride * d->h;
+      d->mapa = mmap (NULL, d->tam_mapa, PROT_READ, MAP_SHARED, d->fd, 0);
+      if (d->mapa == MAP_FAILED)
+	{
+	  LOG ("mmap del dmabuf: %s", strerror (errno));
+	  d->mapa = NULL;
+	  wl_buffer_send_release (d->res);
+	  return;
+	}
+    }
+  /* Sincronización implícita: la WSI de Mesa le pega al dmabuf la fence del
+     render; POLLIN = ya se puede leer.  */
+  struct pollfd pfd = { d->fd, POLLIN, 0 };
+  poll (&pfd, 1, 100);
+  s->buf_w = d->w;
+  s->buf_h = d->h;
+  pthread_mutex_lock (&mtx);
+  fuente.datos = (const uint8_t *) d->mapa + d->offset;
+  fuente.stride = d->stride;
+  fuente.w = d->w;
+  fuente.h = d->h;
+  fuente.bgra = d->formato == DRM_ARGB8888 || d->formato == DRM_XRGB8888;
+  fuente.fd = d->fd;
+  mostrar ();
+  if (retenido != d->res)
+    soltar_retenido ();
+  retenido = d->res;
+  pthread_mutex_unlock (&mtx);
+}
+
+/* zwp_linux_buffer_params_v1: junta el plano 0 y arma el wl_buffer.  */
+static void
+params_add (struct wl_client *c, struct wl_resource *r, int32_t fd, uint32_t plano,
+	    uint32_t offset, uint32_t stride, uint32_t mod_hi, uint32_t mod_lo)
+{
+  struct dmabuf *d = wl_resource_get_user_data (r);
+  if (d == NULL)
+    {
+      close (fd);
+      wl_resource_post_error (r, ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_ALREADY_USED,
+			      "params ya usados");
+      return;
+    }
+  if (plano != 0 || d->fd >= 0)
+    {
+      close (fd);
+      wl_resource_post_error (r, ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_PLANE_IDX,
+			      "solo se admite un plano");
+      return;
+    }
+  d->fd = fd;
+  d->offset = offset;
+  d->stride = stride;
+  d->modificador = ((uint64_t) mod_hi << 32) | mod_lo;
+}
+
+static struct wl_resource *
+params_crear_buffer (struct wl_client *c, struct wl_resource *r, uint32_t id,
+		     int32_t w, int32_t h, uint32_t formato)
+{
+  struct dmabuf *d = wl_resource_get_user_data (r);
+  if (d == NULL)
+    {
+      wl_resource_post_error (r, ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_ALREADY_USED,
+			      "params ya usados");
+      return NULL;
+    }
+  wl_resource_set_user_data (r, NULL);
+  bool formato_ok = false;
+  for (size_t i = 0; i < sizeof formatos_dmabuf / sizeof *formatos_dmabuf; i++)
+    formato_ok |= formatos_dmabuf[i] == formato;
+  if (d->fd < 0 || w <= 0 || h <= 0 || d->stride < (uint32_t) w * 4 || !formato_ok
+      || (d->modificador != MOD_LINEAR && d->modificador != MOD_INVALID))
+    {
+      LOG ("dmabuf rechazado: %dx%d formato 0x%x stride %u modificador 0x%llx",
+	   w, h, formato, d->stride, (unsigned long long) d->modificador);
+      if (d->fd >= 0)
+	close (d->fd);
+      free (d);
+      return NULL;
+    }
+  d->w = w;
+  d->h = h;
+  d->formato = formato;
+  struct wl_resource *b = wl_resource_create (c, &wl_buffer_interface, 1, id);
+  if (b == NULL)
+    {
+      close (d->fd);
+      free (d);
+      wl_client_post_no_memory (c);
+      return NULL;
+    }
+  d->res = b;
+  wl_resource_set_implementation (b, &dmabuf_buffer_impl, d, dmabuf_destruido);
+  return b;
+}
+
+static void
+params_create (struct wl_client *c, struct wl_resource *r, int32_t w, int32_t h,
+	       uint32_t formato, uint32_t flags)
+{
+  struct wl_resource *b = params_crear_buffer (c, r, 0, w, h, formato);
+  if (b != NULL)
+    zwp_linux_buffer_params_v1_send_created (r, b);
+  else
+    zwp_linux_buffer_params_v1_send_failed (r);
+}
+
+static void
+params_create_immed (struct wl_client *c, struct wl_resource *r, uint32_t id,
+		     int32_t w, int32_t h, uint32_t formato, uint32_t flags)
+{
+  if (params_crear_buffer (c, r, id, w, h, formato) == NULL)
+    wl_resource_post_error (r, ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INVALID_WL_BUFFER,
+			    "dmabuf no admitido");
+}
+
+static const struct zwp_linux_buffer_params_v1_interface params_impl = {
+  .destroy = destruir_recurso,
+  .add = params_add,
+  .create = params_create,
+  .create_immed = params_create_immed,
+};
+
+static void
+params_destruidos (struct wl_resource *r)
+{
+  struct dmabuf *d = wl_resource_get_user_data (r);
+  if (d == NULL)
+    return;
+  if (d->fd >= 0)
+    close (d->fd);
+  free (d);
+}
+
+static void
+dmabuf_create_params (struct wl_client *c, struct wl_resource *r, uint32_t id)
+{
+  struct dmabuf *d = calloc (1, sizeof *d);
+  struct wl_resource *p = wl_resource_create (c, &zwp_linux_buffer_params_v1_interface,
+					      wl_resource_get_version (r), id);
+  if (d == NULL || p == NULL)
+    {
+      free (d);
+      wl_client_post_no_memory (c);
+      return;
+    }
+  d->fd = -1;
+  wl_resource_set_implementation (p, &params_impl, d, params_destruidos);
+}
+
+static const struct zwp_linux_dmabuf_v1_interface linux_dmabuf_impl = {
+  .destroy = destruir_recurso,
+  .create_params = dmabuf_create_params,
+};
+
+static void
+linux_dmabuf_bind (struct wl_client *c, void *data, uint32_t version, uint32_t id)
+{
+  struct wl_resource *r = wl_resource_create (c, &zwp_linux_dmabuf_v1_interface, version, id);
+  if (r == NULL)
+    {
+      wl_client_post_no_memory (c);
+      return;
+    }
+  wl_resource_set_implementation (r, &linux_dmabuf_impl, NULL, NULL);
+  for (size_t i = 0; i < sizeof formatos_dmabuf / sizeof *formatos_dmabuf; i++)
+    {
+      zwp_linux_dmabuf_v1_send_format (r, formatos_dmabuf[i]);
+      if (version >= ZWP_LINUX_DMABUF_V1_MODIFIER_SINCE_VERSION)
+	zwp_linux_dmabuf_v1_send_modifier (r, formatos_dmabuf[i], MOD_LINEAR >> 32,
+					   MOD_LINEAR & 0xffffffff);
+    }
 }
 
 /* ---------- foco ---------- */
@@ -290,9 +589,13 @@ surface_commit (struct wl_client *c, struct wl_resource *r)
 	      wl_list_insert (toplevels.prev, &s->link);
 	      elegir_foco ();
 	    }
+	  struct dmabuf *dmabuf = shm == NULL ? dmabuf_de (buffer) : NULL;
 	  if (shm != NULL && s == foco)
-	    copiar_buffer (s, shm);
-	  wl_buffer_send_release (buffer);
+	    copiar_shm (s, shm);
+	  if (dmabuf != NULL && s == foco)
+	    mostrar_dmabuf (s, dmabuf);	/* lo libera al llegar el siguiente */
+	  else
+	    wl_buffer_send_release (buffer);
 	}
     }
   else if (s->toplevel != NULL && !s->configurado)
@@ -631,10 +934,17 @@ seat_get_keyboard (struct wl_client *c, struct wl_resource *r, uint32_t id)
     }
   wl_resource_set_implementation (k, &keyboard_impl, NULL, quitar_de_lista);
   wl_list_insert (&teclados, wl_resource_get_link (k));
-  /* Sin keymap: el cliente (wlroots) usa el suyo con códigos evdev.  */
-  int fd = open ("/dev/null", O_RDONLY | O_CLOEXEC);
-  wl_keyboard_send_keymap (k, WL_KEYBOARD_KEYMAP_FORMAT_NO_KEYMAP, fd, 0);
-  close (fd);
+  /* El keymap va en un memfd sellado: el cliente lo mapea de solo lectura.  */
+  int fd = memfd_create ("keymap", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+  if (fd >= 0 && write (fd, keymap_xkb, sizeof keymap_xkb) == sizeof keymap_xkb)
+    {
+      fcntl (fd, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE | F_SEAL_SEAL);
+      wl_keyboard_send_keymap (k, WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1, fd, sizeof keymap_xkb);
+    }
+  else
+    LOG ("no se pudo armar el keymap");
+  if (fd >= 0)
+    close (fd);
   if (wl_resource_get_version (k) >= WL_KEYBOARD_REPEAT_INFO_SINCE_VERSION)
     wl_keyboard_send_repeat_info (k, 25, 600);
   if (foco != NULL && wl_resource_get_client (foco->res) == c)
@@ -956,6 +1266,7 @@ Java_dev_ben4shot_glibcprueba_Wayland_iniciar (JNIEnv *env, jclass cls, jstring 
   wl_global_create (display, &xdg_wm_base_interface, 2, NULL, wm_base_bind);
   wl_global_create (display, &wl_seat_interface, 7, NULL, seat_bind);
   wl_global_create (display, &wl_output_interface, 4, NULL, output_bind);
+  wl_global_create (display, &zwp_linux_dmabuf_v1_interface, 3, NULL, linux_dmabuf_bind);
 
   evfd = eventfd (0, EFD_CLOEXEC | EFD_NONBLOCK);
   wl_event_loop_add_fd (wl_display_get_event_loop (display), evfd,

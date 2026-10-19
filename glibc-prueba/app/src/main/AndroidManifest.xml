@@ -11,7 +11,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
-        android:label="glibc prueba">
+        android:label="Arch Linux">
         <!-- Pruebas por ADB (scripts/correr.sh la abre por nombre) -->
         <activity
             android:name=".MainActivity"
@@ -21,20 +21,19 @@
             android:name=".TerminalActivity"
             android:exported="true"
             android:label="Terminal Arch"
+            android:taskAffinity=".terminal"
             android:theme="@android:style/Theme.Material.NoActionBar"
             android:windowSoftInputMode="adjustResize"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density"
-            android:launchMode="singleTask">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+            android:launchMode="singleTask" />
+
+        <!-- Único ícono: el escritorio (arranca sway solo). La terminal va en el
+             atajo de mantener pulsado el ícono, y dentro de sway con foot. -->
 
         <activity
             android:name=".WaylandActivity"
             android:exported="true"
-            android:label="Wayland Arch"
+            android:label="Arch Linux"
             android:theme="@android:style/Theme.Material.NoActionBar"
             android:windowSoftInputMode="adjustResize"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density"
@@ -51,7 +50,7 @@
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Terminal: mantiene vivos los procesos Linux del usuario" />
+                android:value="Mantiene vivos los procesos Linux del usuario (sway, terminal)" />
         </service>
     </application>
 

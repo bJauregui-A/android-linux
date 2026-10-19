@@ -53,9 +53,11 @@ if [ ! -f "$OUT/lib/libwayland-server.a" ]; then
     -Dlibraries=true -Dscanner=false -Dtests=false -Ddocumentation=false -Ddtd_validation=false
   ninja -C build/wl install
 fi
-# Código de servidor de los protocolos extra (xdg-shell)
+# Código de servidor de los protocolos extra (xdg-shell, linux-dmabuf)
 mkdir -p "$OUT/proto"
-XDG=/usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml
-wayland-scanner server-header $XDG "$OUT/proto/xdg-shell-server-protocol.h"
-wayland-scanner private-code $XDG "$OUT/proto/xdg-shell-protocol.c"
+for X in stable/xdg-shell/xdg-shell stable/linux-dmabuf/linux-dmabuf-v1; do
+  N=$(basename $X)
+  wayland-scanner server-header /usr/share/wayland-protocols/$X.xml "$OUT/proto/$N-server-protocol.h"
+  wayland-scanner private-code /usr/share/wayland-protocols/$X.xml "$OUT/proto/$N-protocol.c"
+done
 ls -la "$OUT/lib/"*.a "$OUT/proto"

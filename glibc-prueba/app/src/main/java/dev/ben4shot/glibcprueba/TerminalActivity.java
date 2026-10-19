@@ -131,10 +131,10 @@ public class TerminalActivity extends Activity implements TerminalViewClient {
         botonAlt.setBackgroundColor(alt ? 0xff3d6aa5 : 0);
     }
 
-    // Enter con la sesión terminada cierra la terminal y el servicio.
+    // Enter con la sesión terminada cierra la terminal (y el servicio si no queda sway).
     private boolean cerrarSiTermino(TerminalSession s) {
         if (s == null || s.isRunning()) return false;
-        if (servicio != null) servicio.terminar();
+        if (servicio != null) servicio.cerrarSesion();
         finish();
         return true;
     }

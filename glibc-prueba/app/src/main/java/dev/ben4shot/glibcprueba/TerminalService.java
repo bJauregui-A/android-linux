@@ -26,16 +26,19 @@ import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.List;
 
-// Servicio en primer plano dueño de la sesión de bash: la activity se puede cerrar
-// (o girar) sin que Android mate los procesos glibc.
+// Servicio en primer plano dueño de los procesos Linux (sway y la sesión de bash):
+// las activities se pueden cerrar (o girar) sin que Android mate los procesos glibc.
 public class TerminalService extends Service implements TerminalSessionClient {
     private static final String TAG = "TERMINAL";
     private static final String CANAL = "terminal";
     static final String PREFIJO = "archlinux";
+    // WaylandActivity lo manda al abrirse: arrancar sway si no está corriendo
+    static final String SWAY = "dev.ben4shot.glibcprueba.SWAY";
 
     private final IBinder binder = new Local();
     private TerminalSession sesion;
     private TerminalView vista; // la de la activity visible, o null
+    private Process sway;
 
     class Local extends Binder {
         TerminalService servicio() { return TerminalService.this; }
@@ -49,22 +52,24 @@ public class TerminalService extends Service implements TerminalSessionClient {
         NotificationManager nm = getSystemService(NotificationManager.class);
         nm.createNotificationChannel(new NotificationChannel(CANAL, "Terminal", NotificationManager.IMPORTANCE_LOW));
         PendingIntent abrir = PendingIntent.getActivity(this, 0,
-                new Intent(this, TerminalActivity.class), PendingIntent.FLAG_IMMUTABLE);
+                new Intent(this, WaylandActivity.class), PendingIntent.FLAG_IMMUTABLE);
         Notification n = new Notification.Builder(this, CANAL)
                 .setSmallIcon(android.R.drawable.ic_menu_manage)
-                .setContentTitle("Terminal Arch")
-                .setContentText("bash corriendo")
+                .setContentTitle("Arch Linux")
+                .setContentText("procesos Linux corriendo")
                 .setContentIntent(abrir)
                 .setOngoing(true)
                 .build();
         if (Build.VERSION.SDK_INT >= 34) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
         else startForeground(1, n);
+        if (intent != null && SWAY.equals(intent.getAction())) iniciarSway();
         return START_NOT_STICKY;
     }
 
     @Override
     public void onDestroy() {
         if (sesion != null) sesion.finishIfRunning();
+        if (sway != null) sway.destroy();
         super.onDestroy();
     }
 
@@ -78,6 +83,19 @@ public class TerminalService extends Service implements TerminalSessionClient {
         if (sesion != null) sesion.updateTerminalSessionClient(this);
     }
 
+    // La próxima vez que se abra la terminal arranca un bash nuevo.
+    void cerrarSesion() {
+        sesion = null;
+        terminarSiNoQuedaNada();
+    }
+
+    // Sin sway ni bash no queda nada que cuidar.
+    private void terminarSiNoQuedaNada() {
+        boolean bash = sesion != null && sesion.isRunning();
+        boolean escritorio = sway != null && sway.isAlive();
+        if (!bash && !escritorio) terminar();
+    }
+
     void terminar() {
         stopForeground(STOP_FOREGROUND_REMOVE);
         stopSelf();
@@ -87,12 +105,59 @@ public class TerminalService extends Service implements TerminalSessionClient {
     // (el pty lo abre libtermux.so, que es bionic), el resto ya va dentro del prefijo.
     private TerminalSession crearSesion() {
         File prefijo = new File(getFilesDir(), PREFIJO);
-        String cargador = getApplicationInfo().nativeLibraryDir + "/libldp.so";
         if (!new File(prefijo, "usr/bin/bash").exists()) {
             String msg = "falta " + prefijo + " (instalar con scripts/instalar-arch.sh)";
             return new TerminalSession("/system/bin/sh", getFilesDir().getAbsolutePath(),
                     new String[]{"sh", "-c", "echo '" + msg + "'"}, new String[0], 2000, this);
         }
+        String cargador = cargador();
+        List<String> env = entorno(prefijo, cargador);
+        String[] args = {"libldp.so", "/usr/bin/bash", "-l"};
+        Log.i(TAG, "sesión: " + cargador + " /usr/bin/bash -l, prefijo " + prefijo);
+        return new TerminalSession(cargador, new File(prefijo, "home/user").getAbsolutePath(), args,
+                env.toArray(new String[0]), 5000, this);
+    }
+
+    // sway en segundo plano (bash -l para tomar /etc/profile), log en /tmp/sway.log.
+    synchronized void iniciarSway() {
+        if (sway != null && sway.isAlive()) return;
+        File prefijo = new File(getFilesDir(), PREFIJO);
+        if (!new File(prefijo, "usr/bin/sway").exists()) {
+            Log.e(TAG, "falta sway en " + prefijo);
+            return;
+        }
+        String cargador = cargador();
+        ProcessBuilder pb = new ProcessBuilder(cargador, "/usr/bin/bash", "-lc",
+                "exec sway > /tmp/sway.log 2>&1");
+        pb.directory(new File(prefijo, "home/user"));
+        pb.environment().clear();
+        for (String v : entorno(prefijo, cargador)) {
+            int i = v.indexOf('=');
+            pb.environment().put(v.substring(0, i), v.substring(i + 1));
+        }
+        try {
+            Process p = pb.start();
+            sway = p;
+            Log.i(TAG, "sway iniciado");
+            new Thread(() -> {
+                try {
+                    Log.i(TAG, "sway terminó: " + p.waitFor());
+                } catch (InterruptedException ignorada) {
+                    return;
+                }
+                new android.os.Handler(getMainLooper()).post(this::terminarSiNoQuedaNada);
+            }, "sway").start();
+        } catch (java.io.IOException e) {
+            Log.e(TAG, "sway", e);
+        }
+    }
+
+    private String cargador() {
+        return getApplicationInfo().nativeLibraryDir + "/libldp.so";
+    }
+
+    // Entorno de los procesos Linux; de paso deja listo el prefijo (DNS, sudo, Wayland).
+    private List<String> entorno(File prefijo, String cargador) {
         File home = new File(prefijo, "home/user");
         home.mkdirs();
         // shm_open de glibc usa /dev/shm (traducido al prefijo): wlroots, foot...
@@ -100,7 +165,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
         escribirResolvConf(prefijo);
         escribirSudo(prefijo);
         Wayland.iniciar(this);
-        String[] env = {
+        List<String> env = new ArrayList<>(List.of(
                 "GLIBC_PREFIX=" + prefijo,
                 "GLIBC_LOADER=" + cargador,
                 "HOME=/home/user",
@@ -120,10 +185,12 @@ public class TerminalService extends Service implements TerminalSessionClient {
                 // sin dmabuf (dma_heap bloqueado), el cuadro sale por wl_shm
                 "VK_ICD_FILENAMES=/home/user/turnip/share/vulkan/icd.d/freedreno_icd.aarch64.json",
                 "MESA_VK_WSI_DEBUG=sw",
-        };
-        String[] args = {"libldp.so", "/usr/bin/bash", "-l"};
-        Log.i(TAG, "sesión: " + cargador + " /usr/bin/bash -l, prefijo " + prefijo);
-        return new TerminalSession(cargador, home.getAbsolutePath(), args, env, 5000, this);
+                // OpenGL: Zink (mesa de Arch) sobre Turnip
+                "MESA_LOADER_DRIVER_OVERRIDE=zink"));
+        // EGL en Wayland sin dmabuf: Zink + kopper por wl_shm (turnip/egl-zink.c)
+        if (new File(home, "turnip/lib/libegl-zink.so").exists())
+            env.add("LD_PRELOAD=/home/user/turnip/lib/libegl-zink.so");
+        return env;
     }
 
     // DNS de la red activa de Android; 1.1.1.1 de respaldo (glibc usa hasta 3).
@@ -176,7 +243,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
     @Override
     public void onSessionFinished(TerminalSession s) {
         if (vista != null) vista.onScreenUpdated();
-        else terminar();
+        else terminarSiNoQuedaNada();
     }
 
     @Override

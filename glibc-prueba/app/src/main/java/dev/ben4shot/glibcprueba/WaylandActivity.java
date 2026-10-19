@@ -1,6 +1,10 @@
 package dev.ben4shot.glibcprueba;
 
 import android.app.Activity;
+import android.content.Intent;
+import android.content.pm.ShortcutInfo;
+import android.content.pm.ShortcutManager;
+import android.graphics.drawable.Icon;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.os.Bundle;
@@ -24,6 +28,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import java.text.Normalizer;
+import java.util.List;
 
 // Pantalla Wayland: SurfaceView donde el anfitrión dibuja la ventana Linux.
 // Tacto: toque = clic, arrastrar = clic sostenido, mantener = clic derecho,
@@ -95,6 +100,9 @@ public class WaylandActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         Wayland.iniciar(this);
+        // El escritorio arranca solo: el servicio lanza sway si no está corriendo
+        startForegroundService(new Intent(this, TerminalService.class).setAction(TerminalService.SWAY));
+        atajoTerminal();
 
         vista = new SurfaceView(this) {
             @Override
@@ -411,5 +419,15 @@ public class WaylandActivity extends Activity {
         if (e.isCtrlPressed()) Wayland.tecla(CTRL, pulsar);
         if (e.isAltPressed()) Wayland.tecla(ALT, pulsar);
         if (e.isMetaPressed()) Wayland.tecla(SUPER, pulsar);
+    }
+
+    // Mantener pulsado el ícono -> "Terminal": rescate si sway no arranca.
+    private void atajoTerminal() {
+        ShortcutInfo atajo = new ShortcutInfo.Builder(this, "terminal")
+                .setShortLabel("Terminal")
+                .setIcon(Icon.createWithResource(this, android.R.drawable.ic_menu_manage))
+                .setIntent(new Intent(Intent.ACTION_MAIN).setClass(this, TerminalActivity.class))
+                .build();
+        getSystemService(ShortcutManager.class).setDynamicShortcuts(List.of(atajo));
     }
 }

@@ -52,8 +52,9 @@ Pendiente / ideas:
 Objetivo principal: que el teléfono sea a la vez Android y un Linux real y modificable — programas de Arch Linux ARM sin recompilar,
 nativos (glibc propia en una app, sin root ni proot), con escritorio Wayland mínimo tipo Hyprland adaptado al celular y GPU (Turnip),
 sin perder apps bancarias/Play Store y todo reversible.
-Estado al cerrar la 2ª sesión (2026-10-19): ✅ pacman, ✅ terminal ("Terminal Arch"), ✅ Wayland con sway anidado ("Wayland Arch"),
-✅ Vulkan con Turnip (vkcube en la Adreno 619). **Siguiente: Zink (OpenGL); pendientes en orden en PROYECTO.md → "Para retomar".**
+Estado al cerrar la 2ª sesión (2026-10-19): ✅ pacman, ✅ terminal, ✅ Wayland con sway anidado,
+✅ Vulkan con Turnip (vkcube en la Adreno 619). 3ª sesión: ✅ OpenGL 4.6 / GLES 3.2 por GPU (Zink sobre Turnip) en ventanas Wayland; un solo ícono "Arch Linux" que abre sway directo (terminal de rescate: mantener pulsado el ícono).
+**Siguiente: cero copias (AHardwareBuffer + ASurfaceControl); pendientes en orden en PROYECTO.md → "Para retomar".**
 Root temporal descartado: lo necesario vive en particiones verificadas, y desbloquear/bloquear borra `/data`.
 
 Probado en el teléfono (glibc 2.43, bash 5.3, coreutils 9.12 de Arch ARM):
@@ -80,8 +81,10 @@ Siguiente:
 - [x] DNS de Android → `/etc/resolv.conf` (lo escribe la terminal al abrir)
 - [x] Compositor Wayland propio en la app (`app/src/main/cpp/anfitrion.c`) + sway anidado; tacto/scroll/teclado latam (2026-10-19)
 - [x] Turnip (Adreno 619, KGSL) compilado dentro del teléfono; vkcube ✅ (2026-10-19)
-- [ ] **← siguiente:** Zink (OpenGL sobre Turnip)
-- [ ] Sin copia por CPU (AHardwareBuffer/dmabuf), escritorio por GPU (Hyprland), popups/portapapeles, Xwayland, Steam
+- [x] Zink (OpenGL sobre Turnip) con el mesa de Arch, sin recompilar; `turnip/egl-zink.c` (LD_PRELOAD) para que EGL use kopper por wl_shm (2026-10-19)
+- [x] Keymap xkb real (latam) para clientes conectados directo al anfitrión (2026-10-19)
+- [x] dmabuf: el anfitrión implementa linux-dmabuf; Turnip compilado con `kgsl,msm` (si no, sin dmabuf en la WSI). El cliente ya no copia; el anfitrión aún lee por CPU (2026-10-19)
+- [ ] **← siguiente:** cero copias (AHardwareBuffer + ASurfaceControl), escritorio por GPU; resto: sin copia por CPU (AHardwareBuffer/dmabuf), escritorio por GPU (Hyprland), popups/portapapeles, Xwayland, Steam
 - [ ] Binarios estáticos (ej. `ldconfig`): cargarlos en espacio de usuario desde `execve`
 
 En el teléfono: app sdk36 con `files/archlinux` (Arch + pacman + sway/foot + gcc/meson + Turnip en `~/turnip`, varios GB) y carpetas de pruebas anteriores (`files/arch`, `files/glibc`, `files/glibcp`).
