@@ -937,6 +937,10 @@ surface_commit (struct wl_client *c, struct wl_resource *r)
 	      wl_list_remove (&s->link);
 	      wl_list_insert (toplevels.prev, &s->link);
 	      elegir_foco ();
+	      /* El backend wayland de wlroots ignora el tamaño del configure que
+		 llega mientras activa la salida: sin otro, sway se quedaba en
+		 1280×720 (estirado) hasta que la ventana cambiara de tamaño.  */
+	      enviar_configure (s);
 	    }
 	  struct dmabuf *dmabuf = shm == NULL ? dmabuf_de (buffer) : NULL;
 	  struct ahb *ahb = shm == NULL && dmabuf == NULL ? ahb_de (buffer) : NULL;

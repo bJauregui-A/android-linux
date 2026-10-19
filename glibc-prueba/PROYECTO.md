@@ -23,7 +23,8 @@ Que el teléfono (Redmi 15 5G, HyperOS, **sin root**) sea a la vez Android y un 
 - **`vkcube` a secas y `vulkaninfo` fallan** ("zero accessible devices"): activan `VK_KHR_display` y `tu_knl_kgsl_load` devuelve `VK_ERROR_INITIALIZATION_FAILED` ("I can't KHR_display"). Usar `vkcube --wsi wayland`. Pendiente menor: parche a Turnip para ignorarlo en vez de fallar.
 - Desde `run-as` Turnip no ve la GPU: lanzar programas gráficos por `swaymsg exec` (ojo: la coma separa comandos de sway).
 - Confirmado por el usuario: escala 2.5 ✅, opacidad ✅, SUPER+A ✅, SUPER+TAB ✅, scroll de 2 dedos ✅, ñ/tildes desde el teclado de Android ✅. Clic derecho: sin probar.
-- **Barra de navegación** (3 botones, `navigation_mode 0`): el usuario dice que la inferior siempre se ve (la superior se esconde bien). Con el teclado de Android abierto es normal (Android la fuerza); falta ver si sigue con el teclado cerrado.
+- Barra de navegación (3 botones, `navigation_mode 0`): solo se ve con el teclado de Android abierto (Android la fuerza); con el teclado cerrado se esconde ✅.
+- ✅ **Estirado en la primera apertura**: en frío la ventana ya existe cuando sway se conecta y el único configure con el tamaño real llega mientras wlroots activa la salida, que lo ignora (`xdg_surface_handle_configure`: `if (!wlr_output.enabled) return`) → sway quedaba en 1280×720 (waybar "width: 512") aplastado a 1080 px hasta cerrar/abrir el teclado. Ahora el anfitrión reenvía el configure cuando el toplevel se mapea (primer buffer). Probado en 3 aperturas en frío: "width: 432" desde el inicio.
 
 **8ª sesión (2026-10-19), cerrada: ✅ portapapeles Android ↔ Linux, probado por el usuario en los dos sentidos.** El cursor está bien así (no tocar).
 - **Por qué no en el anfitrión**: el backend wayland de wlroots no reenvía el portapapeles al compositor padre (no usa `wl_data_device`), así que un `wl_data_device_manager` en `anfitrion.c` no le serviría a sway. El puente va **dentro de sway** con wl-clipboard (protocolo data-control, sin foco): `Portapapeles.java`.
@@ -46,7 +47,7 @@ Que el teléfono (Redmi 15 5G, HyperOS, **sin root**) sea a la vez Android y un 
 **Empezar la próxima sesión por** (en orden; el usuario eligió escritorio cómodo primero y luego compatibilidad):
 1. **Ojo: el usuario suele estar usando el teléfono.** `scripts/correr.sh`, `correr-wl.sh` y `adb install -r` cierran sway y todo lo abierto: avisar antes. Para mirar sin cerrar nada: `adb exec-out screencap -p` y `adb shell "run-as dev.ben4shot.glibcprueba.sdk36 cat files/archlinux/tmp/sway.log"`.
 2. ~~Cursor más grande~~: el usuario dice que está bien. ~~Portapapeles Android ↔ Linux~~ ✅ (8ª sesión).
-3. ~~¿sway se bloquea en segundo plano?~~ No (9ª sesión); frame callbacks sin ventana ✅. Ver la barra de navegación inferior con el teclado cerrado.
+3. ~~¿sway se bloquea en segundo plano?~~ No (9ª sesión); frame callbacks sin ventana ✅; estirado al abrir ✅; barra inferior solo con teclado (normal).
 4. **Popups xdg y `wl_subcompositor`** en el anfitrión (solo clientes directos, sin sway en medio).
 5. ~~Escala y opacidad~~: el usuario dice que están bien.
 6. Luego lo grande de "Compatibilidad completa" (abajo): capa seccomp para Go/estáticos, audio, Xwayland.

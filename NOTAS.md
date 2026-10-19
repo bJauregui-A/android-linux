@@ -65,8 +65,8 @@ Cambios hechos en el teléfono por ADB (reversibles): gestos de 3 dedos de Hyper
 y límite de procesos hijos de Android desactivado (`settings put global settings_enable_monitor_phantom_procs false`, volver con `settings delete ...`).
 8ª sesión: ✅ portapapeles Android ↔ Linux en los dos sentidos (`Portapapeles.java`: wl-paste --watch / wl-copy dentro de sway; Android solo deja leer con el escritorio al frente). Cursor: está bien así.
 SUPER+V (historial con cliphist) no anda: cliphist es Go y se salta la glibc → llega con la capa seccomp.
-9ª sesión: sway no se bloquea en segundo plano; ✅ sin ventana el anfitrión ya no responde frame callbacks (sway con vkcube atrás: 2,7 s de CPU cada 5 s → 0). `vkcube` necesita `--wsi wayland`.
-**Siguiente: barra de navegación inferior (¿se ve con el teclado cerrado?), popups xdg / `wl_subcompositor`, escala; después compatibilidad: Go/estáticos (seccomp, arregla también SUPER+V), audio, Xwayland.
+9ª sesión: sway no se bloquea en segundo plano; ✅ sin ventana el anfitrión ya no responde frame callbacks (sway con vkcube atrás: 2,7 s de CPU cada 5 s → 0). ✅ ya no se ve estirado en la primera apertura. `vkcube` necesita `--wsi wayland`.
+**Siguiente: popups xdg / `wl_subcompositor`, escala; después compatibilidad: Go/estáticos (seccomp, arregla también SUPER+V), audio, Xwayland.
 Avisar antes de correr scripts que cierran la app (force-stop): el usuario suele estar usándola.**
 Root temporal descartado: lo necesario vive en particiones verificadas, y desbloquear/bloquear borra `/data`.
 
