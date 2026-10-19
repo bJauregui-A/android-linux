@@ -67,6 +67,8 @@ y límite de procesos hijos de Android desactivado (`settings put global setting
 SUPER+V (historial con cliphist) no anda: cliphist es Go y se salta la glibc → llega con la capa seccomp.
 9ª sesión: sway no se bloquea en segundo plano; ✅ sin ventana el anfitrión ya no responde frame callbacks (sway con vkcube atrás: 2,7 s de CPU cada 5 s → 0). ✅ ya no se ve estirado en la primera apertura. `vkcube` necesita `--wsi wayland` (parche a Turnip: pendiente menor). El usuario confirmó escala, opacidad, SUPER+A/TAB, scroll, ñ/tildes; falta el clic derecho.
 10ª sesión: ✅ **menús/popups GTK funcionan dentro de sway** (probado con gtk3-widget-factory). Las apps GTK se caían al cargar el primer ícono: glycin (gdk-pixbuf) aísla los cargadores con bwrap, que aquí falla → `GLYCIN_DISABLE_SANDBOX=i-know-the-risks` en el entorno de `TerminalService` (aplica al reinstalar la app). Popups en el anfitrión pasan a menor (solo clientes directos, que hoy no se usan).
+✅ **Ventanas que no caben se achican en vez de recortarse** (gtk3-widget-factory pide mínimo 1393×740 y la pantalla tiene 432 de ancho lógico): parche propio a wlroots (`0004`, escala de contenido en la escena) y **sway compilado con parche propio** (`sway/parches/0001`, `~/sway/bin/sway`, lo arranca `TerminalService`). Probado: se ve completa, clics y menús caen bien. Los diálogos (fuentes, archivos) ya flotaban solos (el usuario lo confirmó).
+**Pendiente a decidir con el usuario:** que la ventana *principal* que no cabe pase sola a flotante (achicada y centrada encima) en vez de partir la pantalla en mosaico. El usuario lo pidió y luego frenó; preguntar si sigue (plan en PROYECTO.md, 10ª sesión).
 **Siguiente: compatibilidad: Go/estáticos (seccomp, arregla también SUPER+V), audio, Xwayland.
 Avisar antes de correr scripts que cierran la app (force-stop): el usuario suele estar usándola.**
 Root temporal descartado: lo necesario vive en particiones verificadas, y desbloquear/bloquear borra `/data`.
@@ -104,6 +106,8 @@ Siguiente:
 - [x] Portapapeles Android ↔ Linux (2026-10-19, 8ª sesión)
 - [x] sway en segundo plano: no se bloquea; frame callbacks sin ventana arreglados (2026-10-19, 9ª sesión)
 - [x] menús GTK dentro de sway: funcionan; apps GTK ya no se caen (glycin sin bwrap) (2026-10-19, 10ª sesión)
+- [x] sway parchado: ventanas que no caben se achican (wlroots 0004 + sway 0001) (2026-10-19, 10ª sesión)
+- [ ] ¿ventana principal que no cabe → flotante encima? (preguntar al usuario)
 - [ ] **← siguiente:** programas Go/estáticos (seccomp), audio, Xwayland, Steam; popups en el anfitrión (menor)
 - [ ] Binarios estáticos (ej. `ldconfig`): cargarlos en espacio de usuario desde `execve`
 
