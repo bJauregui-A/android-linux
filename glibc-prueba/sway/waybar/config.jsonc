@@ -1,0 +1,36 @@
+// waybar en el teléfono: las "píldoras" del layout 12 de HyDE.
+// El centro queda vacío porque ahí está la cámara (la app es de pantalla completa).
+// Sin audio, red, brillo ni bandeja; la batería no se puede leer
+// (/sys/class/power_supply da "Permission denied").
+{
+    "layer": "top",
+    "position": "top",
+    "exclusive": true,
+    "modules-left": ["group/pill#left"],
+    "group/pill#left": {
+        "orientation": "inherit",
+        "modules": ["sway/workspaces", "sway/mode"]
+    },
+    "modules-right": ["group/pill#right"],
+    "group/pill#right": {
+        "orientation": "inherit",
+        "modules": ["cpu", "memory", "clock"]
+    },
+    "sway/workspaces": {
+        "disable-scroll": false,
+        "all-outputs": true
+    },
+    "clock": {
+        "format": "{:%I:%M %p}",
+        "format-alt": "{:%R  %d·%m·%y}",
+        "tooltip-format": "<span>{calendar}</span>"
+    },
+    "cpu": {
+        "interval": 5,
+        "format": "󰍛 {usage}%"
+    },
+    "memory": {
+        "interval": 10,
+        "format": "󰾆 {percentage}%"
+    }
+}

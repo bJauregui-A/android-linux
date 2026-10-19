@@ -1,0 +1,74 @@
+--- a/sysdeps/unix/sysv/linux/aarch64/android-path.c
++++ b/sysdeps/unix/sysv/linux/aarch64/android-path.c
+@@ -30,6 +30,7 @@
+ #include <sys/syscall.h>
+ #include <sys/un.h>
+ #include <unistd.h>
++#include <sys/auxv.h>
+ 
+ #define KEY_PREFIX "GLIBC_PREFIX="
+ #define KEY_LOADER "GLIBC_LOADER="
+@@ -259,6 +260,38 @@
+   return m != n ? m : strip (buf, n, real_prefix, rlen);
+ }
+ 
++/* Si PATH es el enlace exe del propio proceso (/proc/self/exe,
++   /proc/thread-self/exe o /proc/<pid>/exe), la ruta del programa.  El kernel
++   apunta al cargador (libldp.so), y los programas que buscan sus archivos a
++   partir de ahí (kitty...) necesitan el suyo.  rtld.c deja esa ruta en
++   AT_EXECFN (la que recibió el cargador, antes de aplicar --argv0).  */
++static const char *
++own_exe (const char *path)
++{
++#if IS_IN (libc)
++  if (path == NULL || !starts (path, "/proc/", 6))
++    return NULL;
++  const char *p = path + 6;
++  if (!starts (p, "self/exe", 9) && !starts (p, "thread-self/exe", 16))
++    {
++      unsigned long int pid = 0;
++      if (*p < '0' || *p > '9')
++	return NULL;
++      while (*p >= '0' && *p <= '9')
++	pid = pid * 10 + (*p++ - '0');
++      if (!starts (p, "/exe", 5)
++	  || pid != (unsigned long int) raw (__NR_getpid, 0, 0, 0, 0, 0, 0))
++	return NULL;
++    }
++  const char *exe = (const char *) __getauxval (AT_EXECFN);
++  if (exe == NULL || exe[0] != '/')
++    return NULL;
++  return exe;
++#else
++  return NULL;
++#endif
++}
++
+ static size_t
+ count (char *const *v)
+ {
+@@ -832,10 +865,20 @@
+ 
+     case __NR_readlinkat:
+       {
+-	XL (a1, b1);
+-	long int r = raw (nr, a0, a1, (long int) b2, PATH_MAX, 0, 0);
+-	if (r < 0)
+-	  return r;
++	const char *exe = own_exe ((const char *) a1);
++	long int r;
++	if (exe != NULL)
++	  {
++	    r = slen (exe);
++	    mcopy (b2, exe, r);
++	  }
++	else
++	  {
++	    XL (a1, b1);
++	    r = raw (nr, a0, a1, (long int) b2, PATH_MAX, 0, 0);
++	    if (r < 0)
++	      return r;
++	  }
+ 	r = unxlat (b2, r);
+ 	if ((size_t) r > (size_t) a3)
+ 	  r = a3;

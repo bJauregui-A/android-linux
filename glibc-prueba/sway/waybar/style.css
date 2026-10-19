@@ -1,0 +1,65 @@
+/* Colores y formas del tema "Mine" de HyDE (theme.css + defaults.css + border-radius 10pt) */
+@define-color bar-bg rgba(0, 0, 0, 0.1);
+@define-color main-bg #000000;
+@define-color main-fg #ffffff;
+@define-color wb-act-bg #cccccc;
+@define-color wb-act-fg #1F1F1F;
+@define-color wb-hvr-bg #999999;
+@define-color wb-hvr-fg #1F1F1F;
+
+* {
+    font-family: "JetBrainsMono Nerd Font";
+    font-size: 12px;
+    font-weight: bold;
+    min-height: 0;
+    border: none;
+}
+
+window#waybar {
+    background: @bar-bg;
+}
+
+.module {
+    color: @main-fg;
+}
+
+#pill {
+    background-color: @main-bg;
+    border-radius: 10pt;
+    margin: 0.3em;
+    padding: 0 0.4em;
+}
+
+label.module {
+    padding: 0 0.4em;
+}
+
+#workspaces button {
+    box-shadow: none;
+    text-shadow: none;
+    background: transparent;
+    color: @main-fg;
+    border-radius: 10pt;
+    margin: 0.3em 0;
+    padding: 0 0.3em;
+}
+
+#workspaces button.focused {
+    background: @wb-act-bg;
+    color: @wb-act-fg;
+    margin: 0.3em;
+    padding: 0 1.2em;
+    transition: all 0.4s cubic-bezier(.55, -0.68, .48, 1.682);
+}
+
+#workspaces button:hover {
+    background: @wb-hvr-bg;
+    color: @wb-hvr-fg;
+}
+
+#mode {
+    color: @wb-act-fg;
+    background: @wb-act-bg;
+    border-radius: 10pt;
+    margin: 0.3em 0;
+}

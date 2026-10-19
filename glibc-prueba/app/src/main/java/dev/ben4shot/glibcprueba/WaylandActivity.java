@@ -20,6 +20,8 @@ import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.ViewConfiguration;
 import android.view.WindowInsets;
+import android.view.WindowInsetsController;
+import android.view.WindowManager;
 import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
@@ -162,7 +164,25 @@ public class WaylandActivity extends Activity {
             return WindowInsets.CONSUMED;
         });
         setContentView(raiz);
+        inmersivo();
         vista.requestFocus();
+    }
+
+    // Pantalla completa: sin barras de Android (se asoman deslizando desde el borde) y
+    // también bajo el recorte de la cámara, así sway recibe los 1080×2340 del panel.
+    private void inmersivo() {
+        getWindow().getAttributes().layoutInDisplayCutoutMode =
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+        WindowInsetsController c = getWindow().getInsetsController();
+        if (c == null) return;
+        c.hide(WindowInsets.Type.systemBars());
+        c.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean foco) {
+        super.onWindowFocusChanged(foco);
+        if (foco) inmersivo();
     }
 
     // --- tacto ---

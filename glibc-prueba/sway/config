@@ -1,0 +1,153 @@
+# sway en el teléfono, con los atajos y la apariencia de la config de Hyprland del PC
+# (HyDE, tema "Mine": Graphite Mono, sin bordes, huecos de 1 px, opacidad 0.90/0.75).
+# Fuente: glibc-prueba/sway/config; scripts/subir-sway.sh la copia a ~/.config/sway/.
+# Ver atajos en el teléfono: SUPER + /
+
+set $mod Mod4
+# kitty con la config del PC (HyDE); foot queda de respaldo en SUPER+ALT+T
+set $term kitty
+set $menu fuzzel
+set $s ~/.config/sway
+
+### Pantalla y entrada
+# ~400 dpi
+output * scale 2.5
+output * bg #000000 solid_color
+# misma distribución que app/.../Distribucion.java (wayland/generar-teclado.sh)
+input type:keyboard xkb_layout latam
+focus_follows_mouse yes
+
+### Apariencia (tema Mine de HyDE)
+font pango:JetBrainsMono Nerd Font 10
+default_border none
+default_floating_border none
+gaps inner 1
+gaps outer 1
+# clase                  borde   fondo   texto   indicador hijo
+client.focused           #ffffff #cccccc #1f1f1f #ffffff   #ffffff
+client.focused_inactive  #4d4d4d #191919 #d9d9d9 #4d4d4d   #4d4d4d
+client.unfocused         #4d4d4d #191919 #b8b8b8 #4d4d4d   #4d4d4d
+client.urgent            #ffffff #636363 #ffffff #ffffff   #ffffff
+
+bar {
+    swaybar_command waybar
+}
+
+### Al arrancar
+# dwindle de Hyprland: alterna la división según la forma de la ventana
+exec autotiling
+# opacidad de HyDE: activa 0.90, inactivas 0.75, pantalla completa 1
+exec python $s/opacidad.py
+# historial del portapapeles (SUPER+V)
+exec wl-paste --type text --watch cliphist store
+exec wl-paste --type image --watch cliphist store
+
+### Programas
+bindsym $mod+t exec $term
+bindsym $mod+Return exec $term
+bindsym $mod+Mod1+t exec foot
+bindsym $mod+a exec $menu
+bindsym $mod+Tab exec $s/ventanas.sh
+bindsym $mod+v exec cliphist list | fuzzel --dmenu | cliphist decode | wl-copy
+bindsym $mod+slash exec $s/atajos.sh
+
+### Ventanas
+bindsym $mod+q kill
+bindsym Mod1+F4 kill
+bindsym $mod+w floating toggle
+bindsym Shift+F11 fullscreen toggle
+# fijar (visible en todos los escritorios)
+bindsym $mod+Shift+f sticky toggle
+# agrupar = pestañas
+bindsym $mod+g layout toggle tabbed split
+bindsym $mod+Ctrl+h focus left
+bindsym $mod+Ctrl+l focus right
+bindsym $mod+j layout toggle split
+bindsym $mod+Delete exit
+bindsym $mod+Shift+c reload
+
+bindsym $mod+Left focus left
+bindsym $mod+Right focus right
+bindsym $mod+Up focus up
+bindsym $mod+Down focus down
+bindsym Mod1+Tab focus next
+bindsym Mod1+Shift+Tab focus prev
+
+bindsym $mod+Shift+Right resize grow width 30px
+bindsym $mod+Shift+Left resize shrink width 30px
+bindsym $mod+Shift+Up resize shrink height 30px
+bindsym $mod+Shift+Down resize grow height 30px
+
+bindsym $mod+Shift+Ctrl+Left move left 30px
+bindsym $mod+Shift+Ctrl+Right move right 30px
+bindsym $mod+Shift+Ctrl+Up move up 30px
+bindsym $mod+Shift+Ctrl+Down move down 30px
+
+# arrastrar con SUPER + clic izquierdo, redimensionar con SUPER + clic derecho
+floating_modifier $mod normal
+# SUPER+X: redimensionar con las flechas (Enter o Esc para salir)
+mode "redimensionar" {
+    bindsym Left resize shrink width 30px
+    bindsym Right resize grow width 30px
+    bindsym Up resize shrink height 30px
+    bindsym Down resize grow height 30px
+    bindsym Return mode "default"
+    bindsym Escape mode "default"
+}
+bindsym $mod+x mode "redimensionar"
+
+### Escritorios
+bindsym $mod+1 workspace number 1
+bindsym $mod+2 workspace number 2
+bindsym $mod+3 workspace number 3
+bindsym $mod+4 workspace number 4
+bindsym $mod+5 workspace number 5
+bindsym $mod+6 workspace number 6
+bindsym $mod+7 workspace number 7
+bindsym $mod+8 workspace number 8
+bindsym $mod+9 workspace number 9
+bindsym $mod+0 workspace number 10
+# mover la ventana y seguirla
+bindsym $mod+Shift+1 move container to workspace number 1; workspace number 1
+bindsym $mod+Shift+2 move container to workspace number 2; workspace number 2
+bindsym $mod+Shift+3 move container to workspace number 3; workspace number 3
+bindsym $mod+Shift+4 move container to workspace number 4; workspace number 4
+bindsym $mod+Shift+5 move container to workspace number 5; workspace number 5
+bindsym $mod+Shift+6 move container to workspace number 6; workspace number 6
+bindsym $mod+Shift+7 move container to workspace number 7; workspace number 7
+bindsym $mod+Shift+8 move container to workspace number 8; workspace number 8
+bindsym $mod+Shift+9 move container to workspace number 9; workspace number 9
+bindsym $mod+Shift+0 move container to workspace number 10; workspace number 10
+# mover la ventana sin seguirla
+bindsym $mod+Mod1+1 move container to workspace number 1
+bindsym $mod+Mod1+2 move container to workspace number 2
+bindsym $mod+Mod1+3 move container to workspace number 3
+bindsym $mod+Mod1+4 move container to workspace number 4
+bindsym $mod+Mod1+5 move container to workspace number 5
+bindsym $mod+Mod1+6 move container to workspace number 6
+bindsym $mod+Mod1+7 move container to workspace number 7
+bindsym $mod+Mod1+8 move container to workspace number 8
+bindsym $mod+Mod1+9 move container to workspace number 9
+bindsym $mod+Mod1+0 move container to workspace number 10
+
+bindsym $mod+Ctrl+Right workspace next
+bindsym $mod+Ctrl+Left workspace prev
+bindsym $mod+Ctrl+Down exec $s/escritorio-vacio.sh
+bindsym $mod+Ctrl+Mod1+Right move container to workspace next
+bindsym $mod+Ctrl+Mod1+Left move container to workspace prev
+bindsym --whole-window $mod+button4 workspace prev
+bindsym --whole-window $mod+button5 workspace next
+
+# escritorio especial de Hyprland = scratchpad
+bindsym $mod+s scratchpad show
+bindsym $mod+Shift+s move scratchpad
+bindsym $mod+Mod1+s move scratchpad
+
+### Reglas de ventana (las flotantes de HyDE)
+for_window [app_id="(?i)^(bitwarden|org\.keepassxc\.keepassxc|blueman-manager|pavucontrol(-qt)?|org\.pulseaudio\.pavucontrol|com\.gabm\.satty|vlc|kvantummanager|qt[56]ct|nwg-(look|displays)|org\.kde\.ark|nm-(applet|connection-editor)|hyprpolkitagent|org\.kde\.dolphin|xdg-desktop-portal-gtk)$"] floating enable
+for_window [app_id="(?i).*dialog.*"] floating enable
+for_window [title="(?i).*dialog.*"] floating enable
+for_window [title="^(Choose Files|Save As.*|Open|Open File|File Upload.*|Authentication Required|Volume Control|File Operation Progress|Confirm to replace files|Add Folder to Workspace|Choose wallpaper.*|Library.*)$"] floating enable, move position center
+for_window [app_id="^pinentry-.*"] floating enable, move position center, sticky enable
+# picture-in-picture: fijo, abajo a la derecha, 1/4 de pantalla
+for_window [title="(?i)picture[-\s]?in[-\s]?picture.*"] floating enable, sticky enable, resize set 25 ppt 25 ppt, move position 73 ppt 72 ppt

@@ -57,7 +57,11 @@ Estado al cerrar la 2ª sesión (2026-10-19): ✅ pacman, ✅ terminal, ✅ Wayl
 4ª sesión: ✅ cero copias (AHardwareBuffer + ASurfaceControl + parche a la WSI de Mesa) para clientes directos: CPU de la app de ~50 % a ~11 % de un núcleo.
 Probado a mano: cambiar tamaño ✅, salir y volver (sigue en segundo plano) ✅.
 5ª sesión: ✅ escritorio por GPU: wlroots parchado (`glibc-prueba/wlroots/`: renderer Vulkan sin DRM, allocator android-ahb-v1, linux-dmabuf v3) → sway compone con Turnip directo en el AHardwareBuffer y sus clientes le pasan dmabufs. vkcube dentro de sway: CPU total ~89 % → ~21 % de un núcleo. El servicio lo usa solo si existe `~/wlroots`.
-**Siguiente: escritorio cómodo en el celular (pendiente 4 en PROYECTO.md); antes, probar a mano sway por GPU (teclado, girar, salir y volver).**
+6ª sesión: medidos sway (19 MB) / swayfx (~60 MB, funciona por GPU) / Hyprland (no arranca: todo supone DRM) → se queda sway.
+Escritorio con la config de Hyprland/HyDE del PC llevada a sway (`glibc-prueba/sway/`): atajos, aspecto, waybar, fuzzel, kitty con la config del PC;
+app en modo inmersivo (pantalla completa, 1080×2193 px reales); glibc `0007` (`/proc/self/exe` = el programa, kitty lo necesitaba).
+**Siguiente: que el usuario pruebe a mano el escritorio nuevo; confirmar la opacidad de inactivas; gestos, cursor, portapapeles (pendiente 4 en PROYECTO.md).
+Avisar antes de correr scripts que cierran la app (force-stop): el usuario suele estar usándola.**
 Root temporal descartado: lo necesario vive en particiones verificadas, y desbloquear/bloquear borra `/data`.
 
 Probado en el teléfono (glibc 2.43, bash 5.3, coreutils 9.12 de Arch ARM):
