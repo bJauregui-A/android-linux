@@ -1,0 +1,316 @@
+diff --git a/include/types/wlr_scene.h b/include/types/wlr_scene.h
+index c4b40cd..1bc7460 100644
+--- a/include/types/wlr_scene.h
++++ b/include/types/wlr_scene.h
+@@ -9,4 +9,12 @@ void scene_node_get_size(struct wlr_scene_node *node, int *width, int *height);
+ 
+ void scene_surface_set_clip(struct wlr_scene_surface *surface, struct wlr_box *clip);
+ 
++void scene_surface_set_scale(struct wlr_scene_surface *surface, double scale);
++
++// 1 if the node is not a subsurface tree
++double scene_subsurface_tree_get_scale(struct wlr_scene_node *node);
++
++// Repositions the node if it is the tree of a wlr_scene_xdg_surface
++void scene_xdg_surface_update_scale(struct wlr_scene_node *node);
++
+ #endif
+diff --git a/include/wlr/types/wlr_scene.h b/include/wlr/types/wlr_scene.h
+index 6c627b1..7d3f926 100644
+--- a/include/wlr/types/wlr_scene.h
++++ b/include/wlr/types/wlr_scene.h
+@@ -135,6 +135,10 @@ struct wlr_scene_surface {
+ 		struct wl_listener frame_done;
+ 		struct wl_listener surface_destroy;
+ 		struct wl_listener surface_commit;
++
++		// Escala del contenido (wlr_scene_subsurface_tree_set_scale); al final
++		// para no mover los campos que leen los compositores ya compilados.
++		double scale;
+ 	} WLR_PRIVATE;
+ };
+ 
+@@ -698,6 +702,16 @@ struct wlr_scene_tree *wlr_scene_subsurface_tree_create(
+ void wlr_scene_subsurface_tree_set_clip(struct wlr_scene_node *node,
+ 	const struct wlr_box *clip);
+ 
++/**
++ * Draws every subsurface tree under this node (and the xdg popups inside
++ * them) scaled by the given factor: positions, sizes and input coordinates.
++ * The clip stays in the surface coordinate space. The preferred buffer scale
++ * sent to the clients is multiplied by the factor too.
++ *
++ * A scale of 1 restores the default behaviour.
++ */
++void wlr_scene_subsurface_tree_set_scale(struct wlr_scene_node *node, double scale);
++
+ /**
+  * Add a node displaying an xdg_surface and all of its sub-surfaces to the
+  * scene-graph.
+diff --git a/types/scene/subsurface_tree.c b/types/scene/subsurface_tree.c
+index 4e0a3f9..07f764e 100644
+--- a/types/scene/subsurface_tree.c
++++ b/types/scene/subsurface_tree.c
+@@ -1,4 +1,5 @@
+ #include <assert.h>
++#include <math.h>
+ #include <stdlib.h>
+ #include <wlr/types/wlr_compositor.h>
+ #include <wlr/types/wlr_scene.h>
+@@ -28,8 +29,12 @@ struct wlr_scene_subsurface_tree {
+ 
+ 	struct wlr_box clip;
+ 
++	double scale; // only used in the top-level surface
++
+ 	// Only valid if the surface is a sub-surface
+ 
++	int x, y; // sub-surface position, in the parent's (unscaled) coordinates
++
+ 	struct wlr_addon surface_addon;
+ 
+ 	struct wl_listener subsurface_destroy;
+@@ -65,12 +70,22 @@ static struct wlr_scene_subsurface_tree *subsurface_tree_from_subsurface(
+ 	return subsurface_tree;
+ }
+ 
++static double subsurface_tree_scale(struct wlr_scene_subsurface_tree *subsurface_tree) {
++	while (subsurface_tree->parent) {
++		subsurface_tree = subsurface_tree->parent;
++	}
++	return subsurface_tree->scale;
++}
++
+ static bool subsurface_tree_reconfigure_clip(
+ 		struct wlr_scene_subsurface_tree *subsurface_tree) {
++	double scale = subsurface_tree_scale(subsurface_tree);
++	scene_surface_set_scale(subsurface_tree->scene_surface, scale);
++
+ 	if (subsurface_tree->parent) {
+ 		subsurface_tree->clip = (struct wlr_box){
+-			.x = subsurface_tree->parent->clip.x - subsurface_tree->tree->node.x,
+-			.y = subsurface_tree->parent->clip.y - subsurface_tree->tree->node.y,
++			.x = subsurface_tree->parent->clip.x - subsurface_tree->x,
++			.y = subsurface_tree->parent->clip.y - subsurface_tree->y,
+ 			.width = subsurface_tree->parent->clip.width,
+ 			.height = subsurface_tree->parent->clip.height,
+ 		};
+@@ -93,7 +108,8 @@ static bool subsurface_tree_reconfigure_clip(
+ 		wlr_scene_node_set_enabled(&subsurface_tree->scene_surface->buffer->node, intersects);
+ 
+ 		if (intersects) {
+-			wlr_scene_node_set_position(&subsurface_tree->scene_surface->buffer->node, clip.x, clip.y);
++			wlr_scene_node_set_position(&subsurface_tree->scene_surface->buffer->node,
++				round(clip.x * scale), round(clip.y * scale));
+ 			scene_surface_set_clip(subsurface_tree->scene_surface, &clip);
+ 		}
+ 
+@@ -104,6 +120,7 @@ static bool subsurface_tree_reconfigure_clip(
+ static void subsurface_tree_reconfigure(
+ 		struct wlr_scene_subsurface_tree *subsurface_tree) {
+ 	bool has_clip = subsurface_tree_reconfigure_clip(subsurface_tree);
++	double scale = subsurface_tree_scale(subsurface_tree);
+ 
+ 	struct wlr_surface *surface = subsurface_tree->surface;
+ 
+@@ -118,8 +135,10 @@ static void subsurface_tree_reconfigure(
+ 		}
+ 		prev = &child->tree->node;
+ 
++		child->x = subsurface->current.x;
++		child->y = subsurface->current.y;
+ 		wlr_scene_node_set_position(&child->tree->node,
+-			subsurface->current.x, subsurface->current.y);
++			round(child->x * scale), round(child->y * scale));
+ 
+ 		if (has_clip) {
+ 			subsurface_tree_reconfigure_clip(child);
+@@ -138,8 +157,10 @@ static void subsurface_tree_reconfigure(
+ 		wlr_scene_node_place_above(&child->tree->node, prev);
+ 		prev = &child->tree->node;
+ 
++		child->x = subsurface->current.x;
++		child->y = subsurface->current.y;
+ 		wlr_scene_node_set_position(&child->tree->node,
+-			subsurface->current.x, subsurface->current.y);
++			round(child->x * scale), round(child->y * scale));
+ 
+ 		if (has_clip) {
+ 			subsurface_tree_reconfigure_clip(child);
+@@ -243,6 +264,7 @@ static struct wlr_scene_subsurface_tree *scene_surface_tree_create(
+ 		return NULL;
+ 	}
+ 
++	subsurface_tree->scale = 1;
+ 	subsurface_tree->tree = wlr_scene_tree_create(parent);
+ 	if (subsurface_tree->tree == NULL) {
+ 		goto error_surface_tree;
+@@ -368,3 +390,35 @@ void wlr_scene_subsurface_tree_set_clip(struct wlr_scene_node *node,
+ 
+ 	assert(found);
+ }
++
++double scene_subsurface_tree_get_scale(struct wlr_scene_node *node) {
++	struct wlr_scene_subsurface_tree *tree = get_subsurface_tree_from_node(node);
++	return tree ? subsurface_tree_scale(tree) : 1;
++}
++
++static void subsurface_tree_set_scale(struct wlr_scene_node *node, double scale) {
++	if (node->type != WLR_SCENE_NODE_TREE) {
++		return;
++	}
++
++	struct wlr_scene_subsurface_tree *tree = get_subsurface_tree_from_node(node);
++	if (tree) {
++		if (tree->parent == NULL) {
++			tree->scale = scale;
++		}
++		subsurface_tree_reconfigure(tree);
++	}
++
++	struct wlr_scene_tree *scene_tree = wlr_scene_tree_from_node(node);
++	struct wlr_scene_node *child;
++	wl_list_for_each(child, &scene_tree->children, link) {
++		subsurface_tree_set_scale(child, scale);
++	}
++
++	// After the children: the xdg surface needs its surface tree's new scale
++	scene_xdg_surface_update_scale(node);
++}
++
++void wlr_scene_subsurface_tree_set_scale(struct wlr_scene_node *node, double scale) {
++	subsurface_tree_set_scale(node, scale > 0 ? scale : 1);
++}
+diff --git a/types/scene/surface.c b/types/scene/surface.c
+index 89c54a9..015570a 100644
+--- a/types/scene/surface.c
++++ b/types/scene/surface.c
+@@ -10,6 +10,7 @@
+ #include <wlr/types/wlr_output.h>
+ #include <wlr/types/wlr_presentation_time.h>
+ #include <wlr/types/wlr_single_pixel_buffer_v1.h>
++#include <wlr/util/region.h>
+ #include <wlr/util/transform.h>
+ #include "types/wlr_scene.h"
+ 
+@@ -90,6 +91,14 @@ static void get_surface_preferred_image_description(struct wlr_surface *surface,
+ 	};
+ }
+ 
++// Content drawn smaller than its size (wlr_scene_subsurface_tree_set_scale) is
++// asked for fewer pixels.
++static void surface_update_preferred_scale(struct wlr_scene_surface *surface) {
++	double scale = get_surface_preferred_buffer_scale(surface->surface) * surface->scale;
++	wlr_fractional_scale_v1_notify_scale(surface->surface, scale);
++	wlr_surface_set_preferred_buffer_scale(surface->surface, scale > 1 ? ceil(scale) : 1);
++}
++
+ static void handle_scene_buffer_outputs_update(
+ 		struct wl_listener *listener, void *data) {
+ 	struct wlr_scene_surface *surface =
+@@ -143,9 +152,7 @@ static void handle_scene_buffer_outputs_update(
+ 		wlr_surface_send_enter(surface->surface, event->active[i]->output);
+ 	}
+ 
+-	double scale = get_surface_preferred_buffer_scale(surface->surface);
+-	wlr_fractional_scale_v1_notify_scale(surface->surface, scale);
+-	wlr_surface_set_preferred_buffer_scale(surface->surface, ceil(scale));
++	surface_update_preferred_scale(surface);
+ 
+ 	if (scene->color_manager_v1 != NULL) {
+ 		struct wlr_image_description_v1_data img_desc = {0};
+@@ -309,6 +316,12 @@ static void surface_reconfigure(struct wlr_scene_surface *scene_surface) {
+ 		}
+ 	}
+ 
++	if (scene_surface->scale != 1) {
++		wlr_region_scale(&opaque, &opaque, scene_surface->scale);
++		width = fmax(1, round(width * scene_surface->scale));
++		height = fmax(1, round(height * scene_surface->scale));
++	}
++
+ 	wlr_scene_buffer_set_opaque_region(scene_buffer, &opaque);
+ 	wlr_scene_buffer_set_source_box(scene_buffer, &src_box);
+ 	wlr_scene_buffer_set_dest_size(scene_buffer, width, height);
+@@ -383,8 +396,8 @@ static bool scene_buffer_point_accepts_input(struct wlr_scene_buffer *scene_buff
+ 	struct wlr_scene_surface *scene_surface =
+ 		wlr_scene_surface_try_from_buffer(scene_buffer);
+ 
+-	*sx += scene_surface->clip.x;
+-	*sy += scene_surface->clip.y;
++	*sx = *sx / scene_surface->scale + scene_surface->clip.x;
++	*sy = *sy / scene_surface->scale + scene_surface->clip.y;
+ 
+ 	return wlr_surface_point_accepts_input(scene_surface->surface, *sx, *sy);
+ }
+@@ -437,6 +450,7 @@ struct wlr_scene_surface *wlr_scene_surface_create(struct wlr_scene_tree *parent
+ 
+ 	surface->buffer = scene_buffer;
+ 	surface->surface = wlr_surface;
++	surface->scale = 1;
+ 	scene_buffer->point_accepts_input = scene_buffer_point_accepts_input;
+ 
+ 	surface->outputs_update.notify = handle_scene_buffer_outputs_update;
+@@ -475,3 +489,15 @@ void scene_surface_set_clip(struct wlr_scene_surface *surface, struct wlr_box *c
+ 
+ 	surface_reconfigure(surface);
+ }
++
++void scene_surface_set_scale(struct wlr_scene_surface *surface, double scale) {
++	if (surface->scale == scale) {
++		return;
++	}
++
++	surface->scale = scale;
++	surface_reconfigure(surface);
++	if (!wl_list_empty(&surface->surface->current_outputs)) {
++		surface_update_preferred_scale(surface);
++	}
++}
+diff --git a/types/scene/xdg_shell.c b/types/scene/xdg_shell.c
+index 73d0acb..9f18edd 100644
+--- a/types/scene/xdg_shell.c
++++ b/types/scene/xdg_shell.c
+@@ -1,6 +1,8 @@
++#include <math.h>
+ #include <stdlib.h>
+ #include <wlr/types/wlr_scene.h>
+ #include <wlr/types/wlr_xdg_shell.h>
++#include "types/wlr_scene.h"
+ 
+ struct wlr_scene_xdg_surface {
+ 	struct wlr_scene_tree *tree;
+@@ -33,19 +35,31 @@ static void scene_xdg_surface_handle_xdg_surface_destroy(struct wl_listener *lis
+ static void scene_xdg_surface_update_position(
+ 		struct wlr_scene_xdg_surface *scene_xdg_surface) {
+ 	struct wlr_xdg_surface *xdg_surface = scene_xdg_surface->xdg_surface;
++	double scale = scene_subsurface_tree_get_scale(&scene_xdg_surface->surface_tree->node);
+ 
+ 	wlr_scene_node_set_position(&scene_xdg_surface->surface_tree->node,
+-		-xdg_surface->geometry.x, -xdg_surface->geometry.y);
++		round(-xdg_surface->geometry.x * scale), round(-xdg_surface->geometry.y * scale));
+ 
+ 	if (xdg_surface->role == WLR_XDG_SURFACE_ROLE_POPUP) {
+ 		struct wlr_xdg_popup *popup = xdg_surface->popup;
+ 		if (popup != NULL) {
+ 			wlr_scene_node_set_position(&scene_xdg_surface->tree->node,
+-				popup->current.geometry.x, popup->current.geometry.y);
++				round(popup->current.geometry.x * scale),
++				round(popup->current.geometry.y * scale));
+ 		}
+ 	}
+ }
+ 
++void scene_xdg_surface_update_scale(struct wlr_scene_node *node) {
++	struct wl_listener *listener = wl_signal_get(&node->events.destroy,
++		scene_xdg_surface_handle_tree_destroy);
++	if (listener != NULL) {
++		struct wlr_scene_xdg_surface *scene_xdg_surface =
++			wl_container_of(listener, scene_xdg_surface, tree_destroy);
++		scene_xdg_surface_update_position(scene_xdg_surface);
++	}
++}
++
+ static void scene_xdg_surface_handle_xdg_surface_commit(struct wl_listener *listener,
+ 		void *data) {
+ 	struct wlr_scene_xdg_surface *scene_xdg_surface =

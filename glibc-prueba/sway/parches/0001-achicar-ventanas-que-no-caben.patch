@@ -1,0 +1,237 @@
+diff --git a/include/sway/tree/view.h b/include/sway/tree/view.h
+index 26148a9..bb8e0da 100644
+--- a/include/sway/tree/view.h
++++ b/include/sway/tree/view.h
+@@ -97,6 +97,12 @@ struct sway_view {
+ 	// transaction state. Updated on every commit.
+ 	struct wlr_box geometry;
+ 
++	// A window whose minimum size doesn't fit its tile is drawn smaller
++	// instead of clipped (phone screens): content scale (1 = normal) and
++	// where the scaled content starts inside the container.
++	double content_scale;
++	int content_offset_x, content_offset_y;
++
+ 	struct wlr_ext_foreign_toplevel_handle_v1 *ext_foreign_toplevel;
+ 
+ 	struct wlr_foreign_toplevel_handle_v1 *foreign_toplevel;
+@@ -322,6 +328,12 @@ void view_unmap(struct sway_view *view);
+ void view_update_size(struct sway_view *view);
+ void view_center_and_clip_surface(struct sway_view *view);
+ 
++/**
++ * Content scale of the view that owns this surface (subsurfaces and popups
++ * included), 1 if it isn't scaled or has no view.
++ */
++double view_surface_content_scale(struct wlr_surface *surface);
++
+ struct sway_view *view_from_wlr_xdg_surface(
+ 	struct wlr_xdg_surface *xdg_surface);
+ #if WLR_HAS_XWAYLAND
+diff --git a/sway/desktop/xdg_shell.c b/sway/desktop/xdg_shell.c
+index 7217e13..48410a2 100644
+--- a/sway/desktop/xdg_shell.c
++++ b/sway/desktop/xdg_shell.c
+@@ -54,12 +54,15 @@ static void popup_unconstrain(struct sway_xdg_popup *popup) {
+ 	struct sway_output *output = workspace->output;
+ 
+ 	// the output box expressed in the coordinate system of the toplevel parent
+-	// of the popup
++	// of the popup (a scaled view sees a bigger output)
++	double scale = view->content_scale;
+ 	struct wlr_box output_toplevel_sx_box = {
+-		.x = output->lx - view->container->pending.content_x + view->geometry.x,
+-		.y = output->ly - view->container->pending.content_y + view->geometry.y,
+-		.width = output->width,
+-		.height = output->height,
++		.x = (output->lx - view->container->pending.content_x -
++			view->content_offset_x) / scale + view->geometry.x,
++		.y = (output->ly - view->container->pending.content_y -
++			view->content_offset_y) / scale + view->geometry.y,
++		.width = output->width / scale,
++		.height = output->height / scale,
+ 	};
+ 
+ 	wlr_xdg_popup_unconstrain_from_box(wlr_popup, &output_toplevel_sx_box);
+@@ -107,6 +110,11 @@ static struct sway_xdg_popup *popup_create(struct wlr_xdg_popup *wlr_popup,
+ 	popup->desc.relative = &view->content_tree->node;
+ 	popup->desc.view = view;
+ 
++	if (view->content_scale != 1) {
++		wlr_scene_subsurface_tree_set_scale(&popup->scene_tree->node,
++			view->content_scale);
++	}
++
+ 	if (!scene_descriptor_assign(&popup->scene_tree->node,
+ 			SWAY_SCENE_DESC_POPUP, &popup->desc)) {
+ 		sway_log(SWAY_ERROR, "Failed to allocate a popup scene descriptor");
+diff --git a/sway/input/seatop_down.c b/sway/input/seatop_down.c
+index f64e5a4..80ca23b 100644
+--- a/sway/input/seatop_down.c
++++ b/sway/input/seatop_down.c
+@@ -22,6 +22,7 @@ struct seatop_down_event {
+ 	struct wlr_surface *surface;
+ 	double ref_lx, ref_ly;         // cursor's x/y at start of op
+ 	double ref_con_lx, ref_con_ly; // container's x/y at start of op
++	double scale;                  // content scale of the surface's view
+ 	struct wl_list point_events;   // seatop_touch_point_event::link
+ };
+ 
+@@ -41,8 +42,8 @@ static void handle_touch_motion(struct sway_seat *seat,
+ 		return; // Probably not a point_event from this seatop_down
+ 	}
+ 
+-	double moved_x = lx - point_event->ref_lx;
+-	double moved_y = ly - point_event->ref_ly;
++	double moved_x = (lx - point_event->ref_lx) / e->scale;
++	double moved_y = (ly - point_event->ref_ly) / e->scale;
+ 	double sx = point_event->ref_con_lx + moved_x;
+ 	double sy = point_event->ref_con_ly + moved_y;
+ 
+@@ -158,8 +159,8 @@ static void handle_button(struct sway_seat *seat, uint32_t time_msec,
+ static void handle_pointer_motion(struct sway_seat *seat, uint32_t time_msec) {
+ 	struct seatop_down_event *e = seat->seatop_data;
+ 	if (seat_is_input_allowed(seat, e->surface)) {
+-		double moved_x = seat->cursor->cursor->x - e->ref_lx;
+-		double moved_y = seat->cursor->cursor->y - e->ref_ly;
++		double moved_x = (seat->cursor->cursor->x - e->ref_lx) / e->scale;
++		double moved_y = (seat->cursor->cursor->y - e->ref_ly) / e->scale;
+ 		double sx = e->ref_con_lx + moved_x;
+ 		double sy = e->ref_con_ly + moved_y;
+ 		wlr_seat_pointer_notify_motion(seat->wlr_seat, time_msec, sx, sy);
+@@ -179,8 +180,8 @@ static void handle_tablet_tool_motion(struct sway_seat *seat,
+ 		struct sway_tablet_tool *tool, uint32_t time_msec) {
+ 	struct seatop_down_event *e = seat->seatop_data;
+ 	if (seat_is_input_allowed(seat, e->surface)) {
+-		double moved_x = seat->cursor->cursor->x - e->ref_lx;
+-		double moved_y = seat->cursor->cursor->y - e->ref_ly;
++		double moved_x = (seat->cursor->cursor->x - e->ref_lx) / e->scale;
++		double moved_y = (seat->cursor->cursor->y - e->ref_ly) / e->scale;
+ 		double sx = e->ref_con_lx + moved_x;
+ 		double sy = e->ref_con_ly + moved_y;
+ 		wlr_tablet_v2_tablet_tool_notify_motion(tool->tablet_v2_tool, sx, sy);
+@@ -257,6 +258,7 @@ void seatop_begin_down_on_surface(struct sway_seat *seat,
+ 	e->ref_ly = seat->cursor->cursor->y;
+ 	e->ref_con_lx = sx;
+ 	e->ref_con_ly = sy;
++	e->scale = view_surface_content_scale(surface);
+ 	wl_list_init(&e->point_events);
+ 
+ 	seat->seatop_impl = &seatop_impl;
+diff --git a/sway/tree/view.c b/sway/tree/view.c
+index 83b4972..b814e9f 100644
+--- a/sway/tree/view.c
++++ b/sway/tree/view.c
+@@ -1,3 +1,4 @@
++#include <math.h>
+ #include <stdlib.h>
+ #include <strings.h>
+ #include <wayland-server-core.h>
+@@ -105,6 +106,7 @@ bool view_init(struct sway_view *view, enum sway_view_type type,
+ 
+ 	view->type = type;
+ 	view->impl = impl;
++	view->content_scale = 1;
+ 	view->executed_criteria = create_list();
+ 	view->allow_request_urgent = true;
+ 	view->shortcuts_inhibit = SHORTCUTS_INHIBIT_DEFAULT;
+@@ -1030,38 +1032,91 @@ void view_update_size(struct sway_view *view) {
+ 	container_set_geometry_from_content(con);
+ }
+ 
++// Scale that makes a tiled or fullscreen view fit its container when the
++// client won't shrink to it (its minimum size is bigger): 1 if it fits.
++static double view_fit_scale(struct sway_view *view) {
++	struct sway_container *con = view->container;
++	int cw = con->current.content_width, ch = con->current.content_height;
++	int gw = view->geometry.width, gh = view->geometry.height;
++	if (container_is_floating(con) || cw <= 0 || ch <= 0 || gw <= 0 || gh <= 0 ||
++			(gw <= cw && gh <= ch)) {
++		return 1;
++	}
++	return fmin((double)cw / gw, (double)ch / gh);
++}
++
++static void view_set_content_scale(struct sway_view *view, double scale) {
++	if (view->content_scale == scale) {
++		return;
++	}
++	view->content_scale = scale;
++	wlr_scene_subsurface_tree_set_scale(&view->content_tree->node, scale);
++
++	// The view's popups live in their own layer
++	struct wlr_scene_node *node;
++	wl_list_for_each(node, &root->layers.popup->children, link) {
++		struct sway_popup_desc *popup =
++			scene_descriptor_try_get(node, SWAY_SCENE_DESC_POPUP);
++		if (popup && popup->view == view) {
++			wlr_scene_subsurface_tree_set_scale(node, scale);
++		}
++	}
++}
++
+ void view_center_and_clip_surface(struct sway_view *view) {
+ 	struct sway_container *con = view->container;
+ 
+ 	bool clip_to_geometry = true;
++	double scale = view_fit_scale(view);
++	int width = round(view->geometry.width * scale);
++	int height = round(view->geometry.height * scale);
++	int x = 0, y = 0;
+ 
+ 	if (container_is_floating(con) || con->pending.fullscreen_mode != FULLSCREEN_NONE) {
+ 		// We always center the current coordinates rather than the next, as the
+ 		// geometry immediately affects the currently active rendering.
+-		int x = (int) fmax(0, (con->current.content_width - view->geometry.width) / 2);
+-		int y = (int) fmax(0, (con->current.content_height - view->geometry.height) / 2);
++		x = (int) fmax(0, (con->current.content_width - width) / 2);
++		y = (int) fmax(0, (con->current.content_height - height) / 2);
+ 		clip_to_geometry = !view->using_csd;
+-
+-		wlr_scene_node_set_position(&view->content_tree->node, x, y);
+-	} else {
+-		wlr_scene_node_set_position(&view->content_tree->node, 0, 0);
++	} else if (scale != 1) {
++		x = (int) fmax(0, (con->current.content_width - width) / 2);
++		y = (int) fmax(0, (con->current.content_height - height) / 2);
+ 	}
++	wlr_scene_node_set_position(&view->content_tree->node, x, y);
++	view->content_offset_x = scale != 1 ? x : 0;
++	view->content_offset_y = scale != 1 ? y : 0;
+ 
+ 	// only make sure to clip the content if there is content to clip
+ 	if (!wl_list_empty(&con->view->content_tree->children)) {
++		view_set_content_scale(view, scale);
++
+ 		struct wlr_box clip = {0};
+ 		if (clip_to_geometry) {
++			// The clip is in surface coordinates: a scaled view shows all of
++			// its geometry
+ 			clip = (struct wlr_box){
+ 				.x = con->view->geometry.x,
+ 				.y = con->view->geometry.y,
+-				.width = con->current.content_width,
+-				.height = con->current.content_height,
++				.width = scale != 1 ? view->geometry.width : con->current.content_width,
++				.height = scale != 1 ? view->geometry.height : con->current.content_height,
+ 			};
+ 		}
+ 		wlr_scene_subsurface_tree_set_clip(&con->view->content_tree->node, &clip);
+ 	}
+ }
+ 
++double view_surface_content_scale(struct wlr_surface *surface) {
++	surface = wlr_surface_get_root_surface(surface);
++	struct wlr_xdg_surface *xdg_surface;
++	while ((xdg_surface = wlr_xdg_surface_try_from_wlr_surface(surface)) &&
++			xdg_surface->role == WLR_XDG_SURFACE_ROLE_POPUP &&
++			xdg_surface->popup && xdg_surface->popup->parent) {
++		surface = wlr_surface_get_root_surface(xdg_surface->popup->parent);
++	}
++	struct sway_view *view = view_from_wlr_surface(surface);
++	return view ? view->content_scale : 1;
++}
++
+ struct sway_view *view_from_wlr_surface(struct wlr_surface *wlr_surface) {
+ 	struct wlr_xdg_surface *xdg_surface;
+ 	if ((xdg_surface = wlr_xdg_surface_try_from_wlr_surface(wlr_surface))) {

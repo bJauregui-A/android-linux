@@ -128,8 +128,11 @@ public class TerminalService extends Service implements TerminalSessionClient {
             return;
         }
         entornoSway = entorno(prefijo, cargador());
+        // sway parchado (sway/compilar-sway.sh: achica las ventanas que no caben), si está
+        String bin = new File(prefijo, "home/user/sway/bin/sway").exists()
+                ? "/home/user/sway/bin/sway" : "sway";
         ProcessBuilder pb = new ProcessBuilder(cargador(), "/usr/bin/bash", "-lc",
-                "exec sway > /tmp/sway.log 2>&1");
+                "exec " + bin + " > /tmp/sway.log 2>&1");
         entornoLinux(pb);
         try {
             Process p = pb.start();
