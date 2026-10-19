@@ -70,6 +70,8 @@ SUPER+V (historial con cliphist) no anda: cliphist es Go y se salta la glibc →
 ✅ **Ventanas que no caben se achican en vez de recortarse** (gtk3-widget-factory pide mínimo 1393×740 y la pantalla tiene 432 de ancho lógico): parche propio a wlroots (`0004`, escala de contenido en la escena) y **sway compilado con parche propio** (`sway/parches/0001`, `~/sway/bin/sway`, lo arranca `TerminalService`). Probado: se ve completa, clics y menús caen bien. Los diálogos (fuentes, archivos) ya flotaban solos (el usuario lo confirmó).
 **Decidido (11ª sesión):** la ventana *principal* que no cabe **no** pasa sola a flotante: se queda como está (achicada en su tile).
 11ª sesión: ✅ **SSH** (`openssh`, servidor en el puerto 8022, sin sudo; se borró `tty:x:5:` de `/etc/group` para que ande el pty). **Steam ARM64 oficial instalado** en `~/.local/share/Steam`: lo primero que lo frena es **SysV IPC** (`semget` = ENOSYS); después pide Xwayland (X11) y gtk2 (no está en Arch ARM, compilar). Detalle en PROYECTO.md, 11ª sesión.
+Al cierre de la 11ª: ✅ **SysV IPC emulado** en la glibc (parche 0008, `pruebas/sysv.c`), ✅ relanzar `/proc/self/exe` (0009), ✅ **Xwayland en el sway real** (0010: el seccomp de apps bloquea `setgid` y Xwayland no podía lanzar `xkbcomp`; si el set*id no cambia nada se responde éxito, como el kernel), ✅ certificados HTTPS (`update-ca-trust`), ✅ gtk2 en `/opt/gtk2`, ✅ locales en_US/es_CL, ✅ `sshd` al arrancar sway (puerto 8022). Steam se actualizó solo (438 MB) y ya muestra su ventana X11 (visto en un sway de prueba).
+**Siguiente sesión: abrir `steam` a la vista del usuario** y seguir con lo que falle (probable: sandbox de CEF/steamwebhelper → `--no-sandbox`). Reinstalar la app cuando convenga para actualizar el cargador (avisar: cierra todo).
 **Siguiente: compatibilidad: Go/estáticos (seccomp, arregla también SUPER+V), audio, Xwayland.
 Avisar antes de correr scripts que cierran la app (force-stop): el usuario suele estar usándola.**
 Root temporal descartado: lo necesario vive en particiones verificadas, y desbloquear/bloquear borra `/data`.
@@ -109,7 +111,8 @@ Siguiente:
 - [x] menús GTK dentro de sway: funcionan; apps GTK ya no se caen (glycin sin bwrap) (2026-10-19, 10ª sesión)
 - [x] sway parchado: ventanas que no caben se achican (wlroots 0004 + sway 0001) (2026-10-19, 10ª sesión)
 - [x] ¿ventana principal que no cabe → flotante encima? No: el usuario prefiere dejarlo como está (11ª sesión)
-- [ ] **← siguiente:** programas Go/estáticos (seccomp), audio, Xwayland, Steam; popups en el anfitrión (menor)
+- [x] SysV IPC (0008), Xwayland en sway (0010), Steam ARM64 instalado y actualizado (2026-10-19, 11ª sesión)
+- [ ] **← siguiente:** Steam a la vista (steamwebhelper/CEF), luego Go/estáticos (seccomp), audio; popups en el anfitrión (menor)
 - [ ] Mandos (sin `/dev/input`: shim o backend propio). Para jugar, ver PROYECTO.md "Jugar: qué tan posible es" (2026-10-19)
 - [ ] Binarios estáticos (ej. `ldconfig`): cargarlos en espacio de usuario desde `execve`
 
