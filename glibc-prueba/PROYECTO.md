@@ -111,6 +111,18 @@ Que el teléfono (Redmi 15 5G, HyperOS, **sin root**) sea a la vez Android y un 
 8. Hardware sintético: batería (`BatteryManager`), red (`getifaddrs`/netlink), sensores.
 9. Mantener la glibc al día (rebase de los parches con cada glibc de Arch ARM).
 10. x86 (Steam) con FEX. 11. Mosaico.
+12. **Mandos** (agregado el 2026-10-19, faltaba): sin root no hay `/dev/input` ni `uinput` → SDL y Wine no ven mandos. Opciones: shim `LD_PRELOAD` que finja `/dev/input/eventX` leyendo de un socket de la app (como `evshim` de GameNative), o backend propio para SDL y para Wine (winebus/XInput).
+
+### Jugar: qué tan posible es (análisis del 2026-10-19, sin probar)
+Con la glibc, el teléfono es como un PC Linux ARM (estilo Asahi): FEX, Wine, DXVK y Turnip ya existen para eso. Por niveles:
+1. **Nativos ARM64** (RetroArch, Dolphin, PPSSPP, motores libres por pacman): casi listo; faltan **audio** (frente 2) y **mandos** (frente 12).
+2. **Linux x86-64 sin DRM (GOG)** con FEX: ventaja propia, los **thunks** de FEX mandan Vulkan/GL/SDL del juego x86 directo a Turnip/Mesa ARM. Necesita la capa seccomp (frente 1: FEX hace syscalls directas) y el rootfs x86 **descomprimido** (sin root no hay FUSE para el squashfs). Páginas de 4 KB: no hace falta el microVM (muvm) de Asahi.
+3. **Windows** con Wine + FEX + DXVK, fuera del cliente Steam: misma receta que GameNative, pero sobre Linux real; `winewayland.drv` evita Xwayland. DRM de Steam: Goldberg o el `vapor-steam` de Vapor.
+4. **Cliente Steam oficial**: SysV IPC (frente 6; Winlator/GameNative lo emulan con `sysvshm`), gtk2, Xwayland, y luego el muro: Proton moderno va dentro de pressure-vessel (bwrap = namespaces, imposible sin root). Juegos Linux nativos pueden ir sin contenedor; Windows mejor por el nivel 3.
+
+Límites: un proceso glibc no puede cargar bibliotecas bionic (`libaaudio`, driver Vulkan de Qualcomm) → audio por socket a la parte bionic de la app, y GPU solo con Turnip (suficiente para DXVK). Rendimiento esperado: igual o algo mejor que GameNative (mismo FEX, más thunks, sin servidor X en Java); el techo lo pone la Adreno 619.
+Orden propuesto: audio → mandos → un emulador nativo de punta a punta → seccomp + FEX con un juego GOG → Wine + DXVK → Steam (quizás nunca el cliente oficial).
+Pendiente de decidir: si se llega al nivel 3, se cruza con la rama `protonarm` de Vapor (`/media/ben4shot/E/Develop/Steam`, ver su `docs/comparacion-gamenative-droiddesk.md`): ¿dos caminos o uno alimenta al otro?
 Imposible sin root: namespaces (Docker/Flatpak/bwrap, sandbox de Chromium → `--no-sandbox`), systemd PID 1, módulos, KVM, ver procesos de otras apps.
 
 ### Detalle por frente

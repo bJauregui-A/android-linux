@@ -110,6 +110,7 @@ Siguiente:
 - [x] sway parchado: ventanas que no caben se achican (wlroots 0004 + sway 0001) (2026-10-19, 10ª sesión)
 - [x] ¿ventana principal que no cabe → flotante encima? No: el usuario prefiere dejarlo como está (11ª sesión)
 - [ ] **← siguiente:** programas Go/estáticos (seccomp), audio, Xwayland, Steam; popups en el anfitrión (menor)
+- [ ] Mandos (sin `/dev/input`: shim o backend propio). Para jugar, ver PROYECTO.md "Jugar: qué tan posible es" (2026-10-19)
 - [ ] Binarios estáticos (ej. `ldconfig`): cargarlos en espacio de usuario desde `execve`
 
 En el teléfono: app sdk36 con `files/archlinux` (Arch + pacman + sway/foot + gcc/meson + Turnip en `~/turnip`, varios GB) y carpetas de pruebas anteriores (`files/arch`, `files/glibc`, `files/glibcp`).
