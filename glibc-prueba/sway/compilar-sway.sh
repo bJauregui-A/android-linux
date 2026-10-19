@@ -4,6 +4,12 @@
 # scripts/subir-sway-parchado.sh lo copia a ~/ junto con ~/src/sway-1.12.tar.gz y ~/src/parches-sway/.
 #   0001: una ventana cuyo tamaño mínimo no cabe en su espacio se dibuja achicada en vez
 #         de recortada (apps de escritorio en la pantalla del teléfono)
+#   0002: `xwayland_scale <n>` (config): Xwayland ve la pantalla en píxeles reales y sway
+#         dibuja las ventanas X11 divididas por n (nítidas con la salida a escala 2.5)
+#   0003: una ventana flotante más grande que la pantalla (diálogos de escritorio) se achica
+#         manteniendo proporciones y se centra, como 0001 hace con las de mosaico
+#   0004: comando `scale_to_fit enable` (solo Xwayland): la ventana conserva el tamaño que pide
+#         y se dibuja agrandada/achicada para llenar su contenedor (juegos en un escritorio de Wine fijo)
 # Resultado en ~/sway/bin/sway; TerminalService lo prefiere al de Arch si existe.
 set -e
 V=1.12

@@ -1,0 +1,13 @@
+"compatibilitytools"
+{
+  "compat_tools"
+  {
+    "proton_arm64_directo"
+    {
+      "install_path" "."
+      "display_name" "Proton 11 ARM64 (sin contenedor)"
+      "from_oslist" "windows"
+      "to_oslist" "linux"
+    }
+  }
+}

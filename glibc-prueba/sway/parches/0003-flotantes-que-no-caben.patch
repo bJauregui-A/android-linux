@@ -1,0 +1,111 @@
+diff --git a/include/sway/tree/container.h b/include/sway/tree/container.h
+index d878054..5b55d88 100644
+--- a/include/sway/tree/container.h
++++ b/include/sway/tree/container.h
+@@ -196,6 +196,13 @@ size_t container_titlebar_height(void);
+ void floating_calculate_constraints(int *min_width, int *max_width,
+ 		int *min_height, int *max_height);
+ 
++/**
++ * Shrink a floating view's size, keeping its proportions, so that it fits the
++ * floating maximum and its workspace: a client that won't get smaller (e.g. a
++ * desktop dialog on a phone screen) is then drawn scaled down to that size.
++ */
++void floating_fit_size(struct sway_container *con, double *width, double *height);
++
+ void floating_fix_coordinates(struct sway_container *con,
+ 		struct wlr_box *old, struct wlr_box *new);
+ 
+diff --git a/sway/tree/container.c b/sway/tree/container.c
+index 6880841..d0386fb 100644
+--- a/sway/tree/container.c
++++ b/sway/tree/container.c
+@@ -830,6 +830,23 @@ void floating_fix_coordinates(struct sway_container *con, struct wlr_box *old, s
+ 	}
+ }
+ 
++void floating_fit_size(struct sway_container *con, double *width, double *height) {
++	int min_width, max_width, min_height, max_height;
++	floating_calculate_constraints(&min_width, &max_width,
++			&min_height, &max_height);
++	struct sway_workspace *ws = con->pending.workspace;
++	if (ws && ws->width > 0 && ws->height > 0) {
++		max_width = fmin(max_width, ws->width);
++		max_height = fmin(max_height, ws->height);
++	}
++	if (*width <= 0 || *height <= 0) {
++		return;
++	}
++	double scale = fmin(1, fmin(max_width / *width, max_height / *height));
++	*width = fmax(min_width, *width * scale);
++	*height = fmax(min_height, *height * scale);
++}
++
+ static void floating_natural_resize(struct sway_container *con) {
+ 	int min_width, max_width, min_height, max_height;
+ 	floating_calculate_constraints(&min_width, &max_width,
+@@ -839,10 +856,10 @@ static void floating_natural_resize(struct sway_container *con) {
+ 		con->pending.height = fmax(min_height, fmin(con->pending.height, max_height));
+ 	} else {
+ 		struct sway_view *view = con->view;
+-		con->pending.content_width =
+-			fmax(min_width, fmin(view->natural_width, max_width));
+-		con->pending.content_height =
+-			fmax(min_height, fmin(view->natural_height, max_height));
++		double width = view->natural_width, height = view->natural_height;
++		floating_fit_size(con, &width, &height);
++		con->pending.content_width = fmax(min_width, fmin(width, max_width));
++		con->pending.content_height = fmax(min_height, fmin(height, max_height));
+ 		container_set_geometry_from_content(con);
+ 	}
+ }
+diff --git a/sway/tree/view.c b/sway/tree/view.c
+index d4431dd..941edda 100644
+--- a/sway/tree/view.c
++++ b/sway/tree/view.c
+@@ -1027,19 +1027,39 @@ void view_unmap(struct sway_view *view) {
+ 
+ void view_update_size(struct sway_view *view) {
+ 	struct sway_container *con = view->container;
+-	con->pending.content_width = view->geometry.width;
+-	con->pending.content_height = view->geometry.height;
++	double width = view->geometry.width, height = view->geometry.height;
++	bool fitted = false;
++	if (container_is_floating(con)) {
++		floating_fit_size(con, &width, &height);
++		fitted = width != view->geometry.width || height != view->geometry.height;
++	}
++	con->pending.content_width = width;
++	con->pending.content_height = height;
+ 	container_set_geometry_from_content(con);
++
++	// A view that had to be shrunk to fit is moved back inside its workspace
++	struct sway_workspace *ws = con->pending.workspace;
++	if (fitted && ws && (con->pending.x < ws->x || con->pending.y < ws->y ||
++			con->pending.x + con->pending.width > ws->x + ws->width ||
++			con->pending.y + con->pending.height > ws->y + ws->height)) {
++		container_floating_move_to_center(con);
++	}
+ }
+ 
+-// Scale that makes a tiled or fullscreen view fit its container when the
+-// client won't shrink to it (its minimum size is bigger): 1 if it fits.
++// Scale that makes a view fit its container when the client won't shrink to
++// it (its minimum size is bigger): 1 if it fits. A floating view is only
++// scaled when it is bigger than its workspace (see floating_fit_size), not
++// while the client catches up with an interactive resize.
+ static double view_fit_scale(struct sway_view *view) {
+ 	struct sway_container *con = view->container;
+ 	int cw = con->current.content_width, ch = con->current.content_height;
+ 	int gw = view->geometry.width, gh = view->geometry.height;
+-	if (container_is_floating(con) || cw <= 0 || ch <= 0 || gw <= 0 || gh <= 0 ||
+-			(gw <= cw && gh <= ch)) {
++	if (cw <= 0 || ch <= 0 || gw <= 0 || gh <= 0 || (gw <= cw && gh <= ch)) {
++		return 1;
++	}
++	struct sway_workspace *ws = con->current.workspace;
++	if (container_is_floating(con) &&
++			(!ws || (gw <= ws->width && gh <= ws->height))) {
+ 		return 1;
+ 	}
+ 	return fmin((double)cw / gw, (double)ch / gh);

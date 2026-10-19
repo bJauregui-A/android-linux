@@ -1,0 +1,64 @@
+--- /dev/null
++++ b/sysdeps/unix/sysv/linux/aarch64/mprotect.c
+@@ -0,0 +1,61 @@
++/* mprotect para glibc dentro de una app Android.
++
++   SELinux no deja a las apps volver ejecutable una página de un archivo
++   que ya se modificó (copia privada: "execmod"): mprotect da EACCES.  Wine
++   lo hace con cada .dll que carga (mapea el archivo, aplica relocaciones y
++   después pide PROT_EXEC).  La memoria anónima ejecutable sí se permite
++   (es la de los JIT), así que en ese caso la zona se cambia por una copia
++   anónima en el mismo lugar (mremap, atómico) y se reintenta.
++
++   La copia deja de reflejar el archivo; para mapeos privados no importa.
++   Mientras se copia la zona queda sin PROT_EXEC: si otro hilo ejecutaba
++   código ahí (mapeo RWX desde el principio) le llegaría un SIGSEGV.  */
++
++#include <errno.h>
++#include <string.h>
++#include <sys/mman.h>
++#include <sysdep.h>
++#include <ldsodefs.h>
++#include <libc-pointer-arith.h>
++
++#if IS_IN (libc)
++static long int
++mprotect_anonimo (void *addr, size_t len, int prot)
++{
++  /* Si sin PROT_EXEC tampoco se puede, el problema es otro (ej. PROT_WRITE
++     en un mapeo compartido de un archivo de solo lectura).  */
++  long int r = INTERNAL_SYSCALL_CALL (mprotect, addr, len,
++				      (prot & ~PROT_EXEC) | PROT_READ);
++  if (r != 0)
++    return -EACCES;
++  size_t n = ALIGN_UP (len, GLRO(dl_pagesize));
++  long int tmp = INTERNAL_SYSCALL_CALL (mmap, NULL, n, PROT_READ | PROT_WRITE,
++					MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
++  if (INTERNAL_SYSCALL_ERROR_P (tmp))
++    return -EACCES;
++  memcpy ((void *) tmp, addr, n);
++  r = INTERNAL_SYSCALL_CALL (mremap, tmp, n, n,
++			     MREMAP_MAYMOVE | MREMAP_FIXED, addr);
++  if (INTERNAL_SYSCALL_ERROR_P (r))
++    {
++      INTERNAL_SYSCALL_CALL (munmap, tmp, n);
++      return -EACCES;
++    }
++  return INTERNAL_SYSCALL_CALL (mprotect, addr, n, prot);
++}
++#endif
++
++int
++__mprotect (void *addr, size_t len, int prot)
++{
++  long int r = INTERNAL_SYSCALL_CALL (mprotect, addr, len, prot);
++#if IS_IN (libc)
++  if (r == -EACCES && (prot & PROT_EXEC))
++    r = mprotect_anonimo (addr, len, prot);
++#endif
++  if (INTERNAL_SYSCALL_ERROR_P (r))
++    return INLINE_SYSCALL_ERROR_RETURN_VALUE (-r);
++  return 0;
++}
++libc_hidden_def (__mprotect)
++weak_alias (__mprotect, mprotect)

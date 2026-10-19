@@ -1,0 +1,11 @@
+#!/bin/bash
+# "wine" para Lutris: el Wine ARM64 del Proton 11 de Valve (trae FEX como DLL → corre .exe x86/x64),
+# sin pasar por umu/pressure-vessel (imposibles sin root). Lo mismo que hace steam/proton-directo:
+# GLX por llvmpipe (zink por X11 necesita DRI3, que Xwayland aquí no tiene) y sin el LD_PRELOAD de EGL.
+P="$HOME/.local/share/Steam/steamapps/common/Proton 11.0 (ARM64)/files"
+unset LD_PRELOAD MESA_LOADER_DRIVER_OVERRIDE
+# Wine busca wineserver en el PATH (Proton también lo pone ahí)
+export PATH="$P/bin-arm64:$PATH"
+export LD_LIBRARY_PATH="$P/lib/aarch64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export WINEDLLPATH="$P/lib/vkd3d:$P/lib/wine${WINEDLLPATH:+:$WINEDLLPATH}"
+exec "$P/bin-arm64/wine" "$@"

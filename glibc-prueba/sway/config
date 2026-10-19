@@ -13,6 +13,9 @@ set $s ~/.config/sway
 # ~400 dpi
 output * scale 2.5
 output * bg #000000 solid_color
+# Xwayland en píxeles reales: las apps X11 se ven nítidas y se agrandan solas
+# (Steam: -forcedesktopscaling). Parche sway 0002; solo al arrancar sway.
+xwayland_scale 2.5
 # misma distribución que app/.../Distribucion.java (wayland/generar-teclado.sh)
 input type:keyboard xkb_layout latam
 focus_follows_mouse yes
@@ -43,6 +46,8 @@ exec wl-paste --type text --watch cliphist store
 exec wl-paste --type image --watch cliphist store
 # servidor SSH en el puerto 8022 (/etc/ssh/sshd_config.d/10-android.conf); sin sudo: como no-root no hace privsep
 exec /usr/bin/sshd
+# Steam al abrir (steam/steam.sh = /usr/local/bin/steam)
+exec sh -c '/usr/local/bin/steam > /tmp/steam.log 2>&1'
 
 ### Programas
 bindsym $mod+t exec $term
@@ -159,3 +164,9 @@ for_window [title="^(Choose Files|Save As.*|Open|Open File|File Upload.*|Authent
 for_window [app_id="^pinentry-.*"] floating enable, move position center, sticky enable
 # picture-in-picture: fijo, abajo a la derecha, 1/4 de pantalla
 for_window [title="(?i)picture[-\s]?in[-\s]?picture.*"] floating enable, sticky enable, resize set 25 ppt 25 ppt, move position 73 ppt 72 ppt
+# Juegos por Proton/Wine (X11): clase steam_app_<id> (desde Steam) o steam_proton (Lutris, Wine de Proton).
+# A pantalla completa y agrandados con la GPU (scale_to_fit, parche sway 0004): el juego conserva su tamaño
+# (ej. 640×480) y sway lo escala para llenar la pantalla sin deformarlo. Solo ventanas normales, no diálogos.
+# Lo más estable es correrlos en un escritorio virtual de Wine del tamaño del juego (Lutris: "Windowed
+# (virtual desktop)"): así Wine no reacomoda las ventanas al girar el teléfono.
+for_window [class="^(steam_app_.*|steam_proton)$" window_type="normal"] scale_to_fit enable, fullscreen enable

@@ -1,0 +1,13 @@
+#!/bin/bash
+# Proton 11 ARM64 de Valve sin SteamLinuxRuntime_4-arm64: pressure-vessel
+# arma un contenedor con bwrap (namespaces, imposible sin root) y muere en
+# opendir(/proc/self/root).  Wine corre directo sobre el Arch de la app.
+# Se instala en ~/.local/share/Steam/compatibilitytools.d/proton-directo
+# (steam/instalar-proton-directo.sh) y se elige en Propiedades → Compatibilidad.
+P="$HOME/.local/share/Steam/steamapps/common/Proton 11.0 (ARM64)"
+unset LD_PRELOAD MESA_LOADER_DRIVER_OVERRIDE
+# DXVK necesita Vulkan sobre X11 y Turnip está compilado solo para Wayland
+# (y este Proton no trae winewayland): por ahora D3D → OpenGL por GLX (llvmpipe).
+export PROTON_USE_WINED3D=${PROTON_USE_WINED3D:-1}
+export PROTON_LOG=${PROTON_LOG:-1} PROTON_LOG_DIR=${PROTON_LOG_DIR:-/tmp}
+exec python3 "$P/proton" "$@"

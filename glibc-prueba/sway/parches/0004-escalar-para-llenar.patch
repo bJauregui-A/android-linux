@@ -1,0 +1,163 @@
+diff --git a/include/sway/commands.h b/include/sway/commands.h
+index 1d7a3f3..b23894b 100644
+--- a/include/sway/commands.h
++++ b/include/sway/commands.h
+@@ -170,6 +170,7 @@ sway_cmd cmd_reject;
+ sway_cmd cmd_reload;
+ sway_cmd cmd_rename;
+ sway_cmd cmd_resize;
++sway_cmd cmd_scale_to_fit;
+ sway_cmd cmd_scratchpad;
+ sway_cmd cmd_seamless_mouse;
+ sway_cmd cmd_set;
+diff --git a/include/sway/tree/view.h b/include/sway/tree/view.h
+index bb8e0da..5a50da4 100644
+--- a/include/sway/tree/view.h
++++ b/include/sway/tree/view.h
+@@ -102,6 +102,9 @@ struct sway_view {
+ 	// where the scaled content starts inside the container.
+ 	double content_scale;
+ 	int content_offset_x, content_offset_y;
++	// `scale_to_fit` (Xwayland only): the client keeps the size it asks for and
++	// is drawn scaled up or down to fill its container, keeping its proportions
++	bool scale_to_fit;
+ 
+ 	struct wlr_ext_foreign_toplevel_handle_v1 *ext_foreign_toplevel;
+ 
+diff --git a/sway/commands.c b/sway/commands.c
+index 0218479..b81b7f3 100644
+--- a/sway/commands.c
++++ b/sway/commands.c
+@@ -130,6 +130,7 @@ static const struct cmd_handler command_handlers[] = {
+ 	{ "reload", cmd_reload },
+ 	{ "rename", cmd_rename },
+ 	{ "resize", cmd_resize },
++	{ "scale_to_fit", cmd_scale_to_fit },
+ 	{ "scratchpad", cmd_scratchpad },
+ 	{ "shortcuts_inhibitor", cmd_shortcuts_inhibitor },
+ 	{ "split", cmd_split },
+diff --git a/sway/commands/scale_to_fit.c b/sway/commands/scale_to_fit.c
+new file mode 100644
+index 0000000..e86d7b6
+--- /dev/null
++++ b/sway/commands/scale_to_fit.c
+@@ -0,0 +1,42 @@
++#include "sway/commands.h"
++#include "sway/tree/arrange.h"
++#include "sway/tree/container.h"
++#include "sway/tree/view.h"
++#include "util.h"
++
++struct cmd_results *cmd_scale_to_fit(int argc, char **argv) {
++	struct cmd_results *error = NULL;
++	if ((error = checkarg(argc, "scale_to_fit", EXPECTED_EQUAL_TO, 1))) {
++		return error;
++	}
++	struct sway_container *container = config->handler_context.container;
++	if (container == NULL || container->view == NULL) {
++		return cmd_results_new(CMD_FAILURE, "Only views can be scaled to fit");
++	}
++	struct sway_view *view = container->view;
++	if (view->type != SWAY_VIEW_XWAYLAND) {
++		return cmd_results_new(CMD_FAILURE,
++				"scale_to_fit only works with Xwayland views");
++	}
++
++	bool enable = parse_boolean(argv[0], view->scale_to_fit);
++	if (enable == view->scale_to_fit) {
++		return cmd_results_new(CMD_SUCCESS, NULL);
++	}
++	view->scale_to_fit = enable;
++	if (enable && view->geometry.width > 0 && view->geometry.height > 0) {
++		// Keep the size the client has now (when mapping, natural_* already is)
++		view->natural_width = view->geometry.width;
++		view->natural_height = view->geometry.height;
++	}
++
++	// The container doesn't change size, so no transaction would configure it
++	view_configure(view, container->pending.content_x,
++			container->pending.content_y, container->pending.content_width,
++			container->pending.content_height);
++	if (container->pending.workspace) {
++		arrange_workspace(container->pending.workspace);
++	}
++	view_center_and_clip_surface(view);
++	return cmd_results_new(CMD_SUCCESS, NULL);
++}
+diff --git a/sway/desktop/transaction.c b/sway/desktop/transaction.c
+index 082fe20..fb3c7c9 100644
+--- a/sway/desktop/transaction.c
++++ b/sway/desktop/transaction.c
+@@ -833,7 +833,8 @@ static void transaction_commit(struct sway_transaction *transaction) {
+ 					instruction->container_state.content_y,
+ 					instruction->container_state.content_width,
+ 					instruction->container_state.content_height);
+-			if (!hidden) {
++			// A view scaled to fit keeps its size: no commit will answer
++			if (!hidden && !node->sway_container->view->scale_to_fit) {
+ 				instruction->waiting = true;
+ 				++transaction->num_waiting;
+ 			}
+diff --git a/sway/desktop/xwayland.c b/sway/desktop/xwayland.c
+index 88bd125..de2afda 100644
+--- a/sway/desktop/xwayland.c
++++ b/sway/desktop/xwayland.c
+@@ -284,6 +284,10 @@ static uint32_t configure(struct sway_view *view, double lx, double ly, int widt
+ 	}
+ 	struct wlr_xwayland_surface *xsurface = view->wlr_xwayland_surface;
+ 
++	if (view->scale_to_fit && view->natural_width > 0 && view->natural_height > 0) {
++		width = view->natural_width;
++		height = view->natural_height;
++	}
+ 	double s = x11_scale();
+ 	wlr_xwayland_surface_configure(xsurface, round(lx * s), round(ly * s),
+ 		round(width * s), round(height * s));
+@@ -608,7 +612,15 @@ static void handle_request_configure(struct wl_listener *listener, void *data) {
+ 			ev->width, ev->height);
+ 		return;
+ 	}
+-	if (container_is_floating(view->container)) {
++	if (view->scale_to_fit && !container_is_floating(view->container)) {
++		// It gets the size it asks for, scaled to its container
++		view->natural_width = round(ev->width / x11_scale());
++		view->natural_height = round(ev->height / x11_scale());
++		configure(view, view->container->current.content_x,
++				view->container->current.content_y,
++				view->container->current.content_width,
++				view->container->current.content_height);
++	} else if (container_is_floating(view->container)) {
+ 		// Respect minimum and maximum sizes
+ 		view->natural_width = round(ev->width / x11_scale());
+ 		view->natural_height = round(ev->height / x11_scale());
+diff --git a/sway/meson.build b/sway/meson.build
+index ad189cc..03cebd4 100644
+--- a/sway/meson.build
++++ b/sway/meson.build
+@@ -108,6 +108,7 @@ sway_sources = files(
+ 	'commands/smart_borders.c',
+ 	'commands/smart_gaps.c',
+ 	'commands/split.c',
++	'commands/scale_to_fit.c',
+ 	'commands/sticky.c',
+ 	'commands/swaybg_command.c',
+ 	'commands/swaynag_command.c',
+diff --git a/sway/tree/view.c b/sway/tree/view.c
+index 941edda..1b81d04 100644
+--- a/sway/tree/view.c
++++ b/sway/tree/view.c
+@@ -1054,7 +1054,13 @@ static double view_fit_scale(struct sway_view *view) {
+ 	struct sway_container *con = view->container;
+ 	int cw = con->current.content_width, ch = con->current.content_height;
+ 	int gw = view->geometry.width, gh = view->geometry.height;
+-	if (cw <= 0 || ch <= 0 || gw <= 0 || gh <= 0 || (gw <= cw && gh <= ch)) {
++	if (cw <= 0 || ch <= 0 || gw <= 0 || gh <= 0) {
++		return 1;
++	}
++	if (view->scale_to_fit) {
++		return fmin((double)cw / gw, (double)ch / gh);
++	}
++	if (gw <= cw && gh <= ch) {
+ 		return 1;
+ 	}
+ 	struct sway_workspace *ws = con->current.workspace;

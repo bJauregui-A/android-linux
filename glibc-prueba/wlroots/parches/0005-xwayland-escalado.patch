@@ -1,0 +1,132 @@
+diff --git a/include/wlr/types/wlr_scene.h b/include/wlr/types/wlr_scene.h
+index 7d3f926..84f4399 100644
+--- a/include/wlr/types/wlr_scene.h
++++ b/include/wlr/types/wlr_scene.h
+@@ -712,6 +712,12 @@ void wlr_scene_subsurface_tree_set_clip(struct wlr_scene_node *node,
+  */
+ void wlr_scene_subsurface_tree_set_scale(struct wlr_scene_node *node, double scale);
+ 
++/**
++ * Draws a lone scene surface scaled by the given factor (size and input
++ * coordinates), like wlr_scene_subsurface_tree_set_scale().
++ */
++void wlr_scene_surface_set_scale(struct wlr_scene_surface *surface, double scale);
++
+ /**
+  * Add a node displaying an xdg_surface and all of its sub-surfaces to the
+  * scene-graph.
+diff --git a/include/wlr/types/wlr_xdg_output_v1.h b/include/wlr/types/wlr_xdg_output_v1.h
+index 4ee8ec3..0afe0a6 100644
+--- a/include/wlr/types/wlr_xdg_output_v1.h
++++ b/include/wlr/types/wlr_xdg_output_v1.h
+@@ -42,10 +42,25 @@ struct wlr_xdg_output_manager_v1 {
+ 		struct wl_listener layout_add;
+ 		struct wl_listener layout_change;
+ 		struct wl_listener layout_destroy;
++
++		// wlr_xdg_output_manager_v1_set_client_scale()
++		struct wl_client *scaled_client;
++		double client_scale;
++		struct wl_listener scaled_client_destroy;
+ 	} WLR_PRIVATE;
+ };
+ 
+ struct wlr_xdg_output_manager_v1 *wlr_xdg_output_manager_v1_create(
+ 	struct wl_display *display, struct wlr_output_layout *layout);
+ 
++/**
++ * Multiplies the logical position and size sent to one client. Meant for
++ * Xwayland on a scaled output: its X11 screen is then in buffer pixels and the
++ * compositor draws its surfaces scaled down by the same factor. Only affects
++ * outputs the client binds afterwards; NULL (or a scale of 1) disables it.
++ */
++void wlr_xdg_output_manager_v1_set_client_scale(
++	struct wlr_xdg_output_manager_v1 *manager, struct wl_client *client,
++	double scale);
++
+ #endif
+diff --git a/types/scene/surface.c b/types/scene/surface.c
+index 015570a..bed0b69 100644
+--- a/types/scene/surface.c
++++ b/types/scene/surface.c
+@@ -501,3 +501,7 @@ void scene_surface_set_scale(struct wlr_scene_surface *surface, double scale) {
+ 		surface_update_preferred_scale(surface);
+ 	}
+ }
++
++void wlr_scene_surface_set_scale(struct wlr_scene_surface *surface, double scale) {
++	scene_surface_set_scale(surface, scale > 0 ? scale : 1);
++}
+diff --git a/types/wlr_xdg_output_v1.c b/types/wlr_xdg_output_v1.c
+index 2621239..299c70c 100644
+--- a/types/wlr_xdg_output_v1.c
++++ b/types/wlr_xdg_output_v1.c
+@@ -1,4 +1,5 @@
+ #include <assert.h>
++#include <math.h>
+ #include <stdlib.h>
+ #include <stdio.h>
+ #include <wlr/types/wlr_output_layout.h>
+@@ -26,10 +27,16 @@ static void output_handle_resource_destroy(struct wl_resource *resource) {
+ 
+ static void output_send_details(struct wlr_xdg_output_v1 *xdg_output,
+ 		struct wl_resource *resource) {
++	struct wlr_xdg_output_manager_v1 *manager = xdg_output->manager;
++	double scale = 1;
++	if (manager->scaled_client != NULL &&
++			wl_resource_get_client(resource) == manager->scaled_client) {
++		scale = manager->client_scale;
++	}
+ 	zxdg_output_v1_send_logical_position(resource,
+-		xdg_output->x, xdg_output->y);
++		round(xdg_output->x * scale), round(xdg_output->y * scale));
+ 	zxdg_output_v1_send_logical_size(resource,
+-		xdg_output->width, xdg_output->height);
++		round(xdg_output->width * scale), round(xdg_output->height * scale));
+ 	if (wl_resource_get_version(resource) < OUTPUT_DONE_DEPRECATED_SINCE_VERSION) {
+ 		zxdg_output_v1_send_done(resource);
+ 	}
+@@ -229,6 +236,26 @@ static void handle_layout_change(struct wl_listener *listener, void *data) {
+ 	output_manager_send_details(manager);
+ }
+ 
++static void handle_scaled_client_destroy(struct wl_listener *listener, void *data) {
++	struct wlr_xdg_output_manager_v1 *manager =
++		wl_container_of(listener, manager, scaled_client_destroy);
++	wl_list_remove(&manager->scaled_client_destroy.link);
++	wl_list_init(&manager->scaled_client_destroy.link);
++	manager->scaled_client = NULL;
++}
++
++void wlr_xdg_output_manager_v1_set_client_scale(
++		struct wlr_xdg_output_manager_v1 *manager, struct wl_client *client,
++		double scale) {
++	wl_list_remove(&manager->scaled_client_destroy.link);
++	wl_list_init(&manager->scaled_client_destroy.link);
++	manager->scaled_client = scale > 0 && scale != 1 ? client : NULL;
++	manager->client_scale = scale;
++	if (manager->scaled_client != NULL) {
++		wl_client_add_destroy_listener(client, &manager->scaled_client_destroy);
++	}
++}
++
+ static void manager_destroy(struct wlr_xdg_output_manager_v1 *manager) {
+ 	struct wlr_xdg_output_v1 *output, *tmp;
+ 	wl_list_for_each_safe(output, tmp, &manager->outputs, link) {
+@@ -243,6 +270,7 @@ static void manager_destroy(struct wlr_xdg_output_manager_v1 *manager) {
+ 	wl_list_remove(&manager->layout_add.link);
+ 	wl_list_remove(&manager->layout_change.link);
+ 	wl_list_remove(&manager->layout_destroy.link);
++	wl_list_remove(&manager->scaled_client_destroy.link);
+ 	free(manager);
+ }
+ 
+@@ -291,5 +319,8 @@ struct wlr_xdg_output_manager_v1 *wlr_xdg_output_manager_v1_create(
+ 	manager->display_destroy.notify = handle_display_destroy;
+ 	wl_display_add_destroy_listener(display, &manager->display_destroy);
+ 
++	manager->scaled_client_destroy.notify = handle_scaled_client_destroy;
++	wl_list_init(&manager->scaled_client_destroy.link);
++
+ 	return manager;
+ }

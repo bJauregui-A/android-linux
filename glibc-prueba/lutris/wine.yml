@@ -1,0 +1,9 @@
+# Runner Wine de Lutris: Proton 11 ARM64 (ver lutris/wine). DXVK/VKD3D apagados hasta que Turnip tenga X11.
+wine:
+  version: proton-11-arm64
+  dxvk: false
+  vkd3d: false
+  d3d_extras: false
+  dxvk_nvapi: false
+  esync: false  # pide 524288 archivos abiertos; Android tiene tope 32768 (sin root no se sube). fsync sí anda
+  fsync: true

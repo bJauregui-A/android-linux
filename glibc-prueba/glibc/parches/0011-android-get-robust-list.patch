@@ -1,0 +1,97 @@
+--- a/sysdeps/unix/sysv/linux/aarch64/android-path.c
++++ b/sysdeps/unix/sysv/linux/aarch64/android-path.c
+@@ -976,10 +976,38 @@
+ 	if (t == b2)
+ 	  break;
+ 	struct sockaddr_un su;
++	su.sun_family = AF_UNIX;
+ 	n = slen (t);
+ 	if (n >= sizeof su.sun_path)
+-	  return -ENAMETOOLONG;
+-	su.sun_family = AF_UNIX;
++	  {
++	    /* Con el prefijo la ruta ya no cabe en sun_path (108 bytes;
++	       Chromium usa /tmp/.com.valvesoftware.Steam.XXXXXX/SingletonSocket).
++	       Se llega a la carpeta por /proc/self/fd/N: el kernel sigue ese
++	       enlace al resolver la ruta y el socket queda en su lugar real.  */
++	    const char *base = t + n;
++	    while (base[-1] != '/')
++	      base--;
++	    size_t nb = slen (base);
++	    mcopy (b2, t, base - t);
++	    b2[base - t] = '\0';
++	    long int fd = RAW (__NR_openat, AT_FDCWD, b2,
++			       O_PATH | O_DIRECTORY | O_CLOEXEC);
++	    if (fd < 0)
++	      return fd;
++	    char *q = su.sun_path;
++	    mcopy (q, "/proc/self/fd/", 14);
++	    q = utoa (q + 14, fd);
++	    *q++ = '/';
++	    long int r = -ENAMETOOLONG;
++	    if ((size_t) (q - su.sun_path) + nb < sizeof su.sun_path)
++	      {
++		mcopy (q, base, nb + 1);
++		r = raw (nr, a0, (long int) &su, off + (q - su.sun_path) + nb + 1,
++			 0, 0, 0);
++	      }
++	    RAW (__NR_close, fd);
++	    return r;
++	  }
+ 	mcopy (su.sun_path, t, n + 1);
+ 	return raw (nr, a0, (long int) &su, off + n + 1, 0, 0, 0);
+       }
+@@ -1020,6 +1048,7 @@
+ #if IS_IN (libc)
+ # include <signal.h>
+ # include <sys/ucontext.h>
++# include <tls.h>
+ 
+ /* El seccomp de las apps responde a las syscalls no permitidas con SIGSYS
+    (SECCOMP_RET_TRAP).  Se atrapa y la syscall devuelve ENOSYS, como en un
+@@ -1040,6 +1069,30 @@
+   return 0;
+ }
+ 
++/* get_robust_list(tid, &head, &len) también está bloqueada, y Steam y su
++   steamwebhelper usan la respuesta sin mirar el error (NULL -> SIGSEGV).
++   Como set_robust_list no se puede registrar (0001), la lista de cada hilo
++   vive solo en su struct pthread: al hilo que llama se le da la suya; para
++   otro hilo del proceso, una lista vacía (leer su struct pthread desde un
++   manejador de señal no es seguro); un tid ajeno es ESRCH.  */
++static struct robust_list_head robust_vacia = { .list = &robust_vacia };
++
++static long int
++get_robust_list (long int tid, void **head, size_t *len)
++{
++  long int pid = RAW (__NR_getpid, 0);
++  void *h;
++  if (tid == 0 || tid == RAW (__NR_gettid, 0))
++    h = &THREAD_SELF->robust_head;
++  else if (RAW (__NR_tgkill, pid, tid, 0) == 0)
++    h = &robust_vacia;
++  else
++    return -ESRCH;
++  *head = h;
++  *len = sizeof (struct robust_list_head);
++  return 0;
++}
++
+ static void
+ sigsys_handler (int sig, siginfo_t *si, void *ctx)
+ {
+@@ -1064,7 +1117,13 @@
+       RAW (__NR_kill, RAW (__NR_getpid, 0), SIGSYS);
+       return;
+     }
+-  ((ucontext_t *) ctx)->uc_mcontext.regs[0] = -ENOSYS;
++  unsigned long long int *r = ((ucontext_t *) ctx)->uc_mcontext.regs;
++  if (si->si_syscall == __NR_get_robust_list)
++    {
++      r[0] = get_robust_list (r[0], (void **) r[1], (size_t *) r[2]);
++      return;
++    }
++  r[0] = -ENOSYS;
+   init ();
+   if (debug_sigsys)
+     {

@@ -4,6 +4,8 @@
 #   0001: renderer Vulkan sin nodo DRM (Turnip con KGSL)
 #   0002: allocator android-ahb-v1 en el backend wayland (sway compone directo en el AHardwareBuffer)
 #   0003: linux-dmabuf sin nodo DRM (v3, sin feedback): los clientes de sway le pasan dmabufs
+#   0004: escala de contenido en la escena (sway achica las ventanas que no caben)
+#   0005: xdg-output escalado para un cliente (Xwayland en píxeles reales) y escala de wlr_scene_surface
 # Resultado en ~/wlroots/lib/libwlroots-0.20.so; sway lo usa con LD_LIBRARY_PATH=~/wlroots/lib.
 set -e
 V=0.20.2
