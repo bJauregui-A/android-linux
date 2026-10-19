@@ -25,6 +25,8 @@ Que el teléfono (Redmi 15 5G, HyperOS, **sin root**) sea a la vez Android y un 
 - Confirmado por el usuario: escala 2.5 ✅, opacidad ✅, SUPER+A ✅, SUPER+TAB ✅, scroll de 2 dedos ✅, ñ/tildes desde el teclado de Android ✅. Clic derecho: sin probar.
 - Barra de navegación (3 botones, `navigation_mode 0`): solo se ve con el teclado de Android abierto (Android la fuerza); con el teclado cerrado se esconde ✅.
 - ✅ **Estirado en la primera apertura**: en frío la ventana ya existe cuando sway se conecta y el único configure con el tamaño real llega mientras wlroots activa la salida, que lo ignora (`xdg_surface_handle_configure`: `if (!wlr_output.enabled) return`) → sway quedaba en 1280×720 (waybar "width: 512") aplastado a 1080 px hasta cerrar/abrir el teclado. Ahora el anfitrión reenvía el configure cuando el toplevel se mapea (primer buffer). Probado en 3 aperturas en frío: "width: 432" desde el inicio.
+- Herramientas nuevas: `scripts/medir-fondo.sh frente|atras` (CPU de app + sway con vkcube, sin cerrar nada; necesita `scripts/wl.sh` en `/data/local/tmp`). Para ver la apertura en frío: `am force-stop`, `am start ...WaylandActivity`, `screencap` a los pocos segundos (solo si `topResumedActivity` es WaylandActivity) y `grep 'Bar configured' /tmp/sway.log` (432 = bien, 512 = estirado). `swaymsg -t get_outputs` da el tamaño lógico que cree tener sway (1080/2.5 = 432).
+- Commits: `0fa831b` (frame callbacks), `3aae5d8` (configure al mapear).
 
 **8ª sesión (2026-10-19), cerrada: ✅ portapapeles Android ↔ Linux, probado por el usuario en los dos sentidos.** El cursor está bien así (no tocar).
 - **Por qué no en el anfitrión**: el backend wayland de wlroots no reenvía el portapapeles al compositor padre (no usa `wl_data_device`), así que un `wl_data_device_manager` en `anfitrion.c` no le serviría a sway. El puente va **dentro de sway** con wl-clipboard (protocolo data-control, sin foco): `Portapapeles.java`.
@@ -48,7 +50,7 @@ Que el teléfono (Redmi 15 5G, HyperOS, **sin root**) sea a la vez Android y un 
 1. **Ojo: el usuario suele estar usando el teléfono.** `scripts/correr.sh`, `correr-wl.sh` y `adb install -r` cierran sway y todo lo abierto: avisar antes. Para mirar sin cerrar nada: `adb exec-out screencap -p` y `adb shell "run-as dev.ben4shot.glibcprueba.sdk36 cat files/archlinux/tmp/sway.log"`.
 2. ~~Cursor más grande~~: el usuario dice que está bien. ~~Portapapeles Android ↔ Linux~~ ✅ (8ª sesión).
 3. ~~¿sway se bloquea en segundo plano?~~ No (9ª sesión); frame callbacks sin ventana ✅; estirado al abrir ✅; barra inferior solo con teclado (normal).
-4. **Popups xdg y `wl_subcompositor`** en el anfitrión (solo clientes directos, sin sway en medio).
+4. **← siguiente: popups xdg y `wl_subcompositor`** en el anfitrión (solo clientes directos, sin sway en medio): hoy `xdg_surface.get_popup` se cierra al pedirse (menús GTK/Qt no andan) y libdecor pide `wl_subcompositor` para las decoraciones. Revisar también si dentro de sway los menús funcionan (sin probar).
 5. ~~Escala y opacidad~~: el usuario dice que están bien.
 6. Luego lo grande de "Compatibilidad completa" (abajo): capa seccomp para Go/estáticos, audio, Xwayland.
 7. Menores: parche a Turnip para `KHR_display` (vkcube sin `--wsi`); si vuelve a pedir Hyprland, ver "sway, swayfx y Hyprland".
@@ -59,7 +61,7 @@ Que el teléfono (Redmi 15 5G, HyperOS, **sin root**) sea a la vez Android y un 
 3. Vulkan: desde una foot de sway, `vkcube --wsi wayland` (sin la opción falla, ver 9ª sesión; la terminal exporta `VK_ICD_FILENAMES`). Si existe `~/wlroots/lib/libwlroots-0.20.so`, el servicio arranca sway con `WLR_RENDERER=vulkan` y `LD_LIBRARY_PATH=/home/user/wlroots/lib` (escritorio por GPU); si no, `WLR_RENDERER=pixman` y `MESA_VK_WSI_DEBUG=sw` como antes.
 4. OpenGL: `es2gears_wayland`, `eglinfo -B -p wayland` (la terminal exporta `MESA_LOADER_DRIVER_OVERRIDE=zink` y `LD_PRELOAD=~/turnip/lib/libegl-zink.so`).
 
-**Probar a mano (no se pudo por ADB):** SUPER+V (portapapeles), SUPER+A (fuzzel), SUPER+TAB, que las barras de Android aparezcan al deslizar y se escondan solas, kitty (pestañas, letra, padding de 25 en pantalla chica), que waybar no choque con la cámara, opacidad de inactivas. sway por GPU: abrir/cerrar el teclado, girar, salir y volver; teclado físico (US) en el escritorio, scroll con dos dedos, clic derecho (mantener), ñ/tildes desde Gboard, nano/htop a pantalla completa, girar la pantalla.
+**Probar a mano (no se pudo por ADB):** clic derecho (mantener; el usuario aún no puede probarlo), teclado físico (US) en el escritorio, kitty (pestañas, letra, padding de 25 en pantalla chica), que waybar no choque con la cámara, nano/htop a pantalla completa, girar la pantalla. Ya probados por el usuario (9ª sesión): SUPER+A, SUPER+TAB, scroll con dos dedos, ñ/tildes desde el teclado de Android, escala, opacidad, barras de Android (la de abajo solo aparece con el teclado abierto). SUPER+V espera la capa seccomp.
 
 **Pendientes, en el orden sugerido:**
 1. ~~Zink~~ ✅ (ver "GPU").
