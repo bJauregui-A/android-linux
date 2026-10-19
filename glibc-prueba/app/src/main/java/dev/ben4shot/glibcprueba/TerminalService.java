@@ -1,0 +1,227 @@
+package dev.ben4shot.glibcprueba;
+
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.app.Service;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Intent;
+import android.content.pm.ServiceInfo;
+import android.net.ConnectivityManager;
+import android.net.LinkProperties;
+import android.os.Binder;
+import android.os.Build;
+import android.os.IBinder;
+import android.util.Log;
+
+import com.termux.terminal.TerminalSession;
+import com.termux.terminal.TerminalSessionClient;
+import com.termux.view.TerminalView;
+
+import java.io.File;
+import java.io.FileWriter;
+import java.net.InetAddress;
+import java.util.ArrayList;
+import java.util.List;
+
+// Servicio en primer plano dueño de la sesión de bash: la activity se puede cerrar
+// (o girar) sin que Android mate los procesos glibc.
+public class TerminalService extends Service implements TerminalSessionClient {
+    private static final String TAG = "TERMINAL";
+    private static final String CANAL = "terminal";
+    static final String PREFIJO = "archlinux";
+
+    private final IBinder binder = new Local();
+    private TerminalSession sesion;
+    private TerminalView vista; // la de la activity visible, o null
+
+    class Local extends Binder {
+        TerminalService servicio() { return TerminalService.this; }
+    }
+
+    @Override
+    public IBinder onBind(Intent intent) { return binder; }
+
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        NotificationManager nm = getSystemService(NotificationManager.class);
+        nm.createNotificationChannel(new NotificationChannel(CANAL, "Terminal", NotificationManager.IMPORTANCE_LOW));
+        PendingIntent abrir = PendingIntent.getActivity(this, 0,
+                new Intent(this, TerminalActivity.class), PendingIntent.FLAG_IMMUTABLE);
+        Notification n = new Notification.Builder(this, CANAL)
+                .setSmallIcon(android.R.drawable.ic_menu_manage)
+                .setContentTitle("Terminal Arch")
+                .setContentText("bash corriendo")
+                .setContentIntent(abrir)
+                .setOngoing(true)
+                .build();
+        if (Build.VERSION.SDK_INT >= 34) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+        else startForeground(1, n);
+        return START_NOT_STICKY;
+    }
+
+    @Override
+    public void onDestroy() {
+        if (sesion != null) sesion.finishIfRunning();
+        super.onDestroy();
+    }
+
+    TerminalSession sesion() {
+        if (sesion == null) sesion = crearSesion();
+        return sesion;
+    }
+
+    void setVista(TerminalView v) {
+        vista = v;
+        if (sesion != null) sesion.updateTerminalSessionClient(this);
+    }
+
+    void terminar() {
+        stopForeground(STOP_FOREGROUND_REMOVE);
+        stopSelf();
+    }
+
+    // bash -l de Arch a través del cargador de la glibc propia; el cwd es la ruta real
+    // (el pty lo abre libtermux.so, que es bionic), el resto ya va dentro del prefijo.
+    private TerminalSession crearSesion() {
+        File prefijo = new File(getFilesDir(), PREFIJO);
+        String cargador = getApplicationInfo().nativeLibraryDir + "/libldp.so";
+        if (!new File(prefijo, "usr/bin/bash").exists()) {
+            String msg = "falta " + prefijo + " (instalar con scripts/instalar-arch.sh)";
+            return new TerminalSession("/system/bin/sh", getFilesDir().getAbsolutePath(),
+                    new String[]{"sh", "-c", "echo '" + msg + "'"}, new String[0], 2000, this);
+        }
+        File home = new File(prefijo, "home/user");
+        home.mkdirs();
+        // shm_open de glibc usa /dev/shm (traducido al prefijo): wlroots, foot...
+        new File(prefijo, "dev/shm").mkdirs();
+        escribirResolvConf(prefijo);
+        escribirSudo(prefijo);
+        Wayland.iniciar(this);
+        String[] env = {
+                "GLIBC_PREFIX=" + prefijo,
+                "GLIBC_LOADER=" + cargador,
+                "HOME=/home/user",
+                "USER=user",
+                "SHELL=/usr/bin/bash",
+                "PATH=/usr/local/bin:/usr/bin",
+                "TERM=xterm-256color",
+                "COLORTERM=truecolor",
+                "LANG=C.UTF-8",
+                "TMPDIR=/tmp",
+                "TZ=" + java.util.TimeZone.getDefault().getID(),
+                "XDG_RUNTIME_DIR=" + Wayland.runtimeDir(),
+                "WAYLAND_DISPLAY=wayland-0",
+                "WLR_RENDERER=pixman", // sin GPU por ahora (Turnip pendiente)
+                "WLR_NO_HARDWARE_CURSORS=1", // el anfitrión no dibuja cursor: lo pinta sway
+                // Vulkan: Turnip (KGSL) compilado en el teléfono (turnip/compilar-mesa.sh);
+                // sin dmabuf (dma_heap bloqueado), el cuadro sale por wl_shm
+                "VK_ICD_FILENAMES=/home/user/turnip/share/vulkan/icd.d/freedreno_icd.aarch64.json",
+                "MESA_VK_WSI_DEBUG=sw",
+        };
+        String[] args = {"libldp.so", "/usr/bin/bash", "-l"};
+        Log.i(TAG, "sesión: " + cargador + " /usr/bin/bash -l, prefijo " + prefijo);
+        return new TerminalSession(cargador, home.getAbsolutePath(), args, env, 5000, this);
+    }
+
+    // DNS de la red activa de Android; 1.1.1.1 de respaldo (glibc usa hasta 3).
+    private void escribirResolvConf(File prefijo) {
+        List<String> servidores = new ArrayList<>();
+        try {
+            ConnectivityManager cm = getSystemService(ConnectivityManager.class);
+            LinkProperties lp = cm.getLinkProperties(cm.getActiveNetwork());
+            if (lp != null) {
+                for (InetAddress a : lp.getDnsServers()) {
+                    if (servidores.size() < 2) servidores.add(a.getHostAddress());
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "DNS de Android", e);
+        }
+        servidores.add("1.1.1.1");
+        StringBuilder sb = new StringBuilder("# escrito por la app al abrir la terminal\n");
+        for (String s : servidores) sb.append("nameserver ").append(s).append('\n');
+        File f = new File(prefijo, "etc/resolv.conf");
+        f.delete(); // por si es un enlace
+        try (FileWriter w = new FileWriter(f)) {
+            w.write(sb.toString());
+        } catch (Exception e) {
+            Log.e(TAG, "resolv.conf", e);
+        }
+    }
+
+    // "sudo" = modo fakeroot de la glibc (pacman exige uid 0).
+    private void escribirSudo(File prefijo) {
+        File f = new File(prefijo, "usr/local/bin/sudo");
+        if (f.exists()) return;
+        f.getParentFile().mkdirs();
+        try (FileWriter w = new FileWriter(f)) {
+            w.write("#!/usr/bin/bash\n# fakeroot de la glibc propia, escrito por la app\nGLIBC_FAKEROOT=1 exec \"$@\"\n");
+        } catch (Exception e) {
+            Log.e(TAG, "sudo", e);
+        }
+        f.setExecutable(true, false);
+    }
+
+    // --- TerminalSessionClient ---
+
+    @Override
+    public void onTextChanged(TerminalSession s) { if (vista != null) vista.onScreenUpdated(); }
+
+    @Override
+    public void onTitleChanged(TerminalSession s) { }
+
+    @Override
+    public void onSessionFinished(TerminalSession s) {
+        if (vista != null) vista.onScreenUpdated();
+        else terminar();
+    }
+
+    @Override
+    public void onCopyTextToClipboard(TerminalSession s, String texto) {
+        getSystemService(ClipboardManager.class).setPrimaryClip(ClipData.newPlainText("terminal", texto));
+    }
+
+    @Override
+    public void onPasteTextFromClipboard(TerminalSession s) {
+        ClipData clip = getSystemService(ClipboardManager.class).getPrimaryClip();
+        if (clip == null || clip.getItemCount() == 0) return;
+        CharSequence texto = clip.getItemAt(0).coerceToText(this);
+        if (texto != null && s.getEmulator() != null) s.getEmulator().paste(texto.toString());
+    }
+
+    @Override
+    public void onBell(TerminalSession s) { }
+
+    @Override
+    public void onColorsChanged(TerminalSession s) { if (vista != null) vista.invalidate(); }
+
+    @Override
+    public void onTerminalCursorStateChange(boolean visible) { }
+
+    @Override
+    public Integer getTerminalCursorStyle() { return 0; } // bloque
+
+    @Override
+    public void logError(String tag, String msg) { Log.e(TAG, tag + ": " + msg); }
+
+    @Override
+    public void logWarn(String tag, String msg) { Log.w(TAG, tag + ": " + msg); }
+
+    @Override
+    public void logInfo(String tag, String msg) { Log.i(TAG, tag + ": " + msg); }
+
+    @Override
+    public void logDebug(String tag, String msg) { }
+
+    @Override
+    public void logVerbose(String tag, String msg) { }
+
+    @Override
+    public void logStackTraceWithMessage(String tag, String msg, Exception e) { Log.e(TAG, tag + ": " + msg, e); }
+
+    @Override
+    public void logStackTrace(String tag, Exception e) { Log.e(TAG, tag, e); }
+}

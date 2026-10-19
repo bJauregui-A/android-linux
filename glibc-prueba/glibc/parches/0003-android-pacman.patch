@@ -1,0 +1,470 @@
+--- a/elf/libc_early_init.c	2026-01-23 17:54:00.000000000 -0300
++++ b/elf/libc_early_init.c	2026-10-19 09:20:55.927200943 -0300
+@@ -44,6 +44,14 @@
+ 
+   __pthread_early_init ();
+ 
++  /* Android: las syscalls bloqueadas por seccomp devuelven ENOSYS
++     (android-path.c).  */
++  if (initial)
++    {
++      extern void __android_sigsys_init (void) attribute_hidden;
++      __android_sigsys_init ();
++    }
++
+   __getrandom_early_init (initial);
+ 
+   /* Initialize system malloc (needs __libc_initial to be set).  */
+--- a/nptl/cancellation.c	2026-10-19 09:39:10.386316885 -0300
++++ b/nptl/cancellation.c	2026-10-19 09:35:24.888787289 -0300
+@@ -31,6 +31,13 @@
+   long int result;
+   struct pthread *pd = THREAD_SELF;
+ 
++  /* Android: el seccomp de apps solo permite accept4 (lo que usa bionic).  */
++  if (nr == __NR_accept)
++    {
++      nr = __NR_accept4;
++      a4 = 0;
++    }
++
+   /* Android: syscalls con rutas (open, connect...) se traducen; no son
+      puntos de cancelación.  */
+   if (__android_path_nr (nr))
+--- a/sysdeps/unix/sysv/linux/aarch64/android-path.c	2026-10-19 09:39:10.386445185 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/android-path.c	2026-10-19 09:38:19.029467608 -0300
+@@ -7,6 +7,14 @@
+    programas glibc a través del cargador (la única carpeta ejecutable de una
+    app es nativeLibraryDir) y resuelve los scripts #! por su cuenta.
+ 
++   Con GLIBC_FAKEROOT=1 el proceso se ve como root (uid/gid 0) y los chown
++   que el kernel rechaza con EPERM se dan por buenos, como fakeroot (el de
++   Arch usa SysV IPC, que Android no tiene).  Lo usa pacman.
++
++   libc instala además un manejador de SIGSYS: las syscalls que el seccomp de
++   Android no permite devuelven ENOSYS en vez de matar al proceso
++   (GLIBC_DEBUG_SIGSYS=1 las anota en stderr).
++
+    Se compila en libc y en ld.so; cada uno tiene su propia copia del estado.  */
+ 
+ #include <sysdep.h>
+@@ -18,6 +26,7 @@
+ #include <stddef.h>
+ #include <string.h>
+ #include <sys/socket.h>
++#include <sys/stat.h>
+ #include <sys/syscall.h>
+ #include <sys/un.h>
+ #include <unistd.h>
+@@ -25,6 +34,10 @@
+ #define KEY_PREFIX "GLIBC_PREFIX="
+ #define KEY_LOADER "GLIBC_LOADER="
+ #define KEY_LEN 13
++#define KEY_FAKEROOT "GLIBC_FAKEROOT="
++#define KEY_FAKEROOT_LEN 15
++#define KEY_DEBUG "GLIBC_DEBUG_SIGSYS="
++#define KEY_DEBUG_LEN 19
+ 
+ /* 0 sin iniciar, 1 sin prefijo (no se traduce nada), 2 con prefijo.  */
+ static int state;
+@@ -37,6 +50,8 @@
+    que devuelven getcwd y readlink.  */
+ static char real_prefix[PATH_MAX];
+ static size_t rlen;
++static int fakeroot;
++static int debug_sigsys;
+ #define PREFIX (env_prefix + KEY_LEN)
+ #define LOADER (env_loader + KEY_LEN)
+ 
+@@ -89,7 +104,7 @@
+   return p;
+ }
+ 
+-/* Lee GLIBC_PREFIX y GLIBC_LOADER de /proc/self/environ: es el entorno con
++/* Lee GLIBC_PREFIX, GLIBC_LOADER y GLIBC_FAKEROOT de /proc/self/environ: es el entorno con
+    que arrancó el proceso, no lo cambian setenv ni clearenv.  */
+ static void
+ init (void)
+@@ -105,7 +120,7 @@
+     }
+   char buf[512];
+   size_t idx = 0, np = 0, nl = 0;
+-  int mp = 1, ml = 1, gotp = 0, gotl = 0;
++  int mp = 1, ml = 1, mf = 1, md = 1, gotp = 0, gotl = 0;
+   for (;;)
+     {
+       long int n = RAW (__NR_read, fd, buf, sizeof buf);
+@@ -117,9 +132,17 @@
+ 	  if (c == '\0')
+ 	    {
+ 	      idx = 0;
+-	      mp = ml = 1;
++	      mp = ml = mf = md = 1;
+ 	      continue;
+ 	    }
++	  if (idx < KEY_FAKEROOT_LEN)
++	    mf &= c == KEY_FAKEROOT[idx];
++	  else if (idx == KEY_FAKEROOT_LEN && mf)
++	    fakeroot = c != '0';
++	  if (idx < KEY_DEBUG_LEN)
++	    md &= c == KEY_DEBUG[idx];
++	  else if (idx == KEY_DEBUG_LEN && md)
++	    debug_sigsys = c != '0';
+ 	  if (idx < KEY_LEN)
+ 	    {
+ 	      mp &= c == KEY_PREFIX[idx];
+@@ -394,6 +417,70 @@
+   return do_execve (path, argv, nenvp, buf, 0);
+ }
+ 
++/* Android no deja crear enlaces duros en los datos de la app: linkat copia
++   el archivo (o el enlace simbólico) en su lugar.  */
++static long int
++link_copy (int olddfd, const char *old, int newdfd, const char *new, int flags)
++{
++  int nofollow = !(flags & AT_SYMLINK_FOLLOW);
++  int in = RAW (__NR_openat, olddfd, old,
++		O_RDONLY | O_CLOEXEC | (nofollow ? O_NOFOLLOW : 0));
++  if (in == -ELOOP && nofollow)
++    {
++      char target[PATH_MAX];
++      long int n = RAW (__NR_readlinkat, olddfd, old, target, PATH_MAX - 1);
++      if (n < 0)
++	return n;
++      target[n] = '\0';
++      return RAW (__NR_symlinkat, target, newdfd, new);
++    }
++  if (in < 0)
++    return in;
++  struct stat st;
++  long int r = RAW (__NR_fstat, in, &st);
++  if (r == 0 && !S_ISREG (st.st_mode))
++    r = -EPERM;
++  int out = r;
++  if (r == 0)
++    out = RAW (__NR_openat, newdfd, new,
++	       O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, st.st_mode & 07777);
++  if (out < 0)
++    {
++      RAW (__NR_close, in);
++      return out;
++    }
++  char buf[16384];
++  for (;;)
++    {
++      long int n = RAW (__NR_read, in, buf, sizeof buf);
++      if (n == -EINTR)
++	continue;
++      if (n <= 0)
++	{
++	  r = n;
++	  break;
++	}
++      for (long int off = 0; off < n;)
++	{
++	  long int w = RAW (__NR_write, out, buf + off, n - off);
++	  if (w == -EINTR)
++	    continue;
++	  if (w < 0)
++	    {
++	      r = w;
++	      goto done;
++	    }
++	  off += w;
++	}
++    }
++ done:
++  RAW (__NR_close, in);
++  RAW (__NR_close, out);
++  if (r < 0)
++    RAW (__NR_unlinkat, newdfd, new, 0);
++  return r;
++}
++
+ #define XL(a, b)							\
+   do									\
+     if ((a) != 0)							\
+@@ -410,14 +497,50 @@
+ 			long int a3, long int a4, long int a5)
+ {
+   init ();
++  if (fakeroot)
++    switch (nr)
++      {
++      case __NR_getuid:
++      case __NR_geteuid:
++      case __NR_getgid:
++      case __NR_getegid:
++	return 0;
++      case __NR_getresuid:
++      case __NR_getresgid:
++	*(unsigned int *) a0 = *(unsigned int *) a1 = *(unsigned int *) a2 = 0;
++	return 0;
++      case __NR_fchown:
++	{
++	  long int r = raw (nr, a0, a1, a2, a3, a4, a5);
++	  return r == -EPERM ? 0 : r;
++	}
++      }
+   if (state != 2)
+-    return raw (nr, a0, a1, a2, a3, a4, a5);
++    {
++      long int r = raw (nr, a0, a1, a2, a3, a4, a5);
++      return fakeroot && nr == __NR_fchownat && r == -EPERM ? 0 : r;
++    }
+ 
+   char b1[PATH_MAX], b2[PATH_MAX];
+   switch (nr)
+     {
+-    case __NR_chdir:
+     case __NR_chroot:
++      {
++	/* chroot a la raíz virtual: ya se está ahí (pacman lo hace antes de
++	   correr los scripts de instalación).  */
++	const char *p = (const char *) a0;
++	if (p != NULL && p[0] == '/')
++	  {
++	    while (*p == '/' || (p[0] == '.' && (p[1] == '/' || p[1] == '\0')))
++	      p++;
++	    if (*p == '\0')
++	      return 0;
++	  }
++	XL (a0, b1);
++	break;
++      }
++
++    case __NR_chdir:
+     case __NR_truncate:
+     case __NR_statfs:
+     case __NR_acct:
+@@ -432,25 +555,51 @@
+       XL (a0, b1);
+       break;
+ 
++    /* Bloqueadas por el seccomp de apps (bionic no las usa): ENOSYS sin
++       llamar al kernel, así glibc usa su alternativa (faccessat/fchmodat,
++       que vuelven a pasar por aquí) sin el costo de un SIGSYS cada vez.  */
++    case __NR_faccessat2:
++      if (a3 == 0)
++	{
++	  XL (a1, b1);
++	  return raw (__NR_faccessat, a0, a1, a2, 0, 0, 0);
++	}
++      return -ENOSYS;
++    case __NR_fchmodat2:
++      return -ENOSYS;
++
+     case __NR_openat:
+     case __NR_openat2:
+     case __NR_faccessat:
+-    case __NR_faccessat2:
+     case __NR_newfstatat:
+     case __NR_statx:
+     case __NR_mkdirat:
+     case __NR_mknodat:
+     case __NR_unlinkat:
+     case __NR_fchmodat:
+-    case __NR_fchmodat2:
+-    case __NR_fchownat:
+     case __NR_utimensat:
+     case __NR_inotify_add_watch:
+     case __NR_name_to_handle_at:
+       XL (a1, b1);
+       break;
+ 
++    case __NR_fchownat:
++      {
++	XL (a1, b1);
++	long int r = raw (nr, a0, a1, a2, a3, a4, a5);
++	return fakeroot && r == -EPERM ? 0 : r;
++      }
++
+     case __NR_linkat:
++      {
++	XL (a1, b1);
++	XL (a3, b2);
++	long int r = raw (nr, a0, a1, a2, a3, a4, a5);
++	if (r == -EACCES || r == -EPERM)
++	  r = link_copy (a0, (const char *) a1, a2, (const char *) a3, a4);
++	return r;
++      }
++
+     case __NR_renameat:
+     case __NR_renameat2:
+       XL (a1, b1);
+@@ -549,3 +698,42 @@
+     }
+   return raw (nr, a0, a1, a2, a3, a4, a5);
+ }
++
++#if IS_IN (libc)
++# include <signal.h>
++# include <sys/ucontext.h>
++
++/* El seccomp de las apps responde a las syscalls no permitidas con SIGSYS
++   (SECCOMP_RET_TRAP).  Se atrapa y la syscall devuelve ENOSYS, como en un
++   kernel que no la tiene: los programas ya saben arreglárselas con eso.  */
++static void
++sigsys_handler (int sig, siginfo_t *si, void *ctx)
++{
++  if (si->si_code != 1 /* SYS_SECCOMP */)
++    {
++      /* SIGSYS enviada por otro: comportamiento normal (terminar).  */
++      struct sigaction sa = { .sa_handler = SIG_DFL };
++      __sigaction (SIGSYS, &sa, NULL);
++      RAW (__NR_kill, RAW (__NR_getpid, 0), SIGSYS);
++      return;
++    }
++  ((ucontext_t *) ctx)->uc_mcontext.regs[0] = -ENOSYS;
++  init ();
++  if (debug_sigsys)
++    {
++      char msg[80], *q = msg;
++      mcopy (q, "glibc: syscall ", 15);
++      q = utoa (q + 15, si->si_syscall);
++      mcopy (q, " bloqueada por seccomp -> ENOSYS\n", 33);
++      RAW (__NR_write, 2, msg, q + 33 - msg);
++    }
++}
++
++void
++__android_sigsys_init (void)
++{
++  struct sigaction sa = { .sa_sigaction = sigsys_handler,
++			  .sa_flags = SA_SIGINFO | SA_ONSTACK | SA_NODEFER };
++  __sigaction (SIGSYS, &sa, NULL);
++}
++#endif
+--- a/sysdeps/unix/sysv/linux/aarch64/fchown.c	1969-12-31 21:00:00.000000000 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/fchown.c	2026-10-19 09:09:56.111271536 -0300
+@@ -0,0 +1,13 @@
++/* Android: en C (no stub generado) para que pase por INTERNAL_SYSCALL_RAW
++   (android-path.c): modo GLIBC_FAKEROOT.  */
++
++#include <unistd.h>
++#include <sysdep.h>
++
++int
++__fchown (int fd, uid_t owner, gid_t group)
++{
++  return INLINE_SYSCALL_CALL (fchown, fd, owner, group);
++}
++
++weak_alias (__fchown, fchown)
+--- a/sysdeps/unix/sysv/linux/aarch64/getegid.c	1969-12-31 21:00:00.000000000 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/getegid.c	2026-10-19 09:09:56.111136670 -0300
+@@ -0,0 +1,13 @@
++/* Android: en C (no stub generado) para que pase por INTERNAL_SYSCALL_RAW
++   (android-path.c): modo GLIBC_FAKEROOT.  */
++
++#include <unistd.h>
++#include <sysdep.h>
++
++gid_t
++__getegid (void)
++{
++  return INTERNAL_SYSCALL_CALL (getegid);
++}
++
++weak_alias (__getegid, getegid)
+--- a/sysdeps/unix/sysv/linux/aarch64/geteuid.c	1969-12-31 21:00:00.000000000 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/geteuid.c	2026-10-19 09:09:56.111014095 -0300
+@@ -0,0 +1,13 @@
++/* Android: en C (no stub generado) para que pase por INTERNAL_SYSCALL_RAW
++   (android-path.c): modo GLIBC_FAKEROOT.  */
++
++#include <unistd.h>
++#include <sysdep.h>
++
++uid_t
++__geteuid (void)
++{
++  return INTERNAL_SYSCALL_CALL (geteuid);
++}
++
++weak_alias (__geteuid, geteuid)
+--- a/sysdeps/unix/sysv/linux/aarch64/getgid.c	1969-12-31 21:00:00.000000000 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/getgid.c	2026-10-19 09:09:56.111084148 -0300
+@@ -0,0 +1,13 @@
++/* Android: en C (no stub generado) para que pase por INTERNAL_SYSCALL_RAW
++   (android-path.c): modo GLIBC_FAKEROOT.  */
++
++#include <unistd.h>
++#include <sysdep.h>
++
++gid_t
++__getgid (void)
++{
++  return INTERNAL_SYSCALL_CALL (getgid);
++}
++
++weak_alias (__getgid, getgid)
+--- a/sysdeps/unix/sysv/linux/aarch64/getresgid.c	1969-12-31 21:00:00.000000000 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/getresgid.c	2026-10-19 09:09:56.111227745 -0300
+@@ -0,0 +1,13 @@
++/* Android: en C (no stub generado) para que pase por INTERNAL_SYSCALL_RAW
++   (android-path.c): modo GLIBC_FAKEROOT.  */
++
++#include <unistd.h>
++#include <sysdep.h>
++
++int
++__getresgid (gid_t *rgid, gid_t *egid, gid_t *sgid)
++{
++  return INLINE_SYSCALL_CALL (getresgid, rgid, egid, sgid);
++}
++libc_hidden_def (__getresgid)
++weak_alias (__getresgid, getresgid)
+--- a/sysdeps/unix/sysv/linux/aarch64/getresuid.c	1969-12-31 21:00:00.000000000 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/getresuid.c	2026-10-19 09:09:56.111180461 -0300
+@@ -0,0 +1,13 @@
++/* Android: en C (no stub generado) para que pase por INTERNAL_SYSCALL_RAW
++   (android-path.c): modo GLIBC_FAKEROOT.  */
++
++#include <unistd.h>
++#include <sysdep.h>
++
++int
++__getresuid (uid_t *ruid, uid_t *euid, uid_t *suid)
++{
++  return INLINE_SYSCALL_CALL (getresuid, ruid, euid, suid);
++}
++libc_hidden_def (__getresuid)
++weak_alias (__getresuid, getresuid)
+--- a/sysdeps/unix/sysv/linux/aarch64/getuid.c	1969-12-31 21:00:00.000000000 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/getuid.c	2026-10-19 09:09:56.110946907 -0300
+@@ -0,0 +1,13 @@
++/* Android: en C (no stub generado) para que pase por INTERNAL_SYSCALL_RAW
++   (android-path.c): modo GLIBC_FAKEROOT.  */
++
++#include <unistd.h>
++#include <sysdep.h>
++
++uid_t
++__getuid (void)
++{
++  return INTERNAL_SYSCALL_CALL (getuid);
++}
++
++weak_alias (__getuid, getuid)
+--- a/sysdeps/unix/sysv/linux/aarch64/sysdep.h	2026-10-19 09:39:10.387905732 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/sysdep.h	2026-10-19 09:10:38.170471026 -0300
+@@ -190,7 +190,8 @@
+ 
+ /* Android: las syscalls con rutas pasan por __android_path_syscall
+    (android-path.c), que traduce /usr, /etc... al prefijo de la app y lanza
+-   los programas a través del cargador.  Con NAME constante el compilador
++   los programas a través del cargador.  También las de uid/gid y fchown,
++   para el modo GLIBC_FAKEROOT.  Con NAME constante el compilador
+    descarta la comprobación en las demás syscalls.  */
+ # if IS_IN (libc) || IS_IN (rtld)
+ static __always_inline int
+@@ -211,6 +212,8 @@
+     case __NR_renameat2: case __NR_symlinkat: case __NR_readlinkat:
+     case __NR_getcwd: case __NR_bind: case __NR_connect: case __NR_execve:
+     case __NR_execveat:
++    case __NR_getuid: case __NR_geteuid: case __NR_getgid: case __NR_getegid:
++    case __NR_getresuid: case __NR_getresgid: case __NR_fchown:
+       return 1;
+     }
+   return 0;

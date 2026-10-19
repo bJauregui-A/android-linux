@@ -1,0 +1,71 @@
+--- a/sysdeps/unix/sysv/linux/isatty.c
++++ b/sysdeps/unix/sysv/linux/isatty.c
+@@ -24,6 +24,10 @@
+ __isatty (int fd)
+ {
+   struct termios2 k_termios;
+-  return INLINE_SYSCALL_CALL (ioctl, fd, TCGETS2, &k_termios) == 0;
++  /* Android: SELinux no deja usar TCGETS2 en devpts desde una app;
++     TCGETS da la misma respuesta (y el errno de siempre si no es tty).  */
++  if (INTERNAL_SYSCALL_CALL (ioctl, fd, TCGETS2, &k_termios) == 0)
++    return 1;
++  return INLINE_SYSCALL_CALL (ioctl, fd, TCGETS, &k_termios) == 0;
+ }
+ weak_alias (__isatty, isatty)
+--- a/sysdeps/unix/sysv/linux/isatty_nostatus.c
++++ b/sysdeps/unix/sysv/linux/isatty_nostatus.c
+@@ -22,5 +22,7 @@
+ __isatty_nostatus (int fd)
+ {
+   struct termios2 k_termios;
+-  return INTERNAL_SYSCALL_CALL (ioctl, fd, TCGETS2, &k_termios) == 0;
++  /* Android: TCGETS2 bloqueado por SELinux en devpts (ver isatty.c).  */
++  return INTERNAL_SYSCALL_CALL (ioctl, fd, TCGETS2, &k_termios) == 0
++         || INTERNAL_SYSCALL_CALL (ioctl, fd, TCGETS, &k_termios) == 0;
+ }
+--- a/sysdeps/unix/sysv/linux/tcgetattr.c
++++ b/sysdeps/unix/sysv/linux/tcgetattr.c
+@@ -24,6 +24,15 @@
+   struct termios2 k_termios;
+   long int retval = INLINE_SYSCALL_CALL (ioctl, fd, TCGETS2, &k_termios);
+ 
++  /* Android: la lista blanca de ioctls de SELinux para devpts en apps no
++     incluye TCGETS2 (EACCES).  struct termios2 empieza con la misma
++     estructura que TCGETS, y las velocidades salen de c_cflag.  */
++  if (retval == -1)
++    {
++      memset (&k_termios, 0, sizeof k_termios);
++      retval = INLINE_SYSCALL_CALL (ioctl, fd, TCGETS, &k_termios);
++    }
++
+   if (__glibc_likely (retval != -1))
+     {
+       ___termios2_canonicalize_speeds (&k_termios);
+--- a/sysdeps/unix/sysv/linux/tcsetattr.c
++++ b/sysdeps/unix/sysv/linux/tcsetattr.c
+@@ -68,14 +68,18 @@
+      far back as the current glibc supports.  Calling TCSETS with
+      __BOTHER causes unpredictable results on old Alpha kernels and
+      could even crash them. */
+-  if (__ASSUME_TERMIOS2 ||
+-      k_termios.c_ospeed != k_termios.c_ispeed ||
+-      cbaud (k_termios.c_cflag) == __BOTHER)
+-    cmd += TCSETS2;
+-  else
+-    cmd += TCSETS;
++  int termios2 = k_termios.c_ospeed != k_termios.c_ispeed
++                  || cbaud (k_termios.c_cflag) == __BOTHER;
++  if (__ASSUME_TERMIOS2 || termios2)
++    {
++      int ret = INLINE_SYSCALL_CALL (ioctl, fd, cmd + TCSETS2, &k_termios);
++      /* Android: SELinux no deja usar TCSETS2 en devpts desde una app
++         (EACCES); sin velocidades raras TCSETS dice lo mismo.  */
++      if (ret != -1 || termios2 || (errno != EACCES && errno != EPERM))
++        return ret;
++    }
+ 
+-  return INLINE_SYSCALL_CALL (ioctl, fd, cmd, &k_termios);
++  return INLINE_SYSCALL_CALL (ioctl, fd, cmd + TCSETS, &k_termios);
+ }
+ libc_hidden_def (__tcsetattr)
+ 

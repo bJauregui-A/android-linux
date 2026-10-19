@@ -1,0 +1,94 @@
+--- a/signal/sigaction.c
++++ b/signal/sigaction.c
+@@ -31,6 +31,21 @@
+       return -1;
+     }
+ 
++  /* Android: el manejador de SIGSYS es de libc (seccomp -> ENOSYS); el del
++     programa se guarda aparte (android-path.c).  */
++  extern int __android_sigsys_action (const struct sigaction *,
++				      struct sigaction *) attribute_hidden;
++  if (sig == SIGSYS)
++    return __android_sigsys_action (act, oact);
++
++  struct sigaction act_sin_sigsys;
++  if (act != NULL && __sigismember (&act->sa_mask, SIGSYS))
++    {
++      act_sin_sigsys = *act;
++      __sigdelset (&act_sin_sigsys.sa_mask, SIGSYS);
++      act = &act_sin_sigsys;
++    }
++
+   internal_sigset_t set;
+ 
+   if (sig == SIGABRT)
+--- a/sysdeps/unix/sysv/linux/aarch64/android-path.c
++++ b/sysdeps/unix/sysv/linux/aarch64/android-path.c
+@@ -705,15 +705,44 @@
+ 
+ /* El seccomp de las apps responde a las syscalls no permitidas con SIGSYS
+    (SECCOMP_RET_TRAP).  Se atrapa y la syscall devuelve ENOSYS, como en un
+-   kernel que no la tiene: los programas ya saben arreglárselas con eso.  */
++   kernel que no la tiene: los programas ya saben arreglárselas con eso.
++   sigaction(SIGSYS) del programa no reemplaza este manejador (bash
++   interactivo instala uno para todas las señales fatales): se guarda en
++   user_sigsys y solo recibe los SIGSYS que no vienen de seccomp.  */
++static struct sigaction user_sigsys; /* SIG_DFL */
++
++int
++__android_sigsys_action (const struct sigaction *act, struct sigaction *oact)
++{
++  struct sigaction old = user_sigsys;
++  if (act != NULL)
++    user_sigsys = *act;
++  if (oact != NULL)
++    *oact = old;
++  return 0;
++}
++
+ static void
+ sigsys_handler (int sig, siginfo_t *si, void *ctx)
+ {
+   if (si->si_code != 1 /* SYS_SECCOMP */)
+     {
+-      /* SIGSYS enviada por otro: comportamiento normal (terminar).  */
++      struct sigaction u = user_sigsys;
++      if (u.sa_handler == SIG_IGN)
++	return;
++      if (u.sa_handler != SIG_DFL)
++	{
++	  if (u.sa_flags & SA_RESETHAND)
++	    user_sigsys.sa_handler = SIG_DFL;
++	  if (u.sa_flags & SA_SIGINFO)
++	    u.sa_sigaction (sig, si, ctx);
++	  else
++	    u.sa_handler (sig);
++	  return;
++	}
++      /* SIGSYS enviada por otro, sin manejador del programa: terminar.  */
+       struct sigaction sa = { .sa_handler = SIG_DFL };
+-      __sigaction (SIGSYS, &sa, NULL);
++      __libc_sigaction (SIGSYS, &sa, NULL);
+       RAW (__NR_kill, RAW (__NR_getpid, 0), SIGSYS);
+       return;
+     }
+@@ -734,6 +763,6 @@
+ {
+   struct sigaction sa = { .sa_sigaction = sigsys_handler,
+ 			  .sa_flags = SA_SIGINFO | SA_ONSTACK | SA_NODEFER };
+-  __sigaction (SIGSYS, &sa, NULL);
++  __libc_sigaction (SIGSYS, &sa, NULL);
+ }
+ #endif
+--- a/sysdeps/unix/sysv/linux/internal-signals.h
++++ b/sysdeps/unix/sysv/linux/internal-signals.h
+@@ -59,6 +59,9 @@
+ {
+   __sigdelset (set, SIGCANCEL);
+   __sigdelset (set, SIGSETXID);
++  /* Android: un SIGSYS de seccomp con la señal bloqueada mata el proceso
++     (el kernel la fuerza con SIG_DFL), así que nunca se deja bloquear.  */
++  __sigdelset (set, SIGSYS);
+ }
+ 
+ static const internal_sigset_t sigall_set = {

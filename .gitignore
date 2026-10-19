@@ -1,0 +1,13 @@
+# Generados o descargables: se reconstruyen con los scripts (ver glibc-prueba/PROYECTO.md)
+.gradle/
+build/
+.cxx/
+.kotlin/
+local.properties
+glibc-prueba/trabajo/
+glibc-prueba/glibc/glibc-2.43/
+glibc-prueba/glibc/*.tar.xz
+glibc-prueba/glibc/salida/
+glibc-prueba/glibc/build.log
+glibc-prueba/wayland/fuentes/
+glibc-prueba/wayland/salida/

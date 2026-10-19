@@ -1,0 +1,955 @@
+--- a/elf/rtld.c	2026-01-23 17:54:00.000000000 -0300
++++ b/elf/rtld.c	2026-10-19 09:01:49.949777290 -0300
+@@ -65,6 +65,7 @@
+ 
+ /* Must include after <dl-machine.h> for DT_MIPS definition.  */
+ #include <dl-debug.h>
++#include <sys/prctl.h>
+ 
+ /* Only enables rtld profiling for architectures which provides non generic
+    hp-timing support.  The generic support requires either syscall
+@@ -1632,6 +1633,16 @@
+ 	  }
+ #endif
+ 
++      /* Android: el kernel nombra al proceso como el cargador (comm); se le
++	 da el nombre del programa, como haría execve.  */
++      {
++	const char *name = _dl_argv[0];
++	for (const char *p = name; *p != '\0'; p++)
++	  if (*p == '/')
++	    name = p + 1;
++	INTERNAL_SYSCALL_CALL (prctl, PR_SET_NAME, name);
++      }
++
+       /* Set the argv[0] string now that we've processed the executable.  */
+       if (argv0 != NULL)
+         _dl_argv[0] = argv0;
+--- a/nptl/cancellation.c	2026-01-23 17:54:00.000000000 -0300
++++ b/nptl/cancellation.c	2026-10-19 08:52:09.405857519 -0300
+@@ -31,6 +31,11 @@
+   long int result;
+   struct pthread *pd = THREAD_SELF;
+ 
++  /* Android: syscalls con rutas (open, connect...) se traducen; no son
++     puntos de cancelación.  */
++  if (__android_path_nr (nr))
++    return __android_path_syscall (nr, a1, a2, a3, a4, a5, a6);
++
+   /* If cancellation is not enabled, call the syscall directly and also
+      for thread terminatation to avoid call __syscall_do_cancel while
+      executing cleanup handlers.  */
+--- a/sysdeps/unix/sysv/linux/aarch64/android-path.c	1969-12-31 21:00:00.000000000 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/android-path.c	2026-10-19 09:01:49.950017200 -0300
+@@ -0,0 +1,551 @@
++/* Traducción de rutas para correr glibc dentro de una app Android.
++
++   Las syscalls con rutas pasan por aquí (ver INTERNAL_SYSCALL_RAW en
++   sysdep.h).  Si el proceso tiene GLIBC_PREFIX=<dir> en su entorno inicial,
++   las rutas absolutas se redirigen a <dir> (/usr -> <dir>/usr, etc.), salvo
++   las de Android (/proc, /sys, /dev, /data, /system...).  execve lanza los
++   programas glibc a través del cargador (la única carpeta ejecutable de una
++   app es nativeLibraryDir) y resuelve los scripts #! por su cuenta.
++
++   Se compila en libc y en ld.so; cada uno tiene su propia copia del estado.  */
++
++#include <sysdep.h>
++#include <atomic.h>
++#include <elf.h>
++#include <errno.h>
++#include <fcntl.h>
++#include <limits.h>
++#include <stddef.h>
++#include <string.h>
++#include <sys/socket.h>
++#include <sys/syscall.h>
++#include <sys/un.h>
++#include <unistd.h>
++
++#define KEY_PREFIX "GLIBC_PREFIX="
++#define KEY_LOADER "GLIBC_LOADER="
++#define KEY_LEN 13
++
++/* 0 sin iniciar, 1 sin prefijo (no se traduce nada), 2 con prefijo.  */
++static int state;
++/* "GLIBC_PREFIX=<prefijo>" y "GLIBC_LOADER=<cargador>": se reinyectan tal
++   cual en el entorno de los hijos.  */
++static char env_prefix[KEY_LEN + PATH_MAX];
++static char env_loader[KEY_LEN + PATH_MAX];
++static size_t plen;
++/* El prefijo resuelto por el kernel (ej. /data/user/0 -> /data/data): es lo
++   que devuelven getcwd y readlink.  */
++static char real_prefix[PATH_MAX];
++static size_t rlen;
++#define PREFIX (env_prefix + KEY_LEN)
++#define LOADER (env_loader + KEY_LEN)
++
++static inline long int
++raw (long int nr, long int a0, long int a1, long int a2, long int a3,
++     long int a4, long int a5)
++{
++  return INTERNAL_SYSCALL_RAW_DIRECT (nr, 6, a0, a1, a2, a3, a4, a5);
++}
++#define RAW(nr, ...) raw_n (nr, __VA_ARGS__, 0, 0, 0, 0, 0, 0)
++#define raw_n(nr, a0, a1, a2, a3, a4, a5, ...) \
++  raw (nr, (long int) (a0), (long int) (a1), (long int) (a2), \
++       (long int) (a3), (long int) (a4), (long int) (a5))
++
++static size_t
++slen (const char *s)
++{
++  size_t n = 0;
++  while (s[n] != '\0')
++    n++;
++  return n;
++}
++
++static void
++mcopy (char *d, const char *s, size_t n)
++{
++  for (size_t i = 0; i < n; i++)
++    d[i] = s[i];
++}
++
++static int
++starts (const char *s, const char *p, size_t n)
++{
++  for (size_t i = 0; i < n; i++)
++    if (s[i] != p[i])
++      return 0;
++  return 1;
++}
++
++static char *
++utoa (char *p, unsigned long int v)
++{
++  char tmp[24];
++  int n = 0;
++  do
++    tmp[n++] = '0' + v % 10;
++  while ((v /= 10) != 0);
++  while (n > 0)
++    *p++ = tmp[--n];
++  return p;
++}
++
++/* Lee GLIBC_PREFIX y GLIBC_LOADER de /proc/self/environ: es el entorno con
++   que arrancó el proceso, no lo cambian setenv ni clearenv.  */
++static void
++init (void)
++{
++  if (atomic_load_acquire (&state) != 0)
++    return;
++  int fd = RAW (__NR_openat, AT_FDCWD, "/proc/self/environ",
++		O_RDONLY | O_CLOEXEC);
++  if (fd < 0)
++    {
++      atomic_store_release (&state, 1);
++      return;
++    }
++  char buf[512];
++  size_t idx = 0, np = 0, nl = 0;
++  int mp = 1, ml = 1, gotp = 0, gotl = 0;
++  for (;;)
++    {
++      long int n = RAW (__NR_read, fd, buf, sizeof buf);
++      if (n <= 0)
++	break;
++      for (long int i = 0; i < n; i++)
++	{
++	  char c = buf[i];
++	  if (c == '\0')
++	    {
++	      idx = 0;
++	      mp = ml = 1;
++	      continue;
++	    }
++	  if (idx < KEY_LEN)
++	    {
++	      mp &= c == KEY_PREFIX[idx];
++	      ml &= c == KEY_LOADER[idx];
++	      if (idx == KEY_LEN - 1)
++		{
++		  if (mp)
++		    gotp = 1, np = 0;
++		  if (ml)
++		    gotl = 1, nl = 0;
++		}
++	    }
++	  else
++	    {
++	      if (mp && np < PATH_MAX - 1)
++		PREFIX[np++] = c;
++	      if (ml && nl < PATH_MAX - 1)
++		LOADER[nl++] = c;
++	    }
++	  idx++;
++	}
++    }
++  RAW (__NR_close, fd);
++
++  while (np > 1 && PREFIX[np - 1] == '/')
++    np--;
++  if (!gotp || np < 2 || PREFIX[0] != '/')
++    {
++      atomic_store_release (&state, 1);
++      return;
++    }
++  PREFIX[np] = '\0';
++  mcopy (env_prefix, KEY_PREFIX, KEY_LEN);
++  plen = np;
++
++  fd = RAW (__NR_openat, AT_FDCWD, PREFIX, O_PATH | O_DIRECTORY | O_CLOEXEC);
++  if (fd >= 0)
++    {
++      char link[32];
++      mcopy (link, "/proc/self/fd/", 14);
++      *utoa (link + 14, fd) = '\0';
++      long int r = RAW (__NR_readlinkat, AT_FDCWD, link, real_prefix,
++			PATH_MAX - 1);
++      RAW (__NR_close, fd);
++      if (r > 1)
++	rlen = r;
++    }
++
++  if (!gotl || nl == 0)
++    {
++      long int r = RAW (__NR_readlinkat, AT_FDCWD, "/proc/self/exe", LOADER,
++			PATH_MAX - 1);
++      nl = r > 0 ? r : 0;
++    }
++  LOADER[nl] = '\0';
++  mcopy (env_loader, KEY_LOADER, KEY_LEN);
++  atomic_store_release (&state, 2);
++}
++
++/* Carpetas de Android que se ven tal cual.  */
++static const char *const passthrough[] =
++{
++  "proc", "sys", "dev", "data", "system", "apex", "vendor", "product", "odm",
++  "system_ext", "storage", "sdcard", "linkerconfig", NULL
++};
++
++/* Devuelve la ruta a usar: IN sin cambios u OUT con el prefijo.  NULL si no
++   cabe en PATH_MAX.  */
++static const char *
++xlat (const char *in, char *out)
++{
++  if (in == NULL || in[0] != '/')
++    return in;
++  const char *p = in;
++  while (p[1] == '/')
++    p++;
++  const char *c = p + 1;
++  if (!(starts (c, "dev/shm", 7) && (c[7] == '/' || c[7] == '\0')))
++    for (int i = 0; passthrough[i] != NULL; i++)
++      {
++	size_t n = slen (passthrough[i]);
++	if (starts (c, passthrough[i], n) && (c[n] == '/' || c[n] == '\0'))
++	  return in;
++      }
++  size_t n = slen (p);
++  if (plen + n + 1 > PATH_MAX)
++    return NULL;
++  mcopy (out, PREFIX, plen);
++  mcopy (out + plen, p, n + 1);
++  return out;
++}
++
++static size_t
++strip (char *buf, size_t n, const char *pre, size_t len)
++{
++  if (len == 0 || n < len || !starts (buf, pre, len)
++      || (n > len && buf[len] != '/'))
++    return n;
++  if (n == len)
++    {
++      buf[0] = '/';
++      return 1;
++    }
++  for (size_t i = len; i < n; i++)
++    buf[i - len] = buf[i];
++  return n - len;
++}
++
++/* Quita el prefijo de BUF (N bytes, sin '\0').  Devuelve el nuevo largo.  */
++static size_t
++unxlat (char *buf, size_t n)
++{
++  size_t m = strip (buf, n, PREFIX, plen);
++  return m != n ? m : strip (buf, n, real_prefix, rlen);
++}
++
++static size_t
++count (char *const *v)
++{
++  size_t n = 0;
++  if (v != NULL)
++    while (v[n] != NULL)
++      n++;
++  return n;
++}
++
++static long int
++pread_all (int fd, void *buf, size_t n, off_t off)
++{
++  return RAW (__NR_pread64, fd, buf, n, off);
++}
++
++/* Intérprete del ELF abierto en FD: 1 si es el de glibc (ld-linux), 0 si
++   no tiene o es otro (bionic, estático).  */
++static int
++elf_is_glibc (int fd, const char *hdr, long int n)
++{
++  Elf64_Ehdr eh;
++  if (n < (long int) sizeof eh)
++    return 0;
++  mcopy ((char *) &eh, hdr, sizeof eh);
++  if (eh.e_ident[EI_CLASS] != ELFCLASS64 || eh.e_phentsize != sizeof (Elf64_Phdr))
++    return 0;
++  for (int i = 0; i < eh.e_phnum; i++)
++    {
++      Elf64_Phdr ph;
++      if (pread_all (fd, &ph, sizeof ph, eh.e_phoff + i * sizeof ph)
++	  != sizeof ph)
++	return 0;
++      if (ph.p_type != PT_INTERP)
++	continue;
++      char interp[256];
++      size_t len = ph.p_filesz < sizeof interp - 1 ? ph.p_filesz
++						    : sizeof interp - 1;
++      long int r = pread_all (fd, interp, len, ph.p_offset);
++      if (r <= 0)
++	return 0;
++      interp[r] = '\0';
++      for (long int j = 0; j + 8 <= r; j++)
++	if (starts (interp + j, "ld-linux", 8))
++	  return 1;
++      return 0;
++    }
++  return 0;
++}
++
++static long int
++do_execve (const char *path, char *const argv[], char *const envp[],
++	   char *buf, int depth)
++{
++  if (depth > 4)
++    return -ELOOP;
++  const char *t = xlat (path, buf);
++  if (t == NULL)
++    return -ENAMETOOLONG;
++
++  int fd = RAW (__NR_openat, AT_FDCWD, t, O_RDONLY | O_CLOEXEC);
++  if (fd < 0)
++    return fd;
++  long int r = RAW (__NR_faccessat, AT_FDCWD, t, X_OK);
++  if (r < 0)
++    {
++      RAW (__NR_close, fd);
++      return r;
++    }
++  char hdr[256];
++  long int n = pread_all (fd, hdr, sizeof hdr - 1, 0);
++
++  size_t argc = count (argv);
++  if (n >= 2 && hdr[0] == '#' && hdr[1] == '!')
++    {
++      RAW (__NR_close, fd);
++      /* Como el kernel: #!intérprete [un solo argumento]  */
++      hdr[n] = '\0';
++      char *s = hdr + 2;
++      while (*s == ' ' || *s == '\t')
++	s++;
++      char *interp = s;
++      while (*s != '\0' && *s != ' ' && *s != '\t' && *s != '\n')
++	s++;
++      char *arg = NULL;
++      if (*s == ' ' || *s == '\t')
++	{
++	  *s++ = '\0';
++	  while (*s == ' ' || *s == '\t')
++	    s++;
++	  if (*s != '\0' && *s != '\n')
++	    {
++	      arg = s;
++	      while (*s != '\0' && *s != '\n')
++		s++;
++	      while (s > arg && (s[-1] == ' ' || s[-1] == '\t' || s[-1] == '\r'))
++		s--;
++	    }
++	}
++      *s = '\0';
++      if (*interp == '\0')
++	return -ENOEXEC;
++      char *nargv[argc + 3];
++      size_t k = 0;
++      nargv[k++] = interp;
++      if (arg != NULL)
++	nargv[k++] = arg;
++      nargv[k++] = (char *) path;
++      for (size_t i = 1; i < argc; i++)
++	nargv[k++] = argv[i];
++      nargv[k] = NULL;
++      return do_execve (interp, nargv, envp, buf, depth + 1);
++    }
++
++  int glibc = n >= SELFMAG && starts (hdr, ELFMAG, SELFMAG)
++	      && elf_is_glibc (fd, hdr, n);
++  RAW (__NR_close, fd);
++  if (!glibc || LOADER[0] == '\0')
++    return RAW (__NR_execve, t, argv, envp);
++
++  /* cargador --argv0 <argv[0]> <programa> <argumentos...>  */
++  char *nargv[argc + 4];
++  size_t k = 0;
++  nargv[k++] = LOADER;
++  nargv[k++] = (char *) "--argv0";
++  nargv[k++] = argc > 0 ? argv[0] : (char *) path;
++  nargv[k++] = (char *) t;
++  for (size_t i = 1; i < argc; i++)
++    nargv[k++] = argv[i];
++  nargv[k] = NULL;
++  return RAW (__NR_execve, LOADER, nargv, envp);
++}
++
++/* Agrega GLIBC_PREFIX y GLIBC_LOADER al entorno del hijo si faltan (por
++   ejemplo tras env -i), y ejecuta.  */
++static long int
++execve_x (const char *path, char *const argv[], char *const envp[],
++	  char *buf)
++{
++  size_t envc = count (envp);
++  int hasp = 0, hasl = 0;
++  for (size_t i = 0; i < envc; i++)
++    {
++      hasp |= starts (envp[i], KEY_PREFIX, KEY_LEN);
++      hasl |= starts (envp[i], KEY_LOADER, KEY_LEN);
++    }
++  char *nenvp[envc + 3];
++  for (size_t i = 0; i < envc; i++)
++    nenvp[i] = envp[i];
++  size_t k = envc;
++  if (!hasp)
++    nenvp[k++] = env_prefix;
++  if (!hasl && LOADER[0] != '\0')
++    nenvp[k++] = env_loader;
++  nenvp[k] = NULL;
++  return do_execve (path, argv, nenvp, buf, 0);
++}
++
++#define XL(a, b)							\
++  do									\
++    if ((a) != 0)							\
++      {									\
++	const char *t_ = xlat ((const char *) (a), b);			\
++	if (t_ == NULL)							\
++	  return -ENAMETOOLONG;						\
++	(a) = (long int) t_;						\
++      }									\
++  while (0)
++
++long int
++__android_path_syscall (long int nr, long int a0, long int a1, long int a2,
++			long int a3, long int a4, long int a5)
++{
++  init ();
++  if (state != 2)
++    return raw (nr, a0, a1, a2, a3, a4, a5);
++
++  char b1[PATH_MAX], b2[PATH_MAX];
++  switch (nr)
++    {
++    case __NR_chdir:
++    case __NR_chroot:
++    case __NR_truncate:
++    case __NR_statfs:
++    case __NR_acct:
++    case __NR_setxattr:
++    case __NR_lsetxattr:
++    case __NR_getxattr:
++    case __NR_lgetxattr:
++    case __NR_listxattr:
++    case __NR_llistxattr:
++    case __NR_removexattr:
++    case __NR_lremovexattr:
++      XL (a0, b1);
++      break;
++
++    case __NR_openat:
++    case __NR_openat2:
++    case __NR_faccessat:
++    case __NR_faccessat2:
++    case __NR_newfstatat:
++    case __NR_statx:
++    case __NR_mkdirat:
++    case __NR_mknodat:
++    case __NR_unlinkat:
++    case __NR_fchmodat:
++    case __NR_fchmodat2:
++    case __NR_fchownat:
++    case __NR_utimensat:
++    case __NR_inotify_add_watch:
++    case __NR_name_to_handle_at:
++      XL (a1, b1);
++      break;
++
++    case __NR_linkat:
++    case __NR_renameat:
++    case __NR_renameat2:
++      XL (a1, b1);
++      XL (a3, b2);
++      break;
++
++    case __NR_symlinkat:
++      /* El destino absoluto también: lo resuelve el kernel.  readlinkat
++	 le quita el prefijo al leerlo.  */
++      XL (a0, b1);
++      XL (a2, b2);
++      break;
++
++    case __NR_readlinkat:
++      {
++	XL (a1, b1);
++	long int r = raw (nr, a0, a1, (long int) b2, PATH_MAX, 0, 0);
++	if (r < 0)
++	  return r;
++	r = unxlat (b2, r);
++	if ((size_t) r > (size_t) a3)
++	  r = a3;
++	mcopy ((char *) a2, b2, r);
++	return r;
++      }
++
++    case __NR_getcwd:
++      {
++	long int r = raw (nr, a0, a1, 0, 0, 0, 0);
++	char *p = (char *) a0;
++	if (r > 0 && p[0] == '/')
++	  {
++	    size_t n = unxlat (p, r - 1);
++	    p[n] = '\0';
++	    r = n + 1;
++	  }
++	return r;
++      }
++
++    case __NR_bind:
++    case __NR_connect:
++      {
++	const struct sockaddr_un *sa = (const struct sockaddr_un *) a1;
++	size_t off = offsetof (struct sockaddr_un, sun_path);
++	if (sa == NULL || (size_t) a2 <= off || sa->sun_family != AF_UNIX
++	    || sa->sun_path[0] != '/')
++	  break;
++	size_t n = (size_t) a2 - off;
++	if (n > sizeof sa->sun_path)
++	  n = sizeof sa->sun_path;
++	mcopy (b2, sa->sun_path, n);
++	b2[n] = '\0';
++	const char *t = xlat (b2, b1);
++	if (t == NULL)
++	  return -ENAMETOOLONG;
++	if (t == b2)
++	  break;
++	struct sockaddr_un su;
++	n = slen (t);
++	if (n >= sizeof su.sun_path)
++	  return -ENAMETOOLONG;
++	su.sun_family = AF_UNIX;
++	mcopy (su.sun_path, t, n + 1);
++	return raw (nr, a0, (long int) &su, off + n + 1, 0, 0, 0);
++      }
++
++    case __NR_execve:
++      return execve_x ((const char *) a0, (char *const *) a1,
++		       (char *const *) a2, b1);
++
++    case __NR_execveat:
++      {
++	const char *p = (const char *) a1;
++	if (p != NULL && p[0] != '/' && ((int) a0 != AT_FDCWD || p[0] == '\0'))
++	  {
++	    /* Relativo a un descriptor: se ejecuta vía /proc/self/fd/N.  */
++	    if (p[0] == '\0' && !(a4 & AT_EMPTY_PATH))
++	      return -ENOENT;
++	    char *q = b2;
++	    mcopy (q, "/proc/self/fd/", 14);
++	    q = utoa (q + 14, (unsigned int) a0);
++	    if (p[0] != '\0')
++	      {
++		size_t n = slen (p);
++		if (n + 40 > PATH_MAX)
++		  return -ENAMETOOLONG;
++		*q++ = '/';
++		mcopy (q, p, n);
++		q += n;
++	      }
++	    *q = '\0';
++	    p = b2;
++	  }
++	return execve_x (p, (char *const *) a2, (char *const *) a3, b1);
++      }
++    }
++  return raw (nr, a0, a1, a2, a3, a4, a5);
++}
+--- a/sysdeps/unix/sysv/linux/aarch64/chdir.c	1969-12-31 21:00:00.000000000 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/chdir.c	2026-10-19 08:52:22.394853620 -0300
+@@ -0,0 +1,13 @@
++/* Android: en C (no stub generado) para que pase por la traducción de
++   rutas de INTERNAL_SYSCALL_RAW (android-path.c).  */
++
++#include <unistd.h>
++#include <sysdep.h>
++
++int
++__chdir (const char *path)
++{
++  return INLINE_SYSCALL_CALL (chdir, path);
++}
++
++weak_alias (__chdir, chdir)
+--- a/sysdeps/unix/sysv/linux/aarch64/chroot.c	1969-12-31 21:00:00.000000000 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/chroot.c	2026-10-19 08:52:22.394906700 -0300
+@@ -0,0 +1,11 @@
++/* Android: en C (no stub generado) para que pase por la traducción de
++   rutas de INTERNAL_SYSCALL_RAW (android-path.c).  */
++
++#include <unistd.h>
++#include <sysdep.h>
++
++int
++chroot (const char *path)
++{
++  return INLINE_SYSCALL_CALL (chroot, path);
++}
+--- a/sysdeps/unix/sysv/linux/aarch64/execve.c	1969-12-31 21:00:00.000000000 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/execve.c	2026-10-19 08:52:22.394775954 -0300
+@@ -0,0 +1,13 @@
++/* Android: en C (no stub generado) para que pase por la traducción de
++   rutas de INTERNAL_SYSCALL_RAW (android-path.c).  */
++
++#include <unistd.h>
++#include <sysdep.h>
++
++int
++__execve (const char *path, char *const argv[], char *const envp[])
++{
++  return INLINE_SYSCALL_CALL (execve, path, argv, envp);
++}
++
++weak_alias (__execve, execve)
+--- a/sysdeps/unix/sysv/linux/aarch64/fchownat.c	1969-12-31 21:00:00.000000000 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/fchownat.c	2026-10-19 08:52:22.394958244 -0300
+@@ -0,0 +1,12 @@
++/* Android: en C (no stub generado) para que pase por la traducción de
++   rutas de INTERNAL_SYSCALL_RAW (android-path.c).  */
++
++#include <fcntl.h>
++#include <unistd.h>
++#include <sysdep.h>
++
++int
++fchownat (int fd, const char *file, uid_t owner, gid_t group, int flag)
++{
++  return INLINE_SYSCALL_CALL (fchownat, fd, file, owner, group, flag);
++}
+--- a/sysdeps/unix/sysv/linux/aarch64/getxattr.c	1969-12-31 21:00:00.000000000 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/getxattr.c	2026-10-19 08:52:22.395402864 -0300
+@@ -0,0 +1,11 @@
++/* Android: en C (no stub generado) para que pase por la traducción de
++   rutas de INTERNAL_SYSCALL_RAW (android-path.c).  */
++
++#include <sys/xattr.h>
++#include <sysdep.h>
++
++ssize_t
++getxattr (const char *path, const char *name, void *value, size_t size)
++{
++  return INLINE_SYSCALL_CALL (getxattr, path, name, value, size);
++}
+--- a/sysdeps/unix/sysv/linux/aarch64/inotify_add_watch.c	1969-12-31 21:00:00.000000000 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/inotify_add_watch.c	2026-10-19 08:56:33.799139056 -0300
+@@ -0,0 +1,11 @@
++/* Android: en C (no stub generado) para que pase por la traducción de
++   rutas de INTERNAL_SYSCALL_RAW (android-path.c).  */
++
++#include <sys/inotify.h>
++#include <sysdep.h>
++
++int
++inotify_add_watch (int fd, const char *name, uint32_t mask)
++{
++  return INLINE_SYSCALL_CALL (inotify_add_watch, fd, name, mask);
++}
+--- a/sysdeps/unix/sysv/linux/aarch64/lgetxattr.c	1969-12-31 21:00:00.000000000 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/lgetxattr.c	2026-10-19 08:52:22.395454199 -0300
+@@ -0,0 +1,11 @@
++/* Android: en C (no stub generado) para que pase por la traducción de
++   rutas de INTERNAL_SYSCALL_RAW (android-path.c).  */
++
++#include <sys/xattr.h>
++#include <sysdep.h>
++
++ssize_t
++lgetxattr (const char *path, const char *name, void *value, size_t size)
++{
++  return INLINE_SYSCALL_CALL (lgetxattr, path, name, value, size);
++}
+--- a/sysdeps/unix/sysv/linux/aarch64/linkat.c	1969-12-31 21:00:00.000000000 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/linkat.c	2026-10-19 08:52:22.395008880 -0300
+@@ -0,0 +1,12 @@
++/* Android: en C (no stub generado) para que pase por la traducción de
++   rutas de INTERNAL_SYSCALL_RAW (android-path.c).  */
++
++#include <fcntl.h>
++#include <unistd.h>
++#include <sysdep.h>
++
++int
++linkat (int fromfd, const char *from, int tofd, const char *to, int flags)
++{
++  return INLINE_SYSCALL_CALL (linkat, fromfd, from, tofd, to, flags);
++}
+--- a/sysdeps/unix/sysv/linux/aarch64/listxattr.c	1969-12-31 21:00:00.000000000 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/listxattr.c	2026-10-19 08:52:22.395505254 -0300
+@@ -0,0 +1,11 @@
++/* Android: en C (no stub generado) para que pase por la traducción de
++   rutas de INTERNAL_SYSCALL_RAW (android-path.c).  */
++
++#include <sys/xattr.h>
++#include <sysdep.h>
++
++ssize_t
++listxattr (const char *path, char *list, size_t size)
++{
++  return INLINE_SYSCALL_CALL (listxattr, path, list, size);
++}
+--- a/sysdeps/unix/sysv/linux/aarch64/llistxattr.c	1969-12-31 21:00:00.000000000 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/llistxattr.c	2026-10-19 08:52:22.395555890 -0300
+@@ -0,0 +1,11 @@
++/* Android: en C (no stub generado) para que pase por la traducción de
++   rutas de INTERNAL_SYSCALL_RAW (android-path.c).  */
++
++#include <sys/xattr.h>
++#include <sysdep.h>
++
++ssize_t
++llistxattr (const char *path, char *list, size_t size)
++{
++  return INLINE_SYSCALL_CALL (llistxattr, path, list, size);
++}
+--- a/sysdeps/unix/sysv/linux/aarch64/lremovexattr.c	1969-12-31 21:00:00.000000000 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/lremovexattr.c	2026-10-19 08:52:22.395658559 -0300
+@@ -0,0 +1,11 @@
++/* Android: en C (no stub generado) para que pase por la traducción de
++   rutas de INTERNAL_SYSCALL_RAW (android-path.c).  */
++
++#include <sys/xattr.h>
++#include <sysdep.h>
++
++int
++lremovexattr (const char *path, const char *name)
++{
++  return INLINE_SYSCALL_CALL (lremovexattr, path, name);
++}
+--- a/sysdeps/unix/sysv/linux/aarch64/lsetxattr.c	1969-12-31 21:00:00.000000000 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/lsetxattr.c	2026-10-19 08:52:22.395351530 -0300
+@@ -0,0 +1,12 @@
++/* Android: en C (no stub generado) para que pase por la traducción de
++   rutas de INTERNAL_SYSCALL_RAW (android-path.c).  */
++
++#include <sys/xattr.h>
++#include <sysdep.h>
++
++int
++lsetxattr (const char *path, const char *name, const void *value, size_t size,
++           int flags)
++{
++  return INLINE_SYSCALL_CALL (lsetxattr, path, name, value, size, flags);
++}
+--- a/sysdeps/unix/sysv/linux/aarch64/Makefile	2026-01-23 17:54:00.000000000 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/Makefile	2026-10-19 08:56:33.802495842 -0300
+@@ -229,3 +229,11 @@
+ 
+ abi-lp64-condition := !defined __AARCH64EB__
+ abi-lp64_be-condition := defined __AARCH64EB__
++
++# Android: traducción de rutas (android-path.c), en libc y en ld.so.
++ifeq ($(subdir),misc)
++sysdep_routines += android-path inotify_add_watch
++endif
++ifeq ($(subdir),elf)
++sysdep-rtld-routines += android-path
++endif
+--- a/sysdeps/unix/sysv/linux/aarch64/mkdirat.c	1969-12-31 21:00:00.000000000 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/mkdirat.c	2026-10-19 08:52:22.395090247 -0300
+@@ -0,0 +1,12 @@
++/* Android: en C (no stub generado) para que pase por la traducción de
++   rutas de INTERNAL_SYSCALL_RAW (android-path.c).  */
++
++#include <fcntl.h>
++#include <sys/stat.h>
++#include <sysdep.h>
++
++int
++mkdirat (int fd, const char *path, mode_t mode)
++{
++  return INLINE_SYSCALL_CALL (mkdirat, fd, path, mode);
++}
+--- a/sysdeps/unix/sysv/linux/aarch64/readlinkat.c	1969-12-31 21:00:00.000000000 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/readlinkat.c	2026-10-19 08:52:22.395145144 -0300
+@@ -0,0 +1,14 @@
++/* Android: en C (no stub generado) para que pase por la traducción de
++   rutas de INTERNAL_SYSCALL_RAW (android-path.c).  */
++
++#include <fcntl.h>
++#include <unistd.h>
++#include <sysdep.h>
++
++ssize_t
++readlinkat (int fd, const char *path, char *buf, size_t len)
++{
++  return INLINE_SYSCALL_CALL (readlinkat, fd, path, buf, len);
++}
++
++libc_hidden_def (readlinkat)
+--- a/sysdeps/unix/sysv/linux/aarch64/removexattr.c	1969-12-31 21:00:00.000000000 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/removexattr.c	2026-10-19 08:52:22.395607713 -0300
+@@ -0,0 +1,11 @@
++/* Android: en C (no stub generado) para que pase por la traducción de
++   rutas de INTERNAL_SYSCALL_RAW (android-path.c).  */
++
++#include <sys/xattr.h>
++#include <sysdep.h>
++
++int
++removexattr (const char *path, const char *name)
++{
++  return INLINE_SYSCALL_CALL (removexattr, path, name);
++}
+--- a/sysdeps/unix/sysv/linux/aarch64/setxattr.c	1969-12-31 21:00:00.000000000 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/setxattr.c	2026-10-19 08:52:22.395300614 -0300
+@@ -0,0 +1,12 @@
++/* Android: en C (no stub generado) para que pase por la traducción de
++   rutas de INTERNAL_SYSCALL_RAW (android-path.c).  */
++
++#include <sys/xattr.h>
++#include <sysdep.h>
++
++int
++setxattr (const char *path, const char *name, const void *value, size_t size,
++          int flags)
++{
++  return INLINE_SYSCALL_CALL (setxattr, path, name, value, size, flags);
++}
+--- a/sysdeps/unix/sysv/linux/aarch64/symlinkat.c	1969-12-31 21:00:00.000000000 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/symlinkat.c	2026-10-19 08:52:22.395196548 -0300
+@@ -0,0 +1,12 @@
++/* Android: en C (no stub generado) para que pase por la traducción de
++   rutas de INTERNAL_SYSCALL_RAW (android-path.c).  */
++
++#include <fcntl.h>
++#include <unistd.h>
++#include <sysdep.h>
++
++int
++symlinkat (const char *from, int tofd, const char *to)
++{
++  return INLINE_SYSCALL_CALL (symlinkat, from, tofd, to);
++}
+--- a/sysdeps/unix/sysv/linux/aarch64/sysdep.h	2026-01-23 17:54:00.000000000 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/sysdep.h	2026-10-19 08:52:09.405759809 -0300
+@@ -177,7 +177,7 @@
+ # define HAVE_CLONE3_WRAPPER		1
+ 
+ # undef INTERNAL_SYSCALL_RAW
+-# define INTERNAL_SYSCALL_RAW(name, nr, args...)		\
++# define INTERNAL_SYSCALL_RAW_DIRECT(name, nr, args...)		\
+   ({ long _sys_result;						\
+      {								\
+        LOAD_ARGS_##nr (args)					\
+@@ -188,6 +188,57 @@
+      }								\
+      _sys_result; })
+ 
++/* Android: las syscalls con rutas pasan por __android_path_syscall
++   (android-path.c), que traduce /usr, /etc... al prefijo de la app y lanza
++   los programas a través del cargador.  Con NAME constante el compilador
++   descarta la comprobación en las demás syscalls.  */
++# if IS_IN (libc) || IS_IN (rtld)
++static __always_inline int
++__android_path_nr (long int nr)
++{
++  switch (nr)
++    {
++    case __NR_chdir: case __NR_chroot: case __NR_truncate: case __NR_statfs:
++    case __NR_acct: case __NR_setxattr: case __NR_lsetxattr:
++    case __NR_getxattr: case __NR_lgetxattr: case __NR_listxattr:
++    case __NR_llistxattr: case __NR_removexattr: case __NR_lremovexattr:
++    case __NR_openat: case __NR_openat2: case __NR_faccessat:
++    case __NR_faccessat2: case __NR_newfstatat: case __NR_statx:
++    case __NR_mkdirat: case __NR_mknodat: case __NR_unlinkat:
++    case __NR_fchmodat: case __NR_fchmodat2: case __NR_fchownat:
++    case __NR_utimensat: case __NR_inotify_add_watch:
++    case __NR_name_to_handle_at: case __NR_linkat: case __NR_renameat:
++    case __NR_renameat2: case __NR_symlinkat: case __NR_readlinkat:
++    case __NR_getcwd: case __NR_bind: case __NR_connect: case __NR_execve:
++    case __NR_execveat:
++      return 1;
++    }
++  return 0;
++}
++extern long int __android_path_syscall (long int, long int, long int,
++					long int, long int, long int,
++					long int) attribute_hidden;
++#  define __ANDROID_ARGS_0()			0, 0, 0, 0, 0, 0
++#  define __ANDROID_ARGS_1(a)			(long int) (a), 0, 0, 0, 0, 0
++#  define __ANDROID_ARGS_2(a, b)		(long int) (a), (long int) (b), \
++	0, 0, 0, 0
++#  define __ANDROID_ARGS_3(a, b, c)		(long int) (a), (long int) (b), \
++	(long int) (c), 0, 0, 0
++#  define __ANDROID_ARGS_4(a, b, c, d)		(long int) (a), (long int) (b), \
++	(long int) (c), (long int) (d), 0, 0
++#  define __ANDROID_ARGS_5(a, b, c, d, e)	(long int) (a), (long int) (b), \
++	(long int) (c), (long int) (d), (long int) (e), 0
++#  define __ANDROID_ARGS_6(a, b, c, d, e, f)	(long int) (a), (long int) (b), \
++	(long int) (c), (long int) (d), (long int) (e), (long int) (f)
++#  define INTERNAL_SYSCALL_RAW(name, nr, args...)			\
++  (__android_path_nr (name)						\
++   ? __android_path_syscall ((name), __ANDROID_ARGS_##nr (args))	\
++   : INTERNAL_SYSCALL_RAW_DIRECT (name, nr, args))
++# else
++#  define INTERNAL_SYSCALL_RAW(name, nr, args...)			\
++	INTERNAL_SYSCALL_RAW_DIRECT (name, nr, args)
++# endif
++
+ # undef INTERNAL_SYSCALL
+ # define INTERNAL_SYSCALL(name, nr, args...)			\
+ 	INTERNAL_SYSCALL_RAW(SYS_ify(name), nr, args)
+--- a/sysdeps/unix/sysv/linux/aarch64/unlinkat.c	1969-12-31 21:00:00.000000000 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/unlinkat.c	2026-10-19 08:52:22.395249070 -0300
+@@ -0,0 +1,12 @@
++/* Android: en C (no stub generado) para que pase por la traducción de
++   rutas de INTERNAL_SYSCALL_RAW (android-path.c).  */
++
++#include <fcntl.h>
++#include <unistd.h>
++#include <sysdep.h>
++
++int
++unlinkat (int fd, const char *path, int flag)
++{
++  return INLINE_SYSCALL_CALL (unlinkat, fd, path, flag);
++}
+--- a/sysdeps/unix/sysv/linux/spawni.c	2026-01-23 17:54:00.000000000 -0300
++++ b/sysdeps/unix/sysv/linux/spawni.c	2026-10-19 08:52:09.406169786 -0300
+@@ -356,7 +356,7 @@
+      extra pages won't actually be allocated unless they get used.
+      It also acts the slack for spawn_closefrom (including MIPS64 getdents64
+      where it might use about 1k extra stack space).  */
+-  argv_size += (32 * 1024);
++  argv_size += (64 * 1024);
+   size_t stack_size = ALIGN_UP (argv_size, GLRO(dl_pagesize));
+   void *stack = __mmap (NULL, stack_size, GL (dl_stack_prot_flags),
+ 			MAP_PRIVATE | MAP_ANONYMOUS | MAP_STACK, -1, 0);

@@ -1,0 +1,233 @@
+--- a/sysdeps/unix/sysv/linux/aarch64/android-path.c
++++ b/sysdeps/unix/sysv/linux/aarch64/android-path.c
+@@ -481,6 +481,214 @@
+   return r;
+ }
+ 
++#if IS_IN (libc)
++# include <sys/mman.h>
++# include <sys/sysinfo.h>
++# include <sys/utsname.h>
++# include <time.h>
++
++/* /proc sintético: SELinux no deja a las apps leer /proc/stat, uptime,
++   loadavg ni version (htop, top, ps, uptime los necesitan).  Si el kernel
++   responde EACCES, se arma el contenido con lo que sí se puede leer y se
++   entrega en un memfd.  Tiempo de CPU: el inactivo sale de cpuidle (µs por
++   estado, en /sys) y el resto hasta el tiempo desde el arranque cuenta como
++   "user" (no hay desglose user/system/irq).  */
++
++#define USER_HZ 100
++
++/* Número del principio de un archivo chico de /sys; -1 si no se puede.  */
++static long int
++leer_num (const char *ruta)
++{
++  char buf[32];
++  int fd = RAW (__NR_openat, AT_FDCWD, ruta, O_RDONLY | O_CLOEXEC);
++  if (fd < 0)
++    return -1;
++  long int n = RAW (__NR_read, fd, buf, sizeof buf - 1);
++  RAW (__NR_close, fd);
++  if (n <= 0 || buf[0] < '0' || buf[0] > '9')
++    return -1;
++  long int v = 0;
++  for (long int i = 0; i < n && buf[i] >= '0' && buf[i] <= '9'; i++)
++    v = v * 10 + buf[i] - '0';
++  return v;
++}
++
++/* Microsegundos inactivos de la CPU n (suma de sus estados de cpuidle).  */
++static unsigned long int
++cpu_inactiva_us (int n)
++{
++  char ruta[96], *q;
++  unsigned long int total = 0;
++  for (int s = 0; s < 16; s++)
++    {
++      q = ruta;
++      mcopy (q, "/sys/devices/system/cpu/cpu", 27);
++      q = utoa (q + 27, n);
++      mcopy (q, "/cpuidle/state", 14);
++      q = utoa (q + 14, s);
++      mcopy (q, "/time", 6);
++      long int t = leer_num (ruta);
++      if (t < 0)
++	break;
++      total += t;
++    }
++  return total;
++}
++
++/* Cantidad de CPUs: "0-7" en /sys/devices/system/cpu/possible.  */
++static int
++num_cpus (void)
++{
++  char buf[32];
++  int fd = RAW (__NR_openat, AT_FDCWD, "/sys/devices/system/cpu/possible",
++		O_RDONLY | O_CLOEXEC);
++  if (fd < 0)
++    return 1;
++  long int n = RAW (__NR_read, fd, buf, sizeof buf - 1);
++  RAW (__NR_close, fd);
++  int v = 0;
++  for (long int i = n - 1; i >= 0; i--)
++    if (buf[i] == '-' || buf[i] == ',')
++      {
++	for (long int j = i + 1; j < n && buf[j] >= '0' && buf[j] <= '9'; j++)
++	  v = v * 10 + buf[j] - '0';
++	return v + 1 > 256 ? 256 : v + 1;
++      }
++  return 1;
++}
++
++static char *
++pon (char *q, const char *s)
++{
++  size_t n = slen (s);
++  mcopy (q, s, n);
++  return q + n;
++}
++
++/* v / div con dos decimales ("12.34").  */
++static char *
++pon_dec (char *q, unsigned long int v, unsigned long int div)
++{
++  q = utoa (q, v / div);
++  *q++ = '.';
++  unsigned long int c = v % div * 100 / div;
++  *q++ = '0' + c / 10;
++  *q++ = '0' + c % 10;
++  return q;
++}
++
++/* Línea "cpuN user 0 0 idle 0 0 0 0 0 0".  */
++static char *
++linea_cpu (char *q, const char *nombre, unsigned long int ocupado,
++	   unsigned long int inactivo)
++{
++  q = pon (q, nombre);
++  *q++ = ' ';
++  q = utoa (q, ocupado);
++  q = pon (q, " 0 0 ");
++  q = utoa (q, inactivo);
++  return pon (q, " 0 0 0 0 0 0\n");
++}
++
++static long int
++proc_falso (const char *ruta, long int flags, long int err)
++{
++  static char buf[256 * 64 + 512];
++  char *q = buf;
++  const char *nombre = ruta + 6;
++  if ((flags & O_ACCMODE) != O_RDONLY)
++    return err;
++
++  struct timespec arranque = { 0, 0 }, ahora = { 0, 0 };
++  RAW (__NR_clock_gettime, CLOCK_BOOTTIME, &arranque);
++  unsigned long int arranque_j = arranque.tv_sec * USER_HZ
++				 + arranque.tv_nsec / (1000000000 / USER_HZ);
++
++  if (starts (nombre, "stat", 5))
++    {
++      int n = num_cpus ();
++      unsigned long int inactivo[256], ocupado[256], ti = 0, to = 0;
++      for (int i = 0; i < n; i++)
++	{
++	  inactivo[i] = cpu_inactiva_us (i) / (1000000 / USER_HZ);
++	  ocupado[i] = arranque_j > inactivo[i] ? arranque_j - inactivo[i] : 0;
++	  ti += inactivo[i];
++	  to += ocupado[i];
++	}
++      q = linea_cpu (q, "cpu ", to, ti);
++      for (int i = 0; i < n; i++)
++	{
++	  char cpu[32], *c = cpu;
++	  c = pon (c, "cpu");
++	  *utoa (c, i) = '\0';
++	  q = linea_cpu (q, cpu, ocupado[i], inactivo[i]);
++	}
++      RAW (__NR_clock_gettime, CLOCK_REALTIME, &ahora);
++      struct sysinfo si = { 0 };
++      RAW (__NR_sysinfo, &si);
++      q = pon (q, "intr 0\nctxt 0\nbtime ");
++      q = utoa (q, ahora.tv_sec - arranque.tv_sec);
++      q = pon (q, "\nprocesses ");
++      q = utoa (q, si.procs);
++      q = pon (q, "\nprocs_running 1\nprocs_blocked 0\nsoftirq 0\n");
++    }
++  else if (starts (nombre, "uptime", 7))
++    {
++      unsigned long int ti = 0;
++      for (int i = 0, n = num_cpus (); i < n; i++)
++	ti += cpu_inactiva_us (i) / 10000;
++      q = pon_dec (q, arranque_j, USER_HZ);
++      *q++ = ' ';
++      q = pon_dec (q, ti, 100);
++      *q++ = '\n';
++    }
++  else if (starts (nombre, "loadavg", 8))
++    {
++      struct sysinfo si = { 0 };
++      RAW (__NR_sysinfo, &si);
++      for (int i = 0; i < 3; i++)
++	{
++	  q = pon_dec (q, si.loads[i], 1 << SI_LOAD_SHIFT);
++	  *q++ = ' ';
++	}
++      q = pon (q, "1/");
++      q = utoa (q, si.procs);
++      q = pon (q, " 0\n");
++    }
++  else if (starts (nombre, "version", 8))
++    {
++      struct utsname u;
++      if (RAW (__NR_uname, &u) < 0)
++	return err;
++      q = pon (q, "Linux version ");
++      q = pon (q, u.release);
++      q = pon (q, " (android) ");
++      q = pon (q, u.version);
++      *q++ = '\n';
++    }
++  else
++    return err;
++
++  int fd = RAW (__NR_memfd_create, nombre,
++		(flags & O_CLOEXEC) ? MFD_CLOEXEC : 0);
++  if (fd < 0)
++    return err;
++  for (char *p = buf; p < q; )
++    {
++      long int w = RAW (__NR_write, fd, p, q - p);
++      if (w <= 0)
++	{
++	  RAW (__NR_close, fd);
++	  return err;
++	}
++      p += w;
++    }
++  RAW (__NR_lseek, fd, 0, SEEK_SET);
++  return fd;
++}
++#endif
++
+ #define XL(a, b)							\
+   do									\
+     if ((a) != 0)							\
+@@ -569,6 +777,15 @@
+       return -ENOSYS;
+ 
+     case __NR_openat:
++#if IS_IN (libc)
++      if (a1 != 0 && starts ((const char *) a1, "/proc/", 6))
++	{
++	  long int r = raw (nr, a0, a1, a2, a3, a4, a5);
++	  return r == -EACCES ? proc_falso ((const char *) a1, a2, r) : r;
++	}
++#endif
++      XL (a1, b1);
++      break;
+     case __NR_openat2:
+     case __NR_faccessat:
+     case __NR_newfstatat:
