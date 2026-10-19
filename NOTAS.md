@@ -66,7 +66,8 @@ y límite de procesos hijos de Android desactivado (`settings put global setting
 8ª sesión: ✅ portapapeles Android ↔ Linux en los dos sentidos (`Portapapeles.java`: wl-paste --watch / wl-copy dentro de sway; Android solo deja leer con el escritorio al frente). Cursor: está bien así.
 SUPER+V (historial con cliphist) no anda: cliphist es Go y se salta la glibc → llega con la capa seccomp.
 9ª sesión: sway no se bloquea en segundo plano; ✅ sin ventana el anfitrión ya no responde frame callbacks (sway con vkcube atrás: 2,7 s de CPU cada 5 s → 0). ✅ ya no se ve estirado en la primera apertura. `vkcube` necesita `--wsi wayland` (parche a Turnip: pendiente menor). El usuario confirmó escala, opacidad, SUPER+A/TAB, scroll, ñ/tildes; falta el clic derecho.
-**Siguiente: popups xdg / `wl_subcompositor` en el anfitrión; después compatibilidad: Go/estáticos (seccomp, arregla también SUPER+V), audio, Xwayland.
+10ª sesión: ✅ **menús/popups GTK funcionan dentro de sway** (probado con gtk3-widget-factory). Las apps GTK se caían al cargar el primer ícono: glycin (gdk-pixbuf) aísla los cargadores con bwrap, que aquí falla → `GLYCIN_DISABLE_SANDBOX=i-know-the-risks` en el entorno de `TerminalService` (aplica al reinstalar la app). Popups en el anfitrión pasan a menor (solo clientes directos, que hoy no se usan).
+**Siguiente: compatibilidad: Go/estáticos (seccomp, arregla también SUPER+V), audio, Xwayland.
 Avisar antes de correr scripts que cierran la app (force-stop): el usuario suele estar usándola.**
 Root temporal descartado: lo necesario vive en particiones verificadas, y desbloquear/bloquear borra `/data`.
 
@@ -102,7 +103,8 @@ Siguiente:
 - [x] Escritorio estilo HyDE, zsh como el PC, gestos de 3 dedos (2026-10-19)
 - [x] Portapapeles Android ↔ Linux (2026-10-19, 8ª sesión)
 - [x] sway en segundo plano: no se bloquea; frame callbacks sin ventana arreglados (2026-10-19, 9ª sesión)
-- [ ] **← siguiente:** popups; luego programas Go/estáticos (seccomp), audio, Xwayland, Steam
+- [x] menús GTK dentro de sway: funcionan; apps GTK ya no se caen (glycin sin bwrap) (2026-10-19, 10ª sesión)
+- [ ] **← siguiente:** programas Go/estáticos (seccomp), audio, Xwayland, Steam; popups en el anfitrión (menor)
 - [ ] Binarios estáticos (ej. `ldconfig`): cargarlos en espacio de usuario desde `execve`
 
 En el teléfono: app sdk36 con `files/archlinux` (Arch + pacman + sway/foot + gcc/meson + Turnip en `~/turnip`, varios GB) y carpetas de pruebas anteriores (`files/arch`, `files/glibc`, `files/glibcp`).

@@ -5,5 +5,5 @@
 # $N cambia con cada `adb install`. LD_PRELOAD no va afuera (rompe el sh de Android): usar /usr/bin/env.
 N=$WL_LIB
 F=/data/data/dev.ben4shot.glibcprueba.sdk36/files/archlinux
-export GLIBC_PREFIX=$F GLIBC_LOADER=$N/libldp.so HOME=/home/user PATH=/usr/bin LANG=C.UTF-8 XDG_RUNTIME_DIR=/run/user/$(id -u) WAYLAND_DISPLAY=wayland-1
-exec /system/bin/timeout 5 $N/libldp.so "$@"
+export GLIBC_PREFIX=$F GLIBC_LOADER=$N/libldp.so HOME=/home/user PATH=/usr/bin LANG=C.UTF-8 XDG_RUNTIME_DIR=/run/user/$(id -u) WAYLAND_DISPLAY=wayland-1 GLYCIN_DISABLE_SANDBOX=i-know-the-risks
+exec /system/bin/timeout ${WL_T:-5} $N/libldp.so "$@"

@@ -206,7 +206,11 @@ public class TerminalService extends Service implements TerminalSessionClient {
                 // Vulkan: Turnip (KGSL) compilado en el teléfono (turnip/compilar-mesa.sh)
                 "VK_ICD_FILENAMES=/home/user/turnip/share/vulkan/icd.d/freedreno_icd.aarch64.json",
                 // OpenGL: Zink (mesa de Arch) sobre Turnip
-                "MESA_LOADER_DRIVER_OVERRIDE=zink"));
+                "MESA_LOADER_DRIVER_OVERRIDE=zink",
+                // gdk-pixbuf carga imágenes con glycin, que las aísla con bwrap (namespaces: no
+                // sin root). bwrap falla leyendo /proc/sys/kernel/overflowuid, glycin no reconoce
+                // ese error y las apps GTK se caen con el primer ícono. La app ya es un sandbox.
+                "GLYCIN_DISABLE_SANDBOX=i-know-the-risks"));
         // Escritorio por GPU: wlroots parchado (wlroots/compilar-wlroots.sh) con renderer
         // Vulkan, buffers android-ahb-v1 hacia el anfitrión y linux-dmabuf para los clientes.
         // Sin él, sway por CPU (pixman) y los clientes Vulkan por wl_shm.

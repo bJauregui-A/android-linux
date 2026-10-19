@@ -6,7 +6,7 @@ Documento de contexto del proyecto. Resume la idea, las decisiones tomadas (y po
 
 Que el teléfono (Redmi 15 5G, HyperOS, **sin root**) sea a la vez Android y un **Linux real y totalmente modificable**: programas de Arch Linux ARM sin recompilar corriendo nativos (glibc propia dentro de una app normal, sin proot ni emulación), con un **escritorio Wayland mínimo y modificable, tipo Hyprland adaptado al celular**, y **aceleración por GPU** (Turnip en la Adreno 619). Sin perder lo de Android que importa (apps bancarias chilenas, Play Store, cámara, pagos) y todo reversible: es una app, se desinstala y el teléfono queda igual. Más adelante: integrarlo con Mosaico (cada ventana Linux como ventana Android) y, si se puede, Steam.
 
-## Para retomar (estado al 2026-10-19, novena sesión)
+## Para retomar (estado al 2026-10-19, décima sesión)
 
 | Frente | Estado |
 |---|---|
@@ -17,6 +17,11 @@ Que el teléfono (Redmi 15 5G, HyperOS, **sin root**) sea a la vez Android y un 
 | GPU | ✅ Vulkan: Turnip (KGSL) compilado en el teléfono. ✅ OpenGL 4.6 / GLES 3.2: Zink sobre Turnip. ✅ **Cero copias** para clientes directos: `AHardwareBuffer` + `ASurfaceControl` (protocolo propio `android-ahb-v1` + parche a la WSI de Mesa) |
 | Escritorio | ✅ sway con los atajos y el aspecto de la config de Hyprland/HyDE del PC (`sway/`), waybar, fuzzel, kitty con la config del PC, modo inmersivo a pantalla completa (1080×2193 px reales). swayfx también funciona por GPU (`~/swayfx`, no es el por defecto); Hyprland instalado pero no arranca (ver "sway, swayfx y Hyprland") |
 | Escritorio por GPU | ✅ sway compone con el renderer **Vulkan** de wlroots (parchado, `wlroots/`) directo en AHardwareBuffers del anfitrión; sus clientes le pasan dmabufs. vkcube dentro de sway: CPU total 8,9 s → 2,1 s cada 10 s |
+
+**10ª sesión (2026-10-19):**
+- ✅ **Menús GTK dentro de sway funcionan** (gtk3-widget-factory: el desplegable abre como popup, la opción elegida queda). sway resuelve los popups de sus clientes: los popups del anfitrión solo hacen falta para clientes directos (hoy no se usan; volverán con Mosaico) → bajan a pendiente menor.
+- **Las apps GTK se caían con el primer ícono**: gdk-pixbuf 2.44 carga imágenes con glycin 2.2, que corre cada cargador dentro de `bwrap`. bwrap muere leyendo `/proc/sys/kernel/overflowuid` (SELinux) con un mensaje que la detección de glycin (`check_bwrap_syscalls_blocked`: SIGSYS o "Creating new namespace failed"...) no reconoce → cree que bwrap sirve y todo cargador "exited early". Arreglo: `GLYCIN_DISABLE_SANDBOX=i-know-the-risks` (ese texto exacto) en `TerminalService.entorno()` y en `scripts/wl.sh`. **Aplica al reinstalar la app** (sway actual no lo tiene: a mano, `env GLYCIN_DISABLE_SANDBOX=i-know-the-risks <app>`). Alternativa más general (no hecha): /proc sintético para `overflowuid` en el parche 0006, así bwrap fallaría en `unshare` con un error que glycin sí reconoce.
+- `scripts/wl.sh`: `WL_T=<segundos>` cambia el tiempo límite (5 por defecto; pacman necesita más). Instalado `gtk3-demos` (gtk3-widget-factory, gtk3-demo) para probar.
 
 **9ª sesión (2026-10-19):** sway **no** se bloquea en segundo plano (2 min atrás: IPC y Wayland responden en ~190 ms; `isFrozen=false` por el servicio en primer plano). Lo de la 8ª era `swaymsg` sin socket: pasar `-s /run/user/<uid>/sway-ipc.<uid>.<pid de sway>.sock`.
 - ✅ **Frame callbacks sin ventana**: se respondían al tiro → con vkcube y la app atrás sway gastaba 2,7 s de CPU cada 5 s. Ahora `anfitrion.c` los guarda en `sin_ventana` (en `presentar()` sin capa y al final de `surface_commit` sin ventana) y los pasa a `para_vsync` en `EV_VENTANA`. Medido: atrás 0 ms (app y sway), al frente igual que antes (~0,5 + 0,45 s); IPC sigue respondiendo atrás.
@@ -50,9 +55,9 @@ Que el teléfono (Redmi 15 5G, HyperOS, **sin root**) sea a la vez Android y un 
 1. **Ojo: el usuario suele estar usando el teléfono.** `scripts/correr.sh`, `correr-wl.sh` y `adb install -r` cierran sway y todo lo abierto: avisar antes. Para mirar sin cerrar nada: `adb exec-out screencap -p` y `adb shell "run-as dev.ben4shot.glibcprueba.sdk36 cat files/archlinux/tmp/sway.log"`.
 2. ~~Cursor más grande~~: el usuario dice que está bien. ~~Portapapeles Android ↔ Linux~~ ✅ (8ª sesión).
 3. ~~¿sway se bloquea en segundo plano?~~ No (9ª sesión); frame callbacks sin ventana ✅; estirado al abrir ✅; barra inferior solo con teclado (normal).
-4. **← siguiente: popups xdg y `wl_subcompositor`** en el anfitrión (solo clientes directos, sin sway en medio): hoy `xdg_surface.get_popup` se cierra al pedirse (menús GTK/Qt no andan) y libdecor pide `wl_subcompositor` para las decoraciones. Revisar también si dentro de sway los menús funcionan (sin probar).
+4. ~~Menús dentro de sway~~ ✅ (10ª sesión). Menor, para clientes directos/Mosaico: popups xdg y `wl_subcompositor` en el anfitrión: hoy `xdg_surface.get_popup` se cierra al pedirse (menús GTK/Qt no andan) y libdecor pide `wl_subcompositor` para las decoraciones. Revisar también si dentro de sway los menús funcionan (sin probar).
 5. ~~Escala y opacidad~~: el usuario dice que están bien.
-6. Luego lo grande de "Compatibilidad completa" (abajo): capa seccomp para Go/estáticos, audio, Xwayland.
+6. **← siguiente:** lo grande de "Compatibilidad completa" (abajo): capa seccomp para Go/estáticos, audio, Xwayland.
 7. Menores: parche a Turnip para `KHR_display` (vkcube sin `--wsi`); si vuelve a pedir Hyprland, ver "sway, swayfx y Hyprland".
 
 **Cómo se usa hoy:**
