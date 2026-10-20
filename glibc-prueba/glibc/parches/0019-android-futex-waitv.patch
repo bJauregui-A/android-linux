@@ -1,0 +1,76 @@
+--- a/sysdeps/unix/sysv/linux/aarch64/android-path.c
++++ b/sysdeps/unix/sysv/linux/aarch64/android-path.c
+@@ -1070,6 +1070,52 @@
+   return 0;
+ }
+ 
++/* Android seccomp bloquea futex_waitv (449) con SIGSYS.
++   Wine (wineserver y ntdll fsync) prueba esta syscall para activar fsync:
++   si recibe ENOSYS cae a sincronización lenta por servidor.
++   Con 0 o puntero nulo se responde -EINVAL (lo mismo que el kernel Linux).
++   Con 1 futex se delega a __NR_futex (FUTEX_WAIT_BITSET), que Android sí permite.
++   Con múltiples futexes se comprueba si alguno cambió; si no, espera breve.  */
++#ifndef __NR_futex_waitv
++# define __NR_futex_waitv 449
++#endif
++
++struct android_futex_waitv
++{
++  unsigned long long int val;
++  unsigned long long int uaddr;
++  unsigned int flags;
++  unsigned int __reserved;
++};
++
++static long int
++emular_futex_waitv (void *waiters_ptr, unsigned int nr_waiters, unsigned int flags,
++		    void *timeout_ptr, int clockid)
++{
++  if (nr_waiters == 0 || nr_waiters > 128 || flags != 0)
++    return -EINVAL;
++  if (waiters_ptr == NULL)
++    return -EFAULT;
++
++  struct android_futex_waitv *waiters = (struct android_futex_waitv *) waiters_ptr;
++
++  if (nr_waiters == 1)
++    {
++      int op = 9 /* FUTEX_WAIT_BITSET */ | (waiters[0].flags & 128 /* FUTEX_PRIVATE_FLAG */);
++      if (clockid == 1 /* CLOCK_MONOTONIC */)
++	op |= 256 /* FUTEX_CLOCK_REALTIME */;
++      long int r = RAW (__NR_futex, waiters[0].uaddr, op,
++			(unsigned int) waiters[0].val, timeout_ptr, NULL,
++			0xffffffff /* FUTEX_BITSET_MATCH_ANY */);
++      if (r == 0)
++	return 0;
++      return r;
++    }
++
++  for (unsigned int i = 0; i < nr_waiters; i++)
++    {
++      volatile unsigned int *p = (volatile unsigned int *) (uintptr_t) waiters[i].uaddr;
++      if (*p != (unsigned int) waiters[i].val)
++	return (long int) i;
++    }
++
++  struct timespec ts = { .tv_sec = 0, .tv_nsec = 1000000 };
++  return RAW (__NR_futex, waiters[0].uaddr, 9 /* FUTEX_WAIT_BITSET */,
++	      (unsigned int) waiters[0].val, &ts, NULL, 0xffffffff);
++}
++
+ static void
+ sigsys_handler (int sig, siginfo_t *si, void *ctx)
+ {
+@@ -1093,6 +1139,12 @@
+       r[0] = get_robust_list (r[0], (void **) r[1], (size_t *) r[2]);
+       return;
+     }
++  if (si->si_syscall == __NR_futex_waitv)
++    {
++      r[0] = emular_futex_waitv ((void *) r[0], (unsigned int) r[1],
++				 (unsigned int) r[2], (void *) r[3], (int) r[4]);
++      return;
++    }
+   r[0] = -ENOSYS;
+   init ();
+   if (debug_sigsys)

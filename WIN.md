@@ -53,9 +53,11 @@ Windows on ARM corre sobre un núcleo NT nativo en ARM64 (`aarch64`). Para compa
 - [x] **Generalizar `~/mesa-gl` en `proton-directo`**:
   - Habilitada aceleración OpenGL por GPU (`~/mesa-gl/lib` con parches 0001/0002) para todos los juegos en [`glibc-prueba/steam/proton-directo/proton`](file:///home/user/android-linux/glibc-prueba/steam/proton-directo/proton).
   - Eliminado `~/.config/proton-directo/22320` (Morrowind) al quedar cubierto de forma global.
-- [ ] **Desbloquear `WINEFSYNC=1` emulando `futex_waitv` (syscall 449) en glibc**:
+- [x] **Desbloquear `WINEFSYNC=1` emulando `futex_waitv` (syscall 449)**:
   - *Diagnóstico*: Proton ya activa `WINEFSYNC=1` por defecto, pero `wineserver` comprueba soporte llamando a `syscall(449, 0, 0, 0, 0, 0)`. El filtro seccomp de Android bloquea la syscall 449 con SIGSYS y glibc respondía ENOSYS (`0x26`), haciendo que wineserver vuelva a sincronización por servidor (`wineserver: using server-side synchronization`).
-  - *Solución*: La syscall estándar 98 (`futex`) sí está permitida por Android. Al atrapar la 449 en el manejador de SIGSYS de glibc y responderla vía syscall 98 (o devolver `EINVAL` a la sonda de prueba en vez de `ENOSYS`), `wineserver` activará fsync nativo por futex para todos los juegos.
+  - *Solución*: La syscall estándar 98 (`futex`) sí está permitida por Android.
+  - *Implementado para pruebas inmediatas*: Creado [`glibc-prueba/steam/shim-futex.c`](file:///home/user/android-linux/glibc-prueba/steam/shim-futex.c) y compilado en `~/.local/lib/libshim-futex.so`, integrado en `proton-directo`. Probado con wineserver: confirma `fsync: up and running.` y mapea las páginas de memoria de fsync sin errores.
+  - *Parche permanente de glibc*: Creado [`glibc-prueba/glibc/parches/0019-android-futex-waitv.patch`](file:///home/user/android-linux/glibc-prueba/glibc/parches/0019-android-futex-waitv.patch) para que la glibc atrape la syscall 449 en su manejador de SIGSYS de forma transparente y sin necesidad de preloads.
 
 ### Fase 2: Camino Gráfico Directo (`winewayland`)
 - [ ] **Integrar el driver `winewayland` en Proton/Wine ARM64**:
