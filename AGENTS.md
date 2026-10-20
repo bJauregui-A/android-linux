@@ -8,7 +8,7 @@ Proyecto: Linux real (Arch ARM con glibc propia, sin root ni proot) dentro de un
 
 ## Dónde corres
 - **En el PC** (repo original): el teléfono se maneja por `adb` y por SSH (`adb forward tcp:8022 tcp:8022`, `ssh -p 8022 user@127.0.0.1`).
-- **Dentro del teléfono** (Claude Code o agy en kitty, dentro de sway): ya estás en el Arch de la app. No hay `adb` y casi todo lo que las notas hacen "por SSH" se corre directo. Ojo: **tú mismo corres dentro de la app**, así que reiniciar sway, hacer `am force-stop`, reinstalar el APK o instalar una libc nueva (`instalar-glibc.sh`) **te mata la sesión**. Eso se hace desde el PC, o se le pide al usuario.
+- **Dentro del teléfono** (Claude Code o agy en kitty, dentro de sway): ya estás en el Arch de la app. Casi todo lo que las notas hacen "por SSH" se corre directo. Hay `adb` local (depuración inalámbrica a `127.0.0.1`, reconectar con `adb-conectar`; se cae sin wifi o al reiniciar el teléfono): da nivel `shell` sobre Android, así que las reglas de abajo sobre comandos que modifican aplican igual. Ojo: **tú mismo corres dentro de la app** (`dev.ben4shot.glibcprueba.sdk36`), así que reiniciar sway, hacer `am force-stop` o `pm` sobre esa app, reinstalar el APK o instalar una libc nueva (`instalar-glibc.sh`) **te mata la sesión** (y todo lo que el usuario tiene abierto). Eso se hace desde el PC, o se le pide al usuario.
 - Lo generado (`~/mesa-gl`, `~/sway`, `~/wlroots`, `~/turnip-x11`...) vive en el home del teléfono, no en el repo; el repo tiene los parches y scripts para rehacerlo.
 
 ## Reglas de trabajo
