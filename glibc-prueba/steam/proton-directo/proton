@@ -25,5 +25,9 @@ export MESA_VK_WSI_DEBUG=${MESA_VK_WSI_DEBUG:-sw}
 # OpenGL (juegos GL, o WineD3D): GLX sin DRI3 cae en drisw; con GALLIUM_DRIVER=zink
 # drisw usa Zink sobre Turnip en vez de llvmpipe (glxgears ~345 fps).
 [ -e "$T" ] && export GALLIUM_DRIVER=${GALLIUM_DRIVER:-zink}
+# ~/mesa-gl tiene parches drisw (0001 put_image2 y 0002 XShmPutImage para Zink sin DRI3).
+# Con esto, WineD3D y juegos OpenGL usan GPU de verdad sin pantalla negra.
+M="$HOME/mesa-gl/lib"
+[ -d "$M" ] && export LD_LIBRARY_PATH="$M${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export PROTON_LOG=${PROTON_LOG:-1} PROTON_LOG_DIR=${PROTON_LOG_DIR:-/tmp}
 exec python3 "$P/proton" "$@"
