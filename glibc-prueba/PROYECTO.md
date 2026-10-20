@@ -6,7 +6,7 @@ Documento de contexto del proyecto. Resume la idea, las decisiones tomadas (y po
 
 Que el teléfono (Redmi 15 5G, HyperOS, **sin root**) sea a la vez Android y un **Linux real y totalmente modificable**: programas de Arch Linux ARM sin recompilar corriendo nativos (glibc propia dentro de una app normal, sin proot ni emulación), con un **escritorio Wayland mínimo y modificable, tipo Hyprland adaptado al celular**, y **aceleración por GPU** (Turnip en la Adreno 619). Sin perder lo de Android que importa (apps bancarias chilenas, Play Store, cámara, pagos) y todo reversible: es una app, se desinstala y el teléfono queda igual. Más adelante: integrarlo con Mosaico (cada ventana Linux como ventana Android) y, si se puede, Steam.
 
-## Para retomar (estado al 2026-10-20, 19ª sesión)
+## Para retomar (estado al 2026-10-20, 20ª sesión)
 
 | Frente | Estado |
 |---|---|
@@ -178,6 +178,7 @@ Lo que lo frenaba, en orden:
 4. ~~Menús dentro de sway~~ ✅ y ventanas que no caben achicadas ✅ (10ª sesión). Ventana principal que no cabe → flotante: el usuario decidió dejarlo como está (11ª sesión). Menor, para clientes directos/Mosaico: popups xdg y `wl_subcompositor` en el anfitrión: hoy `xdg_surface.get_popup` se cierra al pedirse (menús GTK/Qt no andan) y libdecor pide `wl_subcompositor` para las decoraciones.
 5. ~~Escala y opacidad~~: el usuario dice que están bien.
 6. **← siguiente (19ª → 20ª), en el Redmi:** (1) notificaciones D-Bus → Android (servicio `org.freedesktop.Notifications` en el bus de sesión de sway, `sway/dbus-sesion.sh`; mandar por un socket como `Abrir.java` → `NotificationManager`; acciones/clic → volver a la app); (2) `/sdcard` en Linux (permiso de almacenamiento o `MANAGE_EXTERNAL_STORAGE`; la traducción de rutas debe dejar pasar `/storage` y `/sdcard`; `Archivos.real` ya los acepta); (3) Firefox (punto 3 de abajo); (4) estáticos, `msg*`, `/dev/shm` en memfd. Mando y rendimiento: después.
+   Hecho en la 20ª: (1) ✅ notificaciones: `android/android-notificaciones` (dbus-python + GLib; `~/.local/share/dbus-1/services/org.freedesktop.Notifications.service`, registro en `/tmp/notificaciones.log`) ↔ `Notificar.java` (conexión persistente, líneas JSON `mostrar`/`cerrar` y de vuelta `accion`/`cerrada`; clic → WaylandActivity.onNewIntent; expiración la lleva el daemon; capacidades body, body-markup, actions). Sin íconos/imágenes de la notificación todavía. (2) ✅ `/sdcard`: permiso `MANAGE_EXTERNAL_STORAGE` + `appops`. Subir con `scripts/subir-android.sh`.
    Hecho en la 19ª: glibc 0015 en el Redmi (SUPER+V/cliphist, kitty, Steam ✅) y `xdg-open` → Android (punto 2).
    Lista de la 19ª (18ª → 19ª), en el Redmi (la tablet es de un amigo: no tocarla salvo que el usuario lo pida; el usuario dejó mando y rendimiento para después y quiere completar Linux):
    1. ✅ (19ª) Instalada en el Redmi; SUPER+V, kitty, Steam confirmados por el usuario. Era: instalar glibc **0015** en el Redmi: `scripts/instalar-glibc.sh sdk36 archlinux` (APK con cargador 0015 + libs; **cierra la app: avisar**). El repo ya trae `jniLibs/libldp.so` 0015: nunca instalar solo el APK. Probar: SUPER+V (cliphist), kitty/kitten, sway y lo que arranca con él, Steam + `proton-directo` (Wine/FEX hacen syscalls crudas: ahora pasan por la capa; si algo se rompe, `GLIBC_SECCOMP=0` en su entorno y `GLIBC_DEBUG_SIGSYS=1` para ver qué atrapa), Lutris, sshd.

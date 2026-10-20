@@ -1,0 +1,136 @@
+#!/usr/bin/python3
+# Servidor de notificaciones (org.freedesktop.Notifications) que las muestra en Android:
+# Notificar.java en la app, por /run/android-notificar.sock (una línea JSON por mensaje).
+# Lo arranca el bus de sesión al llegar la primera notificación
+# (~/.local/share/dbus-1/services/org.freedesktop.Notifications.service).
+import itertools, json, socket, sys
+import dbus, dbus.service
+from dbus.mainloop.glib import DBusGMainLoop
+from gi.repository import GLib
+
+NOMBRE = "org.freedesktop.Notifications"
+RUTA = "/org/freedesktop/Notifications"
+SOCKET = "/run/android-notificar.sock"
+# razones de NotificationClosed
+EXPIRO, DESCARTADA, CERRADA = 1, 2, 3
+
+
+class App:
+    """La conexión con la app; se reintenta si no está escuchando."""
+
+    def __init__(self, recibir):
+        self.recibir = recibir
+        self.s = None
+        self.resto = b""
+        self.conectar()
+
+    def conectar(self):
+        s = socket.socket(socket.AF_UNIX)
+        try:
+            s.connect(SOCKET)
+        except OSError:
+            GLib.timeout_add_seconds(2, self.conectar)
+            return False
+        self.s = s
+        GLib.io_add_watch(s.fileno(), GLib.IO_IN | GLib.IO_HUP | GLib.IO_ERR, self.leer)
+        return False
+
+    def leer(self, fd, condicion):
+        datos = self.s.recv(65536) if condicion & GLib.IO_IN else b""
+        if not datos:
+            self.s.close()
+            self.s = None
+            self.resto = b""
+            self.conectar()
+            return False
+        *lineas, self.resto = (self.resto + datos).split(b"\n")
+        for l in lineas:
+            try:
+                self.recibir(json.loads(l))
+            except ValueError:
+                print("android-notificaciones: línea rara", l, file=sys.stderr)
+        return True
+
+    def enviar(self, **m):
+        if self.s is None:
+            print("android-notificaciones: la app no escucha", m, file=sys.stderr)
+            return
+        try:
+            self.s.sendall((json.dumps(m) + "\n").encode())
+        except OSError as e:
+            print("android-notificaciones:", e, file=sys.stderr)
+
+
+class Servidor(dbus.service.Object):
+    def __init__(self, bus):
+        super().__init__(bus, RUTA)
+        self.ids = itertools.count(1)
+        self.vivas = {}  # id → fuente GLib de la expiración (o None)
+        self.app = App(self.desde_android)
+
+    @dbus.service.method(NOMBRE, in_signature="", out_signature="as")
+    def GetCapabilities(self):
+        return ["body", "body-markup", "actions"]
+
+    @dbus.service.method(NOMBRE, in_signature="", out_signature="ssss")
+    def GetServerInformation(self):
+        return "android-notificaciones", "ben4shot", "1.0", "1.2"
+
+    @dbus.service.method(NOMBRE, in_signature="susssasa{sv}i", out_signature="u")
+    def Notify(self, app, reemplaza, icono, titulo, cuerpo, acciones, pistas, expira):
+        id = int(reemplaza) if reemplaza in self.vivas else next(self.ids)
+        self.quitar_expiracion(id)
+        self.vivas[id] = GLib.timeout_add(expira, self.expirar, id) if expira > 0 else None
+        self.app.enviar(op="mostrar", id=id, app=str(app), titulo=str(titulo),
+                        cuerpo=str(cuerpo), urgencia=int(pistas.get("urgency", 1)),
+                        acciones=[[str(acciones[i]), str(acciones[i + 1])]
+                                  for i in range(0, len(acciones) - 1, 2)])
+        return id
+
+    @dbus.service.method(NOMBRE, in_signature="u", out_signature="")
+    def CloseNotification(self, id):
+        if id in self.vivas:
+            self.cerrar(int(id), CERRADA)
+
+    @dbus.service.signal(NOMBRE, signature="uu")
+    def NotificationClosed(self, id, razon):
+        pass
+
+    @dbus.service.signal(NOMBRE, signature="us")
+    def ActionInvoked(self, id, clave):
+        pass
+
+    def quitar_expiracion(self, id):
+        fuente = self.vivas.pop(id, None)
+        if fuente:
+            GLib.source_remove(fuente)
+
+    def expirar(self, id):
+        self.vivas[id] = None  # la fuente ya terminó
+        self.cerrar(id, EXPIRO)
+        return False
+
+    def cerrar(self, id, razon, avisar_app=True):
+        self.quitar_expiracion(id)
+        if avisar_app:
+            self.app.enviar(op="cerrar", id=id)
+        self.NotificationClosed(id, razon)
+
+    def desde_android(self, m):
+        id = m.get("id")
+        if id not in self.vivas:
+            return
+        if m.get("op") == "accion":
+            self.ActionInvoked(id, m.get("clave", "default"))
+        # tocada o descartada: Android ya la quitó
+        self.cerrar(id, DESCARTADA, avisar_app=False)
+
+
+DBusGMainLoop(set_as_default=True)
+bus = dbus.SessionBus()
+try:
+    nombre = dbus.service.BusName(NOMBRE, bus, do_not_queue=True)
+except dbus.exceptions.NameExistsException:
+    sys.exit("android-notificaciones: ya hay un servidor de notificaciones")
+servidor = Servidor(bus)
+GLib.MainLoop().run()

@@ -101,6 +101,13 @@ public class WaylandActivity extends Activity {
         TECLAS.put(KeyEvent.KEYCODE_F12, 88);
     }
 
+    // tocar una notificación de Linux (Notificar) con el escritorio ya abierto
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        Notificar.clic(intent);
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -108,6 +115,7 @@ public class WaylandActivity extends Activity {
         // El escritorio arranca solo: el servicio lanza sway si no está corriendo
         startForegroundService(new Intent(this, TerminalService.class).setAction(TerminalService.SWAY));
         atajoTerminal();
+        Notificar.clic(getIntent());
 
         vista = new SurfaceView(this) {
             @Override
