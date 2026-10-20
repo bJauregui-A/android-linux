@@ -1,3 +1,4 @@
-# Herramientas de desarrollo (y lo que piden los scripts compilar-*.sh del repo)
+# Desarrollo (opcional): compilar en el teléfono (scripts compilar-*.sh del repo), git
 gcc make pkgconf patch diffutils bison flex meson ninja git github-cli gdb strace
-android-tools vulkan-headers glslang python-mako python-yaml python-packaging glib2-devel wayland-protocols
+vulkan-headers vulkan-tools mesa-utils glslang python-mako python-yaml python-packaging
+glib2-devel wayland-protocols

@@ -1,0 +1,2 @@
+# SSH (opcional): sshd en el puerto 8022, lo arranca sway (apk/sshd-android.conf)
+openssh

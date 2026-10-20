@@ -1,0 +1,2 @@
+# Audio (opcional): PipeWire → FIFO → AudioTrack de Android (Audio.java, sway/pipewire)
+pipewire pipewire-pulse wireplumber

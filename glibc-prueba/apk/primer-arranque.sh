@@ -1,8 +1,8 @@
 #!/usr/bin/bash
 # Primer arranque, parte Linux (va en /usr/local/share/arch-android; lo lanza instalar.sh).
-# Deja el Arch completo: usuario, llavero, paquetes (escritorio, Firefox, desarrollo y, si se
-# elige, juegos), sshd y los ajustes que antes hacían a mano los scripts subir-*.sh.
-# Se puede volver a correr (pacman --needed): bash /usr/local/share/arch-android/primer-arranque.sh
+# Deja el Arch completo: usuario, llavero, paquetes (lo mínimo + lo que se elija en el menú: ssh,
+# audio, Firefox, juegos...) y los ajustes que antes hacían a mano los scripts subir-*.sh.
+# Se puede volver a correr (pacman --needed); --elegir vuelve a mostrar el menú.
 D=/usr/local/share/arch-android
 E=/var/lib/arch-android
 paso() { printf '\n\e[1;36m==> %s\e[0m\n' "$*"; }
@@ -13,7 +13,7 @@ falla() {
 }
 lista() { for g; do sed 's/#.*//' "$D/paquetes-$g.txt"; done | tr -s ' \n' '  '; }
 
-printf '\e[1mInstalando Arch Linux\e[0m (la primera vez baja ~1–2 GB; no cierres la app)\n'
+printf '\e[1mInstalando Arch Linux\e[0m (lo mínimo baja ~500 MB, más lo que elijas; no cierres la app)\n'
 
 U=$(id -u); G=$(id -g)
 grep -q "^user:" /etc/passwd || echo "user:x:$U:$G:Usuario:/home/user:/bin/bash" >> /etc/passwd
@@ -31,20 +31,49 @@ if [ ! -e $E/base-lista ]; then
     touch $E/base-lista
 fi
 
-if [ ! -e $E/juegos ]; then
-    printf '\n¿Instalar también los juegos? Steam ARM64, Proton directo y Lutris (~1 GB más).\n'
-    read -rp "[s/N] " r
-    case $r in [sSyY]*) echo si ;; *) echo no ;; esac > $E/juegos
+# Opcionales: menú una vez (lo elegido queda en $E/opcionales). Para elegir de nuevo e instalar
+# más después: bash /usr/local/share/arch-android/primer-arranque.sh --elegir
+[ "$1" = --elegir ] && rm -f $E/opcionales
+GRUPOS=(ssh audio firefox juegos desarrollo adb utilidades)
+TEXTOS=("SSH: servidor en el puerto 8022 (~5 MB)"
+        "audio: PipeWire → altavoz de Android (~25 MB)"
+        "Firefox con GPU (~250 MB)"
+        "juegos: Steam ARM64, Proton directo, Lutris (~1 GB)"
+        "desarrollo: gcc, meson, git, gdb, strace (~400 MB)"
+        "adb local sin PC: depuración inalámbrica (adb-conectar) (~10 MB)"
+        "utilidades: htop, grim (capturas), unzip, wget (~5 MB)")
+MARCA=(1 1 0 0 0 0 0)
+if [ ! -e $E/opcionales ]; then
+    while :; do
+        printf '\n\e[1mQué instalar\e[0m (el escritorio, kitty, zsh y los gráficos van siempre):\n'
+        for i in "${!GRUPOS[@]}"; do
+            [ "${MARCA[$i]}" = 1 ] && x=x || x=' '
+            printf '  [%s] %d  %s\n' "$x" $((i + 1)) "${TEXTOS[$i]}"
+        done
+        read -rp "Números para marcar/desmarcar (ej: 3 4), Enter para seguir: " r
+        [ -z "$r" ] && break
+        for n in $r; do
+            [[ $n =~ ^[0-9]+$ ]] && [ "$n" -ge 1 ] && [ "$n" -le ${#GRUPOS[@]} ] &&
+                MARCA[$((n - 1))]=$((1 - MARCA[n - 1]))
+        done
+    done
+    for i in "${!GRUPOS[@]}"; do [ "${MARCA[$i]}" = 1 ] && echo "${GRUPOS[$i]}"; done > $E/opcionales
 fi
-grupos="escritorio firefox desarrollo"
-[ "$(cat $E/juegos)" = si ] && grupos="$grupos juegos"
+elegido() { grep -qx "$1" $E/opcionales; }
+grupos="escritorio $(tr '\n' ' ' < $E/opcionales)"
 
 paso "Paquetes: $grupos"
-sudo pacman -Syu --needed --noconfirm $(lista $grupos) || falla "falló pacman (¿sin internet?)"
+# El mirror corta descargas de vez en cuando: reintentar solo (lo bajado queda en la caché)
+for i in 1 2 3; do
+    sudo pacman -Syu --needed --noconfirm $(lista $grupos) && break
+    [ $i = 3 ] && falla "falló pacman 3 veces (¿sin internet?)"
+    printf '\n\e[33mfalló la descarga, reintento %d de 2...\e[0m\n' $i
+    sleep 3
+done
 
 paso "Ajustes"
 # sshd (sway lo arranca): claves de host. Sin grupo tty, sshd no toca el pty (SELinux lo niega)
-[ -e /etc/ssh/ssh_host_ed25519_key ] || sudo ssh-keygen -A
+elegido ssh && { [ -e /etc/ssh/ssh_host_ed25519_key ] || sudo ssh-keygen -A; }
 sed -i '/^tty:x:5:/d' /etc/group
 # Firefox: rutas del prefijo para el sandbox y el .desktop con el envoltorio de GPU
 FF=/usr/lib/firefox/browser/defaults/preferences
@@ -53,7 +82,7 @@ FF=/usr/lib/firefox/browser/defaults/preferences
     sed 's|/usr/lib/firefox/firefox|/usr/local/bin/firefox|' /usr/share/applications/firefox.desktop \
         > ~/.local/share/applications/firefox.desktop
 
-if [ "$(cat $E/juegos)" = si ] && [ ! -e $E/juegos-listos ]; then
+if elegido juegos && [ ! -e $E/juegos-listos ]; then
     paso "Juegos"
     bash $D/juegos.sh || falla "falló la instalación de los juegos"
     touch $E/juegos-listos

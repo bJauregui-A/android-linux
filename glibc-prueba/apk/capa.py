@@ -57,10 +57,6 @@ ARCHIVOS = [
     # instalador (primer arranque) y lo que instala después
     ("apk/primer-arranque.sh", f"{D}/primer-arranque.sh", 0o755),
     ("apk/juegos.sh", f"{D}/juegos.sh", 0o755),
-    ("apk/paquetes-escritorio.txt", f"{D}/paquetes-escritorio.txt", 0o644),
-    ("apk/paquetes-firefox.txt", f"{D}/paquetes-firefox.txt", 0o644),
-    ("apk/paquetes-desarrollo.txt", f"{D}/paquetes-desarrollo.txt", 0o644),
-    ("apk/paquetes-juegos.txt", f"{D}/paquetes-juegos.txt", 0o644),
     ("steam/steam.sh", f"{D}/juegos/steam", 0o755),
     ("steam/lsof.py", f"{D}/juegos/lsof", 0o755),
     ("steam/proton-directo/compatibilitytool.vdf", f"{D}/juegos/proton-directo/compatibilitytool.vdf", 0o644),
@@ -141,7 +137,9 @@ def main():
                 m.size = len(data)
                 out.t.addfile(m, io.BytesIO(data))
 
-    for src, dst, modo in ARCHIVOS:
+    listas = [(f"apk/{f}", f"{D}/{f}", 0o644)
+              for f in sorted(os.listdir(os.path.join(RAIZ, "apk"))) if f.startswith("paquetes-")]
+    for src, dst, modo in ARCHIVOS + listas:
         out.archivo(dst, open(os.path.join(RAIZ, src), "rb").read(), modo)
     for src, dst in PLANTILLAS:
         texto = open(os.path.join(RAIZ, src)).read().replace("@P@", f"{paquete}/files/archlinux")

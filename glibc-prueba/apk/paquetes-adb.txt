@@ -1,0 +1,2 @@
+# adb local (opcional): depuración inalámbrica del propio teléfono, sin PC (adb-conectar)
+android-tools

@@ -1,15 +1,16 @@
-# Escritorio y terminal (siempre). Lo instala primer-arranque.sh con pacman.
-base which nano htop jq python
-# sway y su entorno (sway/config)
-sway swaybg waybar fuzzel foot kitty autotiling python-i3ipc wl-clipboard cliphist grim xdotool
-xorg-xwayland xorg-xdpyinfo xorg-xwininfo
+# Mínimo para funcionar (siempre): escritorio, terminal y lo que piden los gráficos propios.
+# Lo instala primer-arranque.sh con pacman; lo opcional va en los otros paquetes-*.txt (menú de primer-arranque.sh)
+base python nano jq
+# sway y lo que lanza su config (sway/config, sway/*.sh, sway/*.py)
+sway swaybg waybar fuzzel kitty foot autotiling python-i3ipc wl-clipboard cliphist xorg-xwayland
+# zsh como en el PC (sway/zsh/.zshrc) y las fuentes de kitty/waybar/fuzzel
 zsh zsh-autosuggestions zsh-syntax-highlighting starship eza fastfetch
-ttf-cascadia-code-nerd ttf-jetbrains-mono-nerd ttf-dejavu
-# audio, notificaciones (android/android-notificaciones), sshd
-pipewire pipewire-alsa pipewire-pulse wireplumber libnotify python-dbus python-gobject openssh
-# GPU: Vulkan/GL de Arch + lo que piden los compilados propios (wlroots, sway, Turnip, mesa-gl;
-# sacado con readelf de ~/{wlroots,sway,turnip,turnip-x11,mesa-gl})
-mesa mesa-utils vulkan-icd-loader vulkan-tools
+ttf-cascadia-code-nerd ttf-jetbrains-mono-nerd
+# notificaciones de Linux → Android (android/android-notificaciones)
+libnotify python-dbus python-gobject
+# GPU: Vulkan/GL de Arch (kitty usa GL por Zink) + lo que piden los compilados propios (wlroots,
+# sway, Turnip, mesa-gl; sacado con readelf de ~/{wlroots,sway,turnip,turnip-x11,mesa-gl})
+mesa vulkan-icd-loader
 cairo expat gdk-pixbuf2 glib2 json-c lcms2 libdisplay-info libdrm libevdev libglvnd libinput
 libliftoff libx11 libxcb libxext libxkbcommon libxshmfence libxxf86vm pango pcre2 pixman seatd
 spirv-tools systemd-libs wayland xcb-util-errors xcb-util-keysyms xcb-util-renderutil xcb-util-wm zstd
