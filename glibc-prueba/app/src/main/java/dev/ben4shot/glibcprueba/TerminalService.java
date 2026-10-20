@@ -221,6 +221,10 @@ public class TerminalService extends Service implements TerminalSessionClient {
                 // sin root). bwrap falla leyendo /proc/sys/kernel/overflowuid, glycin no reconoce
                 // ese error y las apps GTK se caen con el primer ícono. La app ya es un sandbox.
                 "GLYCIN_DISABLE_SANDBOX=i-know-the-risks",
+                // Firefox: SELinux no deja reabrir un memfd por /proc/self/fd, el proceso
+                // principal cae a /dev/shm sin sellos y los de contenido exigían F_SEAL_SHRINK
+                // ("Shared memory PlatformHandle is not safe to map", señal 11).
+                "MOZ_SHM_NO_SEALS=1",
                 // Mandos: SDL (y Wine por SDL) los busca en /dev/input (Mandos.java); por udev
                 // no los vería (Android no deja leer /sys/class/input ni los uevents).
                 "SDL_JOYSTICK_DISABLE_UDEV=1"));

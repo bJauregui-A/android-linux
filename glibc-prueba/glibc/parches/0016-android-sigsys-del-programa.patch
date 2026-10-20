@@ -1,0 +1,19 @@
+--- a/sysdeps/unix/sysv/linux/aarch64/android-path.c
++++ b/sysdeps/unix/sysv/linux/aarch64/android-path.c
+@@ -1467,6 +1467,16 @@
+ static void
+ sigsys_handler (int sig, siginfo_t *si, void *ctx)
+ {
++  /* Un filtro seccomp del propio programa (sandbox de Firefox/Chromium:
++     SECCOMP_RET_TRAP con el número de trampa en los datos) es suyo: va a su
++     manejador.  El de Android usa 0 y la capa propia DATOS.  */
++  if (si->si_code == 1 && si->si_errno != 0 && si->si_errno != DATOS
++      && (user_sigsys.sa_flags & SA_SIGINFO)
++      && user_sigsys.sa_handler != SIG_DFL && user_sigsys.sa_handler != SIG_IGN)
++    {
++      user_sigsys.sa_sigaction (sig, si, ctx);
++      return;
++    }
+   if (si->si_code != 1 /* SYS_SECCOMP */)
+     {
+       struct sigaction u = user_sigsys;
