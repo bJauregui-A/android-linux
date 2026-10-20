@@ -1,0 +1,62 @@
+diff --git a/sway/desktop/transaction.c b/sway/desktop/transaction.c
+index fb3c7c9..b17f7d8 100644
+--- a/sway/desktop/transaction.c
++++ b/sway/desktop/transaction.c
+@@ -2,7 +2,11 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <time.h>
++#include <wlr/config.h>
+ #include <wlr/types/wlr_buffer.h>
++#if WLR_HAS_XWAYLAND
++#include <wlr/xwayland.h>
++#endif
+ #include "sway/config.h"
+ #include "sway/scene_descriptor.h"
+ #include "sway/desktop/idle_inhibit_v1.h"
+@@ -13,6 +17,7 @@
+ #include "sway/server.h"
+ #include "sway/tree/container.h"
+ #include "sway/tree/node.h"
++#include "sway/tree/root.h"
+ #include "sway/tree/view.h"
+ #include "sway/tree/workspace.h"
+ #include "list.h"
+@@ -753,6 +758,27 @@ static void transaction_apply(struct sway_transaction *transaction) {
+ 
+ static void transaction_commit_pending(void);
+ 
++#if WLR_HAS_XWAYLAND
++// Una ventana X11 que no se ve (otro escritorio, pestaña inactiva, tapada por
++// una de pantalla completa) queda minimizada (_NET_WM_STATE_HIDDEN): Chromium,
++// Steam y otros dejan de dibujar y de decodificar video. Las de Wayland ya se
++// frenan solas porque no reciben frame callbacks.
++static void update_xwayland_hidden(struct sway_container *con, void *data) {
++	struct sway_view *view = con->view;
++	if (!view || view->type != SWAY_VIEW_XWAYLAND) {
++		return;
++	}
++	struct wlr_xwayland_surface *xsurface = view->wlr_xwayland_surface;
++	if (!xsurface || !xsurface->surface || !xsurface->surface->mapped) {
++		return;
++	}
++	bool hidden = !view_is_visible(view);
++	if (xsurface->minimized != hidden) {
++		wlr_xwayland_surface_set_minimized(xsurface, hidden);
++	}
++}
++#endif
++
+ static void transaction_progress(void) {
+ 	if (!server.queued_transaction) {
+ 		return;
+@@ -762,6 +788,9 @@ static void transaction_progress(void) {
+ 	}
+ 	transaction_apply(server.queued_transaction);
+ 	arrange_root(root);
++#if WLR_HAS_XWAYLAND
++	root_for_each_container(update_xwayland_hidden, NULL);
++#endif
+ 	cursor_rebase_all();
+ 	transaction_destroy(server.queued_transaction);
+ 	server.queued_transaction = NULL;

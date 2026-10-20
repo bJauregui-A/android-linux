@@ -3,14 +3,14 @@
 # /usr/local/bin, el servicio D-Bus de notificaciones (~/.local/share/dbus-1/services), el .desktop
 # y los programas por defecto (links → Android) en ~/.local/share/applications y ~/.config.
 # Un mimeapps.list que ya exista no se pisa (avisa). Con Firefox instalado, sus preferencias
-# para el sandbox (android/firefox-android.js).
+# para el sandbox (android/firefox-android.js) y las rutas reales del prefijo en ld.so.conf.d.
 set -e
 cd "$(dirname "$0")/.."
 PKG=dev.ben4shot.glibcprueba.sdk36
 A=files/archlinux
 copiar() { adb push "$1" /data/local/tmp/ >/dev/null
            adb shell "run-as $PKG cp /data/local/tmp/$(basename $1) $2 && rm /data/local/tmp/$(basename $1)"; }
-adb shell "run-as $PKG mkdir -p $A/usr/local/bin $A/home/user/.local/share/applications $A/home/user/.local/share/dbus-1/services $A/home/user/.config"
+adb shell "run-as $PKG mkdir -p $A/etc/ld.so.conf.d $A/usr/local/bin $A/home/user/.local/share/applications $A/home/user/.local/share/dbus-1/services $A/home/user/.config"
 copiar android/android-abrir $A/usr/local/bin/
 copiar android/xdg-open $A/usr/local/bin/
 copiar android/android-notificaciones $A/usr/local/bin/
@@ -27,4 +27,8 @@ T=$(mktemp)
 sed "s|@P@|$PKG/$A|g" android/firefox-android.js > $T
 adb push $T /data/local/tmp/firefox-android.js >/dev/null; rm $T
 adb shell "run-as $PKG sh -c '[ ! -d $FF ] || cp /data/local/tmp/firefox-android.js $FF/android.js'; rm /data/local/tmp/firefox-android.js"
+# Rutas reales del prefijo para ld.so.conf (sandbox RDD/Utility de Firefox)
+sed "s|@P@|$PKG/$A|g" android/android-prefijo.conf > $T
+adb push $T /data/local/tmp/android-prefijo.conf >/dev/null; rm $T
+adb shell "run-as $PKG cp /data/local/tmp/android-prefijo.conf $A/etc/ld.so.conf.d/; rm /data/local/tmp/android-prefijo.conf"
 echo "integración con Android copiada"

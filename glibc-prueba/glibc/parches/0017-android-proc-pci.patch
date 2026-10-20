@@ -1,0 +1,13 @@
+--- a/sysdeps/unix/sysv/linux/aarch64/android-path.c
++++ b/sysdeps/unix/sysv/linux/aarch64/android-path.c
+@@ -763,6 +763,10 @@
+       q = pon (q, u.version);
+       *q++ = '\n';
+     }
++  else if (starts (nombre, "bus/pci/devices", 16))
++    /* Sin PCI en el teléfono: vacío.  libpci (gfxtest de Firefox) termina
++       el proceso si no puede abrirlo.  */
++    ;
+   else
+     return err;
+ 

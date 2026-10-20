@@ -13,6 +13,8 @@
 #   0005: con `scale_to_fit` el cliente X no se entera de que está a pantalla completa (Wine la
 #         quitaba al instante por su tamaño fijo) y no puede salir de ella; un flotante a pantalla
 #         completa no vuelve al tamaño del cliente (commit ni request_configure: no llenaba la pantalla)
+#   0006: una ventana X11 que no se ve (otro escritorio, pestaña inactiva) queda minimizada
+#         (_NET_WM_STATE_HIDDEN): Steam/Chromium dejan de dibujar y de decodificar video atrás
 # Resultado en ~/sway/bin/sway; TerminalService lo prefiere al de Arch si existe.
 set -e
 V=1.12
