@@ -51,13 +51,12 @@ Windows on ARM corre sobre un núcleo NT nativo en ARM64 (`aarch64`). Para compa
 
 ### Fase 1: Optimización Inmediata de Rendimiento (Sincronización y GL)
 - [x] **Generalizar `~/mesa-gl` en `proton-directo`**:
-  - Habilitada aceleración OpenGL por GPU (`~/mesa-gl/lib` con parches 0001/0002) para todos los juegos en [`glibc-prueba/steam/proton-directo/proton`](file:///home/user/android-linux/glibc-prueba/steam/proton-directo/proton).
+  - Habilitada aceleración OpenGL por GPU (`~/mesa-gl/lib` con parches 0001/0002) para todos los juegos en [`glibc-prueba/steam/proton-directo/proton`](glibc-prueba/steam/proton-directo/proton).
   - Eliminado `~/.config/proton-directo/22320` (Morrowind) al quedar cubierto de forma global.
-- [x] **Desbloquear `WINEFSYNC=1` emulando `futex_waitv` (syscall 449)**:
-  - *Diagnóstico*: Proton ya activa `WINEFSYNC=1` por defecto, pero `wineserver` comprueba soporte llamando a `syscall(449, 0, 0, 0, 0, 0)`. El filtro seccomp de Android bloquea la syscall 449 con SIGSYS y glibc respondía ENOSYS (`0x26`), haciendo que wineserver vuelva a sincronización por servidor (`wineserver: using server-side synchronization`).
-  - *Solución*: La syscall estándar 98 (`futex`) sí está permitida por Android.
-  - *Implementado para pruebas inmediatas*: Creado [`glibc-prueba/steam/shim-futex.c`](file:///home/user/android-linux/glibc-prueba/steam/shim-futex.c) y compilado en `~/.local/lib/libshim-futex.so`, integrado en `proton-directo`. Probado con wineserver: confirma `fsync: up and running.` y mapea las páginas de memoria de fsync sin errores.
-  - *Parche permanente de glibc*: Creado [`glibc-prueba/glibc/parches/0019-android-futex-waitv.patch`](file:///home/user/android-linux/glibc-prueba/glibc/parches/0019-android-futex-waitv.patch) para que la glibc atrape la syscall 449 en su manejador de SIGSYS de forma transparente y sin necesidad de preloads.
+- [ ] **Desbloquear `WINEFSYNC=1` emulando `futex_waitv` (syscall 449)** — primer intento falló, desactivado (27ª sesión):
+  - *Diagnóstico*: Proton ya activa `WINEFSYNC=1` por defecto, pero Wine prueba soporte con `syscall(449, 0, 0, 0, 0, 0)`. El seccomp de Android bloquea la 449 con SIGSYS y glibc responde ENOSYS → `wineserver: using server-side synchronization`. La syscall 98 (`futex`) sí está permitida.
+  - *Intento*: [`glibc-prueba/steam/shim-futex.c`](glibc-prueba/steam/shim-futex.c) (`LD_PRELOAD`, compilado en `~/.local/lib/libshim-futex.so`) y borrador de parche glibc [`glibc-prueba/glibc/borradores/android-futex-waitv.patch.wip`](glibc-prueba/glibc/borradores/android-futex-waitv.patch.wip). Da `fsync: up and running`, pero **ATLYSS no arranca**: `run_wineboot boot event wait timed out`, 8 servicios con error 1053, `c000001d`. Sacado de `proton-directo`.
+  - *Errores a corregir*: (1) reloj invertido: el timeout de `futex_waitv` es absoluto; con `CLOCK_MONOTONIC` va sin flag y con `CLOCK_REALTIME` va `FUTEX_CLOCK_REALTIME` (el shim lo hacía al revés → toda espera con timeout vence al instante); (2) con varios futex pasaba 1 ms relativo donde `FUTEX_WAIT_BITSET` espera tiempo absoluto → `ETIMEDOUT` inmediato, que Wine toma como timeout real aunque la espera sea infinita; hay que hacer un bucle (revisar valores, dormir poco) hasta el plazo real de Wine; (3) valor distinto → `-EAGAIN`, no el índice. Probar con el shim antes de pasarlo a glibc (con número libre, la 0019 es `ip a`).
 
 ### Fase 2: Camino Gráfico Directo (`winewayland`)
 - [ ] **Integrar el driver `winewayland` en Proton/Wine ARM64**:

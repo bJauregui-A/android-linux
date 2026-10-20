@@ -83,6 +83,10 @@ Instalado `android-tools` 37.0.0.p1-1 (`sudo pacman -S android-tools`). Vinculad
 ✅ **`uid=2000(shell)` en `u:r:shell:s0`**: control total de Android desde la propia terminal sin PC (`pm`, `settings`, `dumpsys`, `appops`, `logcat`, `/sdcard/Android/data` y `/sdcard/Android/obb` legibles y modificables).
 Script de reconexión rápida creado en `~/.local/bin/adb-conectar` (escaneo de puertos loopback y reconexión automática).
 
+27ª sesión (2026-10-20, agy y luego Claude Code en el teléfono): agy (se le acabó la cuota a la mitad) escribió `WIN.md` (hoja de ruta para Windows nativo), pasó **`~/mesa-gl` a `proton-directo` para todos los juegos** (borró `~/.config/proton-directo/22320`) e intentó **fsync emulando `futex_waitv` (449)** con `steam/shim-futex.c` por `LD_PRELOAD`. Resultado: `fsync: up and running`, pero **ATLYSS no arranca** (`boot event wait timed out`, servicios de Wine con 1053, `c000001d`); los logs sin el shim no tienen nada de eso. Causa en el código: reloj invertido (`FUTEX_CLOCK_REALTIME` con `CLOCK_MONOTONIC`), espera de varios futex con 1 ms relativo como si fuera absoluto (timeout inmediato) y el índice en vez de `-EAGAIN`. **Shim sacado de `proton-directo`** (repo e instalado); el parche glibc de agy (le había puesto 0019, el número de `ip a`) pasó a `glibc/borradores/android-futex-waitv.patch.wip` para que `compilar.sh` no lo aplique. Detalle y cómo arreglarlo: `WIN.md`, Fase 1.
+
+**Siguiente sesión (28ª):** lo mismo de la 27ª (abajo) salvo el punto 4 (hecho), más: probar ATLYSS sin shim (debe volver a como estaba); si se sigue con fsync, arreglar `shim-futex.c` según `WIN.md` y probarlo solo con el shim antes de llevarlo a glibc.
+
 **Siguiente sesión (27ª), en el Redmi — en orden (preguntar al usuario por cuál partir):**
 (1) **Reiniciar sway/Steam/kitty** cuando el usuario quiera, para que tomen la libc 0018 (lo que ya corría sigue con la 0017; Steam: `swaymsg exec "steam -shutdown"`). Ver que todo arranca igual (sshd, waybar, SUPER+V, Steam, Firefox). Revertir si algo falla: `cd /usr/lib && cp libc.so.6.0017 libc.so.6.x && mv libc.so.6.x libc.so.6` (por SSH, `adb shell run-as` o el nuevo `adb shell`).
 (2) **glibc 0019 (era 0018, la tomó la pila de SIGSYS): `ip a`/`ip r`** (bind netlink falso + `GETLINK` sintético). Probar libc aislada antes de instalar (`instalar-glibc.sh`).
@@ -185,7 +189,8 @@ Siguiente:
 - [x] Morrowind se ve (escritorio virtual 1024×768 + `~/mesa-gl` por juego); input del menú sin resolver (24ª sesión)
 - [x] `agy` (Go) ya no se cae: glibc 0018, manejador de SIGSYS en pila propia (25ª sesión)
 - [x] Puente shell local autónomo (26ª sesión): android-tools instalado en Arch, vinculado por depuración inalámbrica (uid 2000), script adb-conectar
-- [ ] **← siguiente (27ª):** reiniciar lo que corre para tomar la 0018; luego glibc 0019 (`ip a`), mouse de Morrowind, `~/mesa-gl` en proton-directo para todos; ver "Siguiente sesión (27ª)" arriba
+- [x] `~/mesa-gl` en proton-directo para todos (27ª sesión, agy); fsync por shim de `futex_waitv` probado y desactivado (rompe ATLYSS, ver `WIN.md`)
+- [ ] **← siguiente (28ª):** reiniciar lo que corre para tomar la 0018; glibc 0019 (`ip a`), mouse de Morrowind, ATLYSS sin shim, arreglar fsync; ver "Siguiente sesión (28ª)" arriba
 - [ ] Viejos (24ª): limpiar `/dev/shm/.sysv`, `/dev/shm` en memoria, memoria de Steam/Firefox, sockets viejos de sway
 - [ ] Viejos (21ª): video en Firefox, estáticos, `msg*`, `/dev/shm` en memfd; ver PROYECTO.md "Empezar la próxima sesión por" punto 6
 - [ ] Viejos (18ª): audio confirmado, mandos en juegos de Wine, vibración (el usuario los dejó para después)

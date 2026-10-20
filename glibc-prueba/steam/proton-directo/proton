@@ -6,10 +6,6 @@
 # (steam/instalar-proton-directo.sh) y se elige en Propiedades → Compatibilidad.
 P="$HOME/.local/share/Steam/steamapps/common/Proton 11.0 (ARM64)"
 unset LD_PRELOAD MESA_LOADER_DRIVER_OVERRIDE
-# Sincronización por futex (WINEFSYNC=1): Android seccomp bloquea futex_waitv (449)
-# con SIGSYS. libshim-futex traduce la syscall a futex (98), activando fsync nativo.
-S="$HOME/.local/lib/libshim-futex.so"
-[ -f "$S" ] && export LD_PRELOAD="$S" WINEFSYNC=1
 # Mandos: con Steam Input, Steam le dice al juego que ignore el mando real
 # (SDL_GAMECONTROLLER_IGNORE_DEVICES) y use su mando virtual (SteamVirtualGamepadInfo),
 # que se crea con uinput: sin root no existe y el juego se queda sin mando.
