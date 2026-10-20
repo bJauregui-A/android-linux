@@ -6,7 +6,7 @@ Documento de contexto del proyecto. Resume la idea, las decisiones tomadas (y po
 
 Que el teléfono (Redmi 15 5G, HyperOS, **sin root**) sea a la vez Android y un **Linux real y totalmente modificable**: programas de Arch Linux ARM sin recompilar corriendo nativos (glibc propia dentro de una app normal, sin proot ni emulación), con un **escritorio Wayland mínimo y modificable, tipo Hyprland adaptado al celular**, y **aceleración por GPU** (Turnip en la Adreno 619). Sin perder lo de Android que importa (apps bancarias chilenas, Play Store, cámara, pagos) y todo reversible: es una app, se desinstala y el teléfono queda igual. Más adelante, si se puede, Steam.
 
-## Para retomar (estado al 2026-10-20, 26ª sesión)
+## Para retomar (estado al 2026-10-20, 27ª sesión)
 
 | Frente | Estado |
 |---|---|
@@ -14,6 +14,8 @@ Que el teléfono (Redmi 15 5G, HyperOS, **sin root**) sea a la vez Android y un 
 | App única "Arch Linux" | ✅ abre el escritorio y arranca sway sola; terminal de rescate en el atajo del ícono |
 | Terminal | ✅ bash interactivo, htop, nano, `sudo pacman` (foot dentro de sway, o la de rescate) |
 | Wayland | ✅ anfitrión propio + sway 1.12 anidado + foot; tacto, scroll, teclado latam; keymap xkb para clientes directos |
+| Sincronización de Wine (fsync) | 🧪 `steam/shim-futex.c` (v2, `LD_PRELOAD`) emula `futex_waitv` con `futex`; opcional por juego (`FSYNC_SHIM=1` en `~/.config/proton-directo/<appid>`), activo en ATLYSS a 11-12 fps sin comparación válida; prueba `steam/prueba-futexv.c`. Detalle en `NOTAS.md` (27ª) y `WIN.md` |
+| Limpieza de `/dev/shm` | ✅ `sway/limpiar-tmp.py` al arrancar sway (segmentos de Steam, SysV emulado, stats de FEX, sockets `sway-ipc` de sesiones anteriores) |
 | GPU | ✅ Vulkan: Turnip (KGSL) compilado en el teléfono. ✅ OpenGL 4.6 / GLES 3.2: Zink sobre Turnip. ✅ **Cero copias** para clientes directos: `AHardwareBuffer` + `ASurfaceControl` (protocolo propio `android-ahb-v1` + parche a la WSI de Mesa) |
 | Escritorio | ✅ sway con los atajos y el aspecto de la config de Hyprland/HyDE del PC (`sway/`), waybar, fuzzel, kitty con la config del PC, modo inmersivo a pantalla completa (1080×2193 px reales). swayfx también funciona por GPU (`~/swayfx`, no es el por defecto); Hyprland instalado pero no arranca (ver "sway, swayfx y Hyprland") |
 | Escritorio por GPU | ✅ sway compone con el renderer **Vulkan** de wlroots (parchado, `wlroots/`) directo en AHardwareBuffers del anfitrión; sus clientes le pasan dmabufs. vkcube dentro de sway: CPU total 8,9 s → 2,1 s cada 10 s |
@@ -570,6 +572,8 @@ Antecedente útil para ver qué parches hacen falta: el proyecto **glibc-package
 | `wayland/generar-teclado.sh` | Genera `Distribucion.java` (tabla de teclado) y `app/src/main/cpp/keymap.h` (keymap xkb para el anfitrión) con xkbcommon del PC |
 | `mesa-gl/compilar-mesa-gl.sh`, `mesa-gl/parches/` | GL de Mesa propio (EGL/GLX, Zink bajo drisw copia el cuadro a la ventana) en `~/mesa-gl`; `scripts/subir-mesa-gl.sh` copia todo y los envoltorios |
 | `mesa-gl/con-gpu`, `mesa-gl/firefox`, `mesa-gl/prueba-gl.sh` | Correr un programa con GL por GPU; Firefox con WebRender por GPU; prueba es2gears/glxgears |
+| `steam/shim-futex.c`, `steam/prueba-futexv.c` | fsync de Wine sin `futex_waitv` (LD_PRELOAD en `~/.local/lib/libshim-futex.so`) y su prueba sin Wine |
+| `sway/limpiar-tmp.py`, `scripts/hilos.sh` | Limpieza de `/dev/shm` y sockets viejos al arrancar sway; CPU por hilo de todos los procesos |
 | `turnip/egl-zink.c` | LD_PRELOAD para OpenGL por Zink en Wayland sin dmabuf (ver "GPU") |
 | `scripts/correr-wl.sh` | Como `correr.sh` pero con el anfitrión Wayland corriendo (abre el escritorio, corre el script, captura). Para probar clientes Wayland por ADB |
 | `scripts/test-cpu-dmabuf.sh` | CPU del anfitrión y de vkcube: dmabuf contra `MESA_VK_WSI_DEBUG=sw` |
