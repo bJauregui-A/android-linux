@@ -20,7 +20,7 @@
      for (int i = 0; passthrough[i] != NULL; i++)
        {
  	size_t n = slen (passthrough[i]);
-@@ -776,6 +780,191 @@
+@@ -776,6 +780,213 @@
    return 1;
  }
  
@@ -209,10 +209,32 @@
 +  return -EINVAL;
 +}
 +
++/* Descriptores que son reemplazo de NETLINK_KOBJECT_UEVENT.  Cada socket()
++   que devuelve ese número lo vuelve a marcar o desmarcar.  */
++static unsigned long int uevent_fds[1024 / (8 * sizeof (unsigned long int))];
++#define UEV_BITS (8 * sizeof (unsigned long int))
++static void
++uevent_marcar (long int fd, int si)
++{
++  if (fd < 0 || fd >= 1024)
++    return;
++  unsigned long int b = 1UL << (fd % UEV_BITS);
++  if (si)
++    atomic_fetch_or_relaxed (&uevent_fds[fd / UEV_BITS], b);
++  else if (uevent_fds[fd / UEV_BITS] & b)
++    atomic_fetch_and_relaxed (&uevent_fds[fd / UEV_BITS], ~b);
++}
++static int
++uevent_es (long int fd)
++{
++  return fd >= 0 && fd < 1024
++	 && (uevent_fds[fd / UEV_BITS] >> (fd % UEV_BITS)) & 1;
++}
++
  long int
  __android_path_syscall (long int nr, long int a0, long int a1, long int a2,
  			long int a3, long int a4, long int a5)
-@@ -876,6 +1065,12 @@
+@@ -876,6 +1087,12 @@
  	}
  #endif
        XL (a1, b1);
@@ -225,7 +247,24 @@
        break;
      case __NR_openat2:
      case __NR_faccessat:
-@@ -1012,6 +1207,11 @@
+@@ -961,6 +1178,16 @@
+     case __NR_connect:
+       {
+ 	const struct sockaddr_un *sa = (const struct sockaddr_un *) a1;
++	/* bind del reemplazo de NETLINK_KOBJECT_UEVENT (ver __NR_socket):
++	   negado, se da por hecho.  Solo ese: getaddrinfo también abre
++	   NETLINK_ROUTE, sabe arreglárselas sin bind y con un bind falso se
++	   queda esperando una respuesta que no llega.  */
++	if (nr == __NR_bind && sa != NULL && sa->sun_family == AF_NETLINK
++	    && uevent_es (a0))
++	  {
++	    long int r = raw (nr, a0, a1, a2, 0, 0, 0);
++	    return r == -EACCES ? 0 : r;
++	  }
+ 	size_t off = offsetof (struct sockaddr_un, sun_path);
+ 	if (sa == NULL || (size_t) a2 <= off || sa->sun_family != AF_UNIX
+ 	    || sa->sun_path[0] != '/')
+@@ -1012,6 +1239,29 @@
  	return raw (nr, a0, (long int) &su, off + n + 1, 0, 0, 0);
        }
  
@@ -233,6 +272,24 @@
 +      if (_IOC_TYPE (a1) == 'E')
 +	return evdev_ioctl (a0, a1, a2);
 +      break;
++
++    /* udev: el seccomp/SELinux de apps no deja abrir NETLINK_KOBJECT_UEVENT y
++       libudev falla al crear su monitor (SDL_Init con haptic falla entero: Wine
++       se queda sin mandos).  Se le da un NETLINK_ROUTE sin grupos (sí se puede
++       crear): el monitor existe y nunca recibe nada.  Los mandos se encuentran
++       igual por /dev/input.  */
++    case __NR_socket:
++      {
++	long int r = raw (nr, a0, a1, a2, 0, 0, 0);
++	int reemplazo = 0;
++	if (r == -EACCES && a0 == AF_NETLINK && a2 == 15 /* KOBJECT_UEVENT */)
++	  {
++	    r = raw (nr, a0, a1, 0 /* NETLINK_ROUTE */, 0, 0, 0);
++	    reemplazo = r >= 0;
++	  }
++	uevent_marcar (r, reemplazo);
++	return r;
++      }
 +
      case __NR_execve:
        return execve_x ((const char *) a0, (char *const *) a1,
@@ -244,7 +301,7 @@
      case __NR_renameat2: case __NR_symlinkat: case __NR_readlinkat:
      case __NR_getcwd: case __NR_bind: case __NR_connect: case __NR_execve:
 -    case __NR_execveat:
-+    case __NR_execveat: case __NR_ioctl:
++    case __NR_execveat: case __NR_ioctl: case __NR_socket:
      case __NR_getuid: case __NR_geteuid: case __NR_getgid: case __NR_getegid:
      case __NR_getresuid: case __NR_getresgid: case __NR_fchown:
      case __NR_setuid: case __NR_setgid: case __NR_setreuid:

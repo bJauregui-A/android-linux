@@ -14,9 +14,14 @@ import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 
+import android.system.ErrnoException;
+import android.system.Os;
+import android.system.OsConstants;
+import android.system.StructPollfd;
+
 import java.io.File;
+import java.io.FileDescriptor;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
@@ -52,7 +57,9 @@ class Mandos {
     private static LocalServerSocket servidor;
     // dueño del descriptor del servidor: si se lo lleva el GC, su finalizador lo cierra
     private static LocalSocket enlazado;
-    private static final List<OutputStream> clientes = new ArrayList<>();
+    // descriptores no bloqueantes: un programa que abre el mando y no lee no frena a los demás
+    // (como evdev: si su cola se llena, pierde eventos)
+    private static final List<FileDescriptor> clientes = new ArrayList<>();
     private static Handler envio;
     // último valor mandado de cada eje (no repetir los que no cambian)
     private static final SparseIntArray ejes = new SparseIntArray();
@@ -113,7 +120,7 @@ class Mandos {
         servidor = null;
         enlazado = null;
         synchronized (clientes) {
-            for (OutputStream o : clientes) try { o.close(); } catch (Exception ignored) { }
+            for (FileDescriptor f : clientes) try { Os.shutdown(f, OsConstants.SHUT_RDWR); } catch (Exception ignored) { }
             clientes.clear();
         }
         Log.i(TAG, "sin mando");
@@ -123,12 +130,26 @@ class Mandos {
         while (srv == servidor) {
             try {
                 LocalSocket c = srv.accept();
-                synchronized (clientes) { clientes.add(c.getOutputStream()); }
-                InputStream in = c.getInputStream();
+                FileDescriptor fd = c.getFileDescriptor();
+                Os.fcntlInt(fd, OsConstants.F_SETFL, Os.fcntlInt(fd, OsConstants.F_GETFL, 0) | OsConstants.O_NONBLOCK);
+                int pid = c.getPeerCredentials().getPid();
+                Log.i(TAG, "abierto por pid " + pid);
+                synchronized (clientes) { clientes.add(fd); }
+                InputStream in = new java.io.FileInputStream(fd);
                 // vibración y demás escrituras del programa: se descartan; fin = cerró
                 new Thread(() -> {
                     byte[] b = new byte[256];
-                    try { while (in.read(b) > 0) { } } catch (Exception ignored) { }
+                    StructPollfd p = new StructPollfd();
+                    p.fd = fd;
+                    p.events = (short) OsConstants.POLLIN;
+                    try {
+                        while (true) {
+                            Os.poll(new StructPollfd[]{p}, -1);
+                            if (Os.read(fd, b, 0, b.length) <= 0) break;
+                        }
+                    } catch (Exception ignored) { }
+                    synchronized (clientes) { clientes.remove(fd); }
+                    Log.i(TAG, "cerrado por pid " + pid);
                     try { c.close(); } catch (Exception ignored) { }
                 }, "mandos-cliente").start();
             } catch (Exception e) {
@@ -232,7 +253,16 @@ class Mandos {
             evento(b, us, EV_SYN, 0, 0);
             synchronized (clientes) {
                 for (int i = clientes.size() - 1; i >= 0; i--) {
-                    try { clientes.get(i).write(b.array()); }
+                    try {
+                        // a medias desalinearía los input_event: mejor cerrarle el mando
+                        if (Os.write(clientes.get(i), b.array(), 0, b.position()) < b.position()) {
+                            Os.shutdown(clientes.get(i), OsConstants.SHUT_RDWR);
+                            clientes.remove(i);
+                        }
+                    }
+                    catch (ErrnoException e) {
+                        if (e.errno != OsConstants.EAGAIN) clientes.remove(i);
+                    }
                     catch (Exception e) { clientes.remove(i); }
                 }
             }
