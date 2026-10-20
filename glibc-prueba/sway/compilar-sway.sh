@@ -10,6 +10,9 @@
 #         manteniendo proporciones y se centra, como 0001 hace con las de mosaico
 #   0004: comando `scale_to_fit enable` (solo Xwayland): la ventana conserva el tamaño que pide
 #         y se dibuja agrandada/achicada para llenar su contenedor (juegos en un escritorio de Wine fijo)
+#   0005: con `scale_to_fit` el cliente X no se entera de que está a pantalla completa (Wine la
+#         quitaba al instante por su tamaño fijo) y no puede salir de ella; un flotante a pantalla
+#         completa no vuelve al tamaño del cliente (commit ni request_configure: no llenaba la pantalla)
 # Resultado en ~/sway/bin/sway; TerminalService lo prefiere al de Arch si existe.
 set -e
 V=1.12

@@ -122,7 +122,8 @@ Siguiente:
 - [x] Steam a la vista: abre, inicia sesión, descarga (glibc 0011, lsof propio, sin sandbox CEF) (2026-10-19, 12ª sesión)
 - [x] Steam nítido (Xwayland escalado) y Undertale con Proton 11 ARM64 + FEX sin contenedor (glibc 0012, WineD3D) (2026-10-19, 13ª sesión)
 - [x] Lutris con el Wine de Proton 11 ARM64; sway 0003 (flotantes que no caben) y 0004 (`scale_to_fit` para juegos) — 0003/0004 sin probar (2026-10-19, 14ª sesión)
-- [ ] **← siguiente:** probar sway 0003/0004 tras reiniciarlo (Undertale en Lutris, giro, diálogo de archivos); ATLYSS con proton-directo; Turnip con x11 → DXVK; antes: probar Xwayland escalado (wlroots 0005 + sway 0002) con Steam; guardar la sesión de Steam (cierre ordenado); luego Go/estáticos (seccomp), audio; popups en el anfitrión (menor)
+- [x] Undertale en Lutris a pantalla completa y escalado (sway 0005 + escritorio virtual de Wine 640×480 en `~/.wine`, F4 dentro) (2026-10-19, 15ª sesión)
+- [ ] **← siguiente:** girar a vertical con el juego abierto; diálogo de archivos (sway 0003); ATLYSS con proton-directo; Turnip con x11 → DXVK; antes: probar Xwayland escalado (wlroots 0005 + sway 0002) con Steam; guardar la sesión de Steam (cierre ordenado); luego Go/estáticos (seccomp), audio; popups en el anfitrión (menor)
 - [ ] Mandos (sin `/dev/input`: shim o backend propio). Para jugar, ver PROYECTO.md "Jugar: qué tan posible es" (2026-10-19)
 - [ ] Binarios estáticos (ej. `ldconfig`): cargarlos en espacio de usuario desde `execve`
 

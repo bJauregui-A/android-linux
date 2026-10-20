@@ -1,0 +1,73 @@
+diff --git a/sway/commands/scale_to_fit.c b/sway/commands/scale_to_fit.c
+index e86d7b6..06bff26 100644
+--- a/sway/commands/scale_to_fit.c
++++ b/sway/commands/scale_to_fit.c
+@@ -1,3 +1,4 @@
++#include <wlr/xwayland.h>
+ #include "sway/commands.h"
+ #include "sway/tree/arrange.h"
+ #include "sway/tree/container.h"
+@@ -24,6 +25,9 @@ struct cmd_results *cmd_scale_to_fit(int argc, char **argv) {
+ 		return cmd_results_new(CMD_SUCCESS, NULL);
+ 	}
+ 	view->scale_to_fit = enable;
++	// While scaled to fit the client never hears it is fullscreen (Wine undoes it)
++	wlr_xwayland_surface_set_fullscreen(view->wlr_xwayland_surface,
++			!enable && container->pending.fullscreen_mode != FULLSCREEN_NONE);
+ 	if (enable && view->geometry.width > 0 && view->geometry.height > 0) {
+ 		// Keep the size the client has now (when mapping, natural_* already is)
+ 		view->natural_width = view->geometry.width;
+diff --git a/sway/desktop/xwayland.c b/sway/desktop/xwayland.c
+index de2afda..786cbf0 100644
+--- a/sway/desktop/xwayland.c
++++ b/sway/desktop/xwayland.c
+@@ -321,6 +321,10 @@ static void set_fullscreen(struct sway_view *view, bool fullscreen) {
+ 	if (xwayland_view_from_view(view) == NULL) {
+ 		return;
+ 	}
++	if (view->scale_to_fit) {
++		// It keeps its own size: telling it is fullscreen only makes Wine undo it
++		return;
++	}
+ 	struct wlr_xwayland_surface *surface = view->wlr_xwayland_surface;
+ 	wlr_xwayland_surface_set_fullscreen(surface, fullscreen);
+ }
+@@ -612,8 +616,10 @@ static void handle_request_configure(struct wl_listener *listener, void *data) {
+ 			ev->width, ev->height);
+ 		return;
+ 	}
+-	if (view->scale_to_fit && !container_is_floating(view->container)) {
+-		// It gets the size it asks for, scaled to its container
++	if (view->scale_to_fit && (!container_is_floating(view->container) ||
++			view->container->pending.fullscreen_mode != FULLSCREEN_NONE)) {
++		// It gets the size it asks for, scaled to its container (a fullscreen
++		// floating one too: resizing it would take it out of the output's size)
+ 		view->natural_width = round(ev->width / x11_scale());
+ 		view->natural_height = round(ev->height / x11_scale());
+ 		configure(view, view->container->current.content_x,
+@@ -647,6 +653,10 @@ static void handle_request_fullscreen(struct wl_listener *listener, void *data)
+ 	if (xsurface->surface == NULL || !xsurface->surface->mapped) {
+ 		return;
+ 	}
++	if (view->scale_to_fit && !xsurface->fullscreen) {
++		// It wasn't told it is fullscreen (see set_fullscreen): don't let it leave
++		return;
++	}
+ 	container_set_fullscreen(view->container, xsurface->fullscreen);
+ 
+ 	arrange_root();
+diff --git a/sway/tree/view.c b/sway/tree/view.c
+index 1b81d04..fbcdfdf 100644
+--- a/sway/tree/view.c
++++ b/sway/tree/view.c
+@@ -1027,6 +1027,10 @@ void view_unmap(struct sway_view *view) {
+ 
+ void view_update_size(struct sway_view *view) {
+ 	struct sway_container *con = view->container;
++	if (con->pending.fullscreen_mode != FULLSCREEN_NONE) {
++		// arrange gives it the output's size: the client's size doesn't change it
++		return;
++	}
+ 	double width = view->geometry.width, height = view->geometry.height;
+ 	bool fitted = false;
+ 	if (container_is_floating(con)) {
