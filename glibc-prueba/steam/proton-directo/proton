@@ -15,6 +15,10 @@ unset SDL_GAMECONTROLLER_IGNORE_DEVICES SteamVirtualGamepadInfo SteamVirtualGame
 # ~/.config/proton-directo/<appid>, líneas "export VAR=valor" (ej. FEX_TSOENABLED=0).
 C="$HOME/.config/proton-directo/${SteamAppId:-$SteamGameId}"
 [ -n "${SteamAppId:-$SteamGameId}" ] && [ -f "$C" ] && . "$C"
+# fsync (sincronización de Wine por futex en vez de wineserver): Android mata futex_waitv
+# (449); steam/shim-futex.c la hace con futex. Por juego: "export FSYNC_SHIM=1".
+S="$HOME/.local/lib/libshim-futex.so"
+[ "$FSYNC_SHIM" = 1 ] && [ -f "$S" ] && export LD_PRELOAD="$S" WINEFSYNC=1
 # DXVK (D3D → Vulkan): Wine usa winex11 (este Proton no trae winewayland), así que
 # hace falta Turnip con la plataforma x11 (~/turnip-x11, turnip/compilar-mesa.sh).
 # Xwayland no tiene DRI3 → presentación por CPU (MESA_VK_WSI_DEBUG=sw); la GPU dibuja.
