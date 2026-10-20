@@ -50,3 +50,6 @@ if [[ $TERM == xterm-kitty ]] && command -v fastfetch >/dev/null; then
         fastfetch --logo-type kitty
     fi
 fi
+
+# programas instalados por el usuario (claude, etc.)
+export PATH="$HOME/.local/bin:$PATH"

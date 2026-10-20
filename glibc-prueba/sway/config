@@ -45,6 +45,8 @@ bar {
 exec autotiling
 # opacidad de HyDE: activa 0.90, inactivas 0.75, pantalla completa 1
 exec python $s/opacidad.py
+# núcleos según el foco: la ventana enfocada usa los rápidos (6-7), las demás 0-5
+exec python $s/nucleos.py
 # historial del portapapeles (SUPER+V)
 exec wl-paste --type text --watch cliphist store
 exec wl-paste --type image --watch cliphist store
