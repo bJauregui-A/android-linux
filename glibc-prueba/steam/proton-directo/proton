@@ -6,6 +6,10 @@
 # (steam/instalar-proton-directo.sh) y se elige en Propiedades → Compatibilidad.
 P="$HOME/.local/share/Steam/steamapps/common/Proton 11.0 (ARM64)"
 unset LD_PRELOAD MESA_LOADER_DRIVER_OVERRIDE
+# Opciones por juego sin la UI de Steam (sus diálogos no toman clics aquí):
+# ~/.config/proton-directo/<appid>, líneas "export VAR=valor" (ej. FEX_TSOENABLED=0).
+C="$HOME/.config/proton-directo/${SteamAppId:-$SteamGameId}"
+[ -n "${SteamAppId:-$SteamGameId}" ] && [ -f "$C" ] && . "$C"
 # DXVK (D3D → Vulkan): Wine usa winex11 (este Proton no trae winewayland), así que
 # hace falta Turnip con la plataforma x11 (~/turnip-x11, turnip/compilar-mesa.sh).
 # Xwayland no tiene DRI3 → presentación por CPU (MESA_VK_WSI_DEBUG=sw); la GPU dibuja.

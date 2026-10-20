@@ -131,8 +131,11 @@ public class TerminalService extends Service implements TerminalSessionClient {
         // sway parchado (sway/compilar-sway.sh: achica las ventanas que no caben), si está
         String bin = new File(prefijo, "home/user/sway/bin/sway").exists()
                 ? "/home/user/sway/bin/sway" : "sway";
+        // HyperOS ata algunos hilos de la app (el que lanza procesos) a los núcleos grandes
+        // (6-7) y todo lo de sway lo heredaba: juego, Wine, Xwayland y Steam en 2 núcleos.
+        // El cpuset top-app permite 0-7; abrir la afinidad no necesita root.
         ProcessBuilder pb = new ProcessBuilder(cargador(), "/usr/bin/bash", "-lc",
-                "exec " + bin + " > /tmp/sway.log 2>&1");
+                "taskset -p ff $$ > /dev/null 2>&1; exec " + bin + " > /tmp/sway.log 2>&1");
         entornoLinux(pb);
         try {
             Process p = pb.start();
