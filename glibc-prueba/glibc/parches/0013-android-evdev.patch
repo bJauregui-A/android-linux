@@ -1,0 +1,285 @@
+--- a/sysdeps/unix/sysv/linux/aarch64/android-path.c
++++ b/sysdeps/unix/sysv/linux/aarch64/android-path.c
+@@ -25,6 +25,7 @@
+ #include <limits.h>
+ #include <stddef.h>
+ #include <string.h>
++#include <sys/ioctl.h>
+ #include <sys/socket.h>
+ #include <sys/stat.h>
+ #include <sys/syscall.h>
+@@ -221,7 +222,10 @@
+   while (p[1] == '/')
+     p++;
+   const char *c = p + 1;
+-  if (!(starts (c, "dev/shm", 7) && (c[7] == '/' || c[7] == '\0')))
++  /* /dev/shm y /dev/input van al prefijo (memoria compartida; mandos de la
++     app, ver evdev_open).  */
++  if (!(starts (c, "dev/shm", 7) && (c[7] == '/' || c[7] == '\0'))
++      && !(starts (c, "dev/input", 9) && (c[9] == '/' || c[9] == '\0')))
+     for (int i = 0; passthrough[i] != NULL; i++)
+       {
+ 	size_t n = slen (passthrough[i]);
+@@ -776,6 +780,191 @@
+   return 1;
+ }
+ 
++/* Mandos.  Sin root no se lee /dev/input ni hay uinput: la app (Mandos.java)
++   deja en el /dev/input del prefijo un socket Unix "eventN" por mando y
++   manda por él struct input_event.  Abrirlo es conectarse; los ioctl EVIOC*
++   (que en un socket dan ENOTTY) se responden aquí describiendo un mando de
++   Xbox 360 (xpad), que SDL y Wine ya saben mapear.  La vibración que se
++   escribe al descriptor le llega a la app.  */
++#define EV_NB(max) (((max) + 8) / 8)
++static long int
++evdev_open (const char *t, long int flags)
++{
++  const char *b = t + slen (t);
++  while (b > t && b[-1] != '/')
++    b--;
++  if (!starts (b, "event", 5) || b - t < 11 || !starts (b - 11, "/dev/input/", 11))
++    return 1;
++  struct stat st;
++  if (RAW (__NR_newfstatat, AT_FDCWD, t, &st, 0) != 0 || !S_ISSOCK (st.st_mode))
++    return 1;
++  long int fd = RAW (__NR_socket, AF_UNIX, SOCK_STREAM
++		     | (flags & O_CLOEXEC ? SOCK_CLOEXEC : 0)
++		     | (flags & O_NONBLOCK ? SOCK_NONBLOCK : 0), 0);
++  if (fd < 0)
++    return fd;
++  struct sockaddr_un su;
++  size_t n = slen (t);
++  if (n >= sizeof su.sun_path)
++    {
++      RAW (__NR_close, fd);
++      return -ENAMETOOLONG;
++    }
++  su.sun_family = AF_UNIX;
++  mcopy (su.sun_path, t, n + 1);
++  long int r = RAW (__NR_connect, fd, &su,
++		    offsetof (struct sockaddr_un, sun_path) + n + 1);
++  if (r < 0 && r != -EINPROGRESS)
++    {
++      RAW (__NR_close, fd);
++      return r == -ECONNREFUSED ? -ENODEV : r;
++    }
++  return fd;
++}
++
++static void
++bit (unsigned char *m, size_t len, unsigned int b)
++{
++  if (b / 8 < len)
++    m[b / 8] |= 1 << (b % 8);
++}
++
++static long int
++cadena (void *arg, size_t len, const char *s)
++{
++  size_t n = slen (s) + 1;
++  if (n > len)
++    n = len;
++  mcopy (arg, s, n);
++  return n;
++}
++
++static long int
++evdev_ioctl (long int fd, unsigned long int req, long int arg)
++{
++  /* En un socket: ENOTTY, o EACCES si SELinux filtra el ioctl (apps).  */
++  long int r = RAW (__NR_ioctl, fd, req, arg);
++  if (r != -ENOTTY && r != -EINVAL && r != -EACCES)
++    return r;
++  struct sockaddr_un su;
++  unsigned int sl = sizeof su;
++  if (RAW (__NR_getpeername, fd, &su, &sl) != 0 || su.sun_family != AF_UNIX)
++    return r;
++  size_t pl = sl > offsetof (struct sockaddr_un, sun_path)
++	      ? sl - offsetof (struct sockaddr_un, sun_path) : 0;
++  int ok = 0;
++  for (size_t i = 0; i + 16 <= pl; i++)
++    if (starts (su.sun_path + i, "/dev/input/event", 16))
++      ok = 1;
++  if (!ok)
++    return r;
++
++  unsigned int nr = _IOC_NR (req);
++  size_t len = _IOC_SIZE (req);
++  unsigned char *m = (unsigned char *) arg;
++  /* Botones de xpad: A B X Y LB RB Back Start Guide L3 R3.  */
++  static const unsigned short botones[] =
++    { 0x130, 0x131, 0x133, 0x134, 0x136, 0x137, 0x13a, 0x13b, 0x13c, 0x13d,
++      0x13e };
++  if (nr >= 0x20 && nr < 0x40)		/* EVIOCGBIT(ev, len) */
++    {
++      static const unsigned char tam[0x20] =
++	{ [0] = EV_NB (0x1f), [1] = EV_NB (0x2ff), [2] = EV_NB (0x0f),
++	  [3] = EV_NB (0x3f), [4] = EV_NB (0x07), [5] = EV_NB (0x10),
++	  [0x11] = EV_NB (0x0f), [0x12] = EV_NB (0x07), [0x14] = EV_NB (0x01),
++	  [0x15] = EV_NB (0x7f) };
++      unsigned int ev = nr - 0x20;
++      size_t n = tam[ev] < len ? tam[ev] : len;
++      for (size_t i = 0; i < len; i++)
++	m[i] = 0;
++      if (ev == 0)
++	{
++	  bit (m, n, 0);	/* EV_SYN */
++	  bit (m, n, 1);	/* EV_KEY */
++	  bit (m, n, 3);	/* EV_ABS */
++	  bit (m, n, 0x15);	/* EV_FF */
++	}
++      else if (ev == 1)
++	for (size_t i = 0; i < sizeof botones / sizeof botones[0]; i++)
++	  bit (m, n, botones[i]);
++      else if (ev == 3)
++	{
++	  for (unsigned int a = 0; a <= 5; a++)	/* X Y Z RX RY RZ */
++	    bit (m, n, a);
++	  bit (m, n, 0x10);	/* HAT0X */
++	  bit (m, n, 0x11);	/* HAT0Y */
++	}
++      else if (ev == 0x15)
++	bit (m, n, 0x50);	/* FF_RUMBLE */
++      return n;
++    }
++  if (nr >= 0x40 && nr < 0x80)		/* EVIOCGABS(abs) */
++    {
++      int *ai = (int *) arg;	/* value min max fuzz flat resolution */
++      unsigned int a = nr - 0x40;
++      for (int i = 0; i < 6; i++)
++	ai[i] = 0;
++      if (a == 2 || a == 5)		/* gatillos */
++	ai[2] = 255;
++      else if (a == 0x10 || a == 0x11)
++	{
++	  ai[1] = -1;
++	  ai[2] = 1;
++	}
++      else if (a <= 4)
++	{
++	  ai[1] = -32768;
++	  ai[2] = 32767;
++	  ai[3] = 16;
++	  ai[4] = 128;
++	}
++      else
++	return -EINVAL;
++      return 0;
++    }
++  switch (nr)
++    {
++    case 0x01:				/* EVIOCGVERSION */
++      *(int *) arg = 0x010001;
++      return 0;
++    case 0x02:				/* EVIOCGID: USB, 045e:028e */
++      {
++	unsigned short *id = (unsigned short *) arg;
++	id[0] = 3;
++	id[1] = 0x045e;
++	id[2] = 0x028e;
++	id[3] = 0x0114;
++	return 0;
++      }
++    case 0x06:				/* EVIOCGNAME */
++      return cadena (m, len, "Microsoft X-Box 360 pad");
++    case 0x07:				/* EVIOCGPHYS */
++      return cadena (m, len, "android/input0");
++    case 0x08:				/* EVIOCGUNIQ */
++      return cadena (m, len, "");
++    case 0x09:				/* EVIOCGPROP */
++    case 0x18:				/* EVIOCGKEY */
++    case 0x19:				/* EVIOCGLED */
++    case 0x1a:				/* EVIOCGSND */
++    case 0x1b:				/* EVIOCGSW */
++      for (size_t i = 0; i < len; i++)
++	m[i] = 0;
++      return len;
++    case 0x80:				/* EVIOCSFF: un solo efecto, id 0 */
++      ((short *) arg)[1] = 0;
++      return 0;
++    case 0x81:				/* EVIOCRMFF */
++    case 0x90:				/* EVIOCGRAB */
++    case 0x91:				/* EVIOCREVOKE */
++    case 0xa0:				/* EVIOCSCLOCKID */
++      return 0;
++    case 0x84:				/* EVIOCGEFFECTS */
++      *(int *) arg = 1;
++      return 0;
++    }
++  return -EINVAL;
++}
++
+ long int
+ __android_path_syscall (long int nr, long int a0, long int a1, long int a2,
+ 			long int a3, long int a4, long int a5)
+@@ -876,6 +1065,12 @@
+ 	}
+ #endif
+       XL (a1, b1);
++      if ((const char *) a1 == b1)
++	{
++	  long int r = evdev_open (b1, a2);
++	  if (r != 1)
++	    return r;
++	}
+       break;
+     case __NR_openat2:
+     case __NR_faccessat:
+@@ -1012,6 +1207,11 @@
+ 	return raw (nr, a0, (long int) &su, off + n + 1, 0, 0, 0);
+       }
+ 
++    case __NR_ioctl:
++      if (_IOC_TYPE (a1) == 'E')
++	return evdev_ioctl (a0, a1, a2);
++      break;
++
+     case __NR_execve:
+       return execve_x ((const char *) a0, (char *const *) a1,
+ 		       (char *const *) a2, b1);
+--- a/sysdeps/unix/sysv/linux/aarch64/sysdep.h
++++ b/sysdeps/unix/sysv/linux/aarch64/sysdep.h
+@@ -211,7 +211,7 @@
+     case __NR_name_to_handle_at: case __NR_linkat: case __NR_renameat:
+     case __NR_renameat2: case __NR_symlinkat: case __NR_readlinkat:
+     case __NR_getcwd: case __NR_bind: case __NR_connect: case __NR_execve:
+-    case __NR_execveat:
++    case __NR_execveat: case __NR_ioctl:
+     case __NR_getuid: case __NR_geteuid: case __NR_getgid: case __NR_getegid:
+     case __NR_getresuid: case __NR_getresgid: case __NR_fchown:
+     case __NR_setuid: case __NR_setgid: case __NR_setreuid:
+--- a/sysdeps/unix/sysv/linux/aarch64/ioctl.S
++++ /dev/null
+@@ -1,32 +0,0 @@
+-/* Copyright (C) 2012-2026 Free Software Foundation, Inc.
+-
+-   This file is part of the GNU C Library.
+-
+-   The GNU C Library is free software; you can redistribute it and/or
+-   modify it under the terms of the GNU Lesser General Public License as
+-   published by the Free Software Foundation; either version 2.1 of the
+-   License, or (at your option) any later version.
+-
+-   The GNU C Library is distributed in the hope that it will be useful,
+-   but WITHOUT ANY WARRANTY; without even the implied warranty of
+-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+-   Lesser General Public License for more details.
+-
+-   You should have received a copy of the GNU Lesser General Public
+-   License along with the GNU C Library; if not, see
+-   <https://www.gnu.org/licenses/>.  */
+-
+-#include <sysdep.h>
+-
+-	.text
+-ENTRY(__ioctl)
+-	mov	x8, #__NR_ioctl
+-	sxtw	x0, w0
+-	svc	#0x0
+-	cmn	x0, #4095
+-	b.cs	.Lsyscall_error
+-	ret
+-PSEUDO_END (__ioctl)
+-
+-libc_hidden_def (__ioctl)
+-weak_alias (__ioctl, ioctl)

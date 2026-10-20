@@ -142,6 +142,8 @@ public class TerminalService extends Service implements TerminalSessionClient {
             sway = p;
             Log.i(TAG, "sway iniciado");
             Portapapeles.iniciar(this);
+            Audio.iniciar(this);
+            Mandos.iniciar(this);
             new Thread(() -> {
                 try {
                     Log.i(TAG, "sway terminó: " + p.waitFor());
@@ -216,7 +218,10 @@ public class TerminalService extends Service implements TerminalSessionClient {
                 // gdk-pixbuf carga imágenes con glycin, que las aísla con bwrap (namespaces: no
                 // sin root). bwrap falla leyendo /proc/sys/kernel/overflowuid, glycin no reconoce
                 // ese error y las apps GTK se caen con el primer ícono. La app ya es un sandbox.
-                "GLYCIN_DISABLE_SANDBOX=i-know-the-risks"));
+                "GLYCIN_DISABLE_SANDBOX=i-know-the-risks",
+                // Mandos: SDL (y Wine por SDL) los busca en /dev/input (Mandos.java); por udev
+                // no los vería (Android no deja leer /sys/class/input ni los uevents).
+                "SDL_JOYSTICK_DISABLE_UDEV=1"));
         // Escritorio por GPU: wlroots parchado (wlroots/compilar-wlroots.sh) con renderer
         // Vulkan, buffers android-ahb-v1 hacia el anfitrión y linux-dmabuf para los clientes.
         // Sin él, sway por CPU (pixman) y los clientes Vulkan por wl_shm.

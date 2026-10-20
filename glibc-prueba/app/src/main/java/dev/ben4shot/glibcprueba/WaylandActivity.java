@@ -187,6 +187,13 @@ public class WaylandActivity extends Activity {
         super.onWindowFocusChanged(foco);
         if (foco) inmersivo();
         Portapapeles.foco(this, foco);
+        if (!foco) Mandos.soltarTodo();
+    }
+
+    // Mandos: van a Linux como /dev/input/event0 (Mandos.java), no como teclado ni mouse.
+    @Override
+    public boolean dispatchGenericMotionEvent(MotionEvent e) {
+        return Mandos.movimiento(e) || super.dispatchGenericMotionEvent(e);
     }
 
     // --- tacto ---
@@ -431,6 +438,7 @@ public class WaylandActivity extends Activity {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
+        if (Mandos.tecla(e)) return true;
         int k = e.getKeyCode();
         if (k == KeyEvent.KEYCODE_BACK || k == KeyEvent.KEYCODE_VOLUME_UP || k == KeyEvent.KEYCODE_VOLUME_DOWN) {
             return super.dispatchKeyEvent(e);
