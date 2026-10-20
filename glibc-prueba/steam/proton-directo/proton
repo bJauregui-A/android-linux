@@ -16,10 +16,11 @@ unset SDL_GAMECONTROLLER_IGNORE_DEVICES SteamVirtualGamepadInfo SteamVirtualGame
 C="$HOME/.config/proton-directo/${SteamAppId:-$SteamGameId}"
 [ -n "${SteamAppId:-$SteamGameId}" ] && [ -f "$C" ] && . "$C"
 # DXVK (D3D → Vulkan): Wine usa winex11 (este Proton no trae winewayland), así que
-# hace falta Turnip con la plataforma x11 (~/turnip-x11, turnip/compilar-mesa.sh).
+# hace falta Turnip con la plataforma x11 (/usr/local/turnip-x11 o ~/turnip-x11, turnip/compilar-mesa.sh).
 # Xwayland no tiene DRI3 → presentación por CPU (MESA_VK_WSI_DEBUG=sw); la GPU dibuja.
 # Para volver a WineD3D (GL por llvmpipe): PROTON_USE_WINED3D=1 %command% en el juego.
-T="$HOME/turnip-x11/share/vulkan/icd.d/freedreno_icd.aarch64.json"
+T=/usr/local/turnip-x11; [ -d $T ] || T=$HOME/turnip-x11
+T=$T/share/vulkan/icd.d/freedreno_icd.aarch64.json
 [ -e "$T" ] && export VK_ICD_FILENAMES="$T"
 export MESA_VK_WSI_DEBUG=${MESA_VK_WSI_DEBUG:-sw}
 # OpenGL (juegos GL, o WineD3D): GLX sin DRI3 cae en drisw; con GALLIUM_DRIVER=zink

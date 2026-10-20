@@ -22,6 +22,6 @@ fi
 # DNS de Android (el tar trae uno de respaldo)
 rm -f "$P/etc/resolv.conf"
 for s in $ANDROID_DNS; do echo "nameserver $s"; done > "$P/etc/resolv.conf"
-cd "$P/home/user"
+cd "$P"
 PATH=$ARCH_PATH
 exec "$GLIBC_LOADER" /usr/bin/bash /usr/local/share/arch-android/primer-arranque.sh

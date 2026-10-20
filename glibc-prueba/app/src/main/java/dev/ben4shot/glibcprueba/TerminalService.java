@@ -128,7 +128,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
         List<String> env = entorno(prefijo, cargador);
         String[] args = {"libldp.so", "/usr/bin/bash", "-l"};
         Log.i(TAG, "sesión: " + cargador + " /usr/bin/bash -l, prefijo " + prefijo);
-        return new TerminalSession(cargador, new File(prefijo, "home/user").getAbsolutePath(), args,
+        return new TerminalSession(cargador, new File(prefijo, home()).getAbsolutePath(), args,
                 env.toArray(new String[0]), 5000, this);
     }
 
@@ -143,8 +143,8 @@ public class TerminalService extends Service implements TerminalSessionClient {
         }
         entornoSway = entorno(prefijo, cargador());
         // sway parchado (sway/compilar-sway.sh: achica las ventanas que no caben), si está
-        String bin = new File(prefijo, "home/user/sway/bin/sway").exists()
-                ? "/home/user/sway/bin/sway" : "sway";
+        String propio = propio(prefijo, "sway") + "/bin/sway";
+        String bin = new File(prefijo, propio).exists() ? propio : "sway";
         // HyperOS ata algunos hilos de la app (el que lanza procesos) a los núcleos grandes
         // (6-7) y todo lo de sway lo heredaba: juego, Wine, Xwayland y Steam en 2 núcleos.
         // El cpuset top-app permite 0-7; abrir la afinidad no necesita root.
@@ -188,12 +188,32 @@ public class TerminalService extends Service implements TerminalSessionClient {
     }
 
     private void entornoLinux(ProcessBuilder pb) {
-        pb.directory(new File(getFilesDir(), PREFIJO + "/home/user"));
+        pb.directory(new File(new File(getFilesDir(), PREFIJO), home()));
         pb.environment().clear();
         for (String v : entornoSway) {
             int i = v.indexOf('=');
             pb.environment().put(v.substring(0, i), v.substring(i + 1));
         }
+    }
+
+    // Usuario de Linux: lo elige el instalador (primer-arranque.sh); "user" en los Arch de antes.
+    String usuario() {
+        File f = new File(getFilesDir(), PREFIJO + "/var/lib/arch-android/usuario");
+        try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(f))) {
+            String u = r.readLine();
+            if (u != null && u.trim().matches("[a-z_][a-z0-9_-]*")) return u.trim();
+        } catch (java.io.IOException ignorada) {
+        }
+        return "user";
+    }
+
+    private String home() { return "/home/" + usuario(); }
+
+    // Lo compilado propio (wlroots, sway, Turnip, mesa-gl): /usr/local/<nombre> con el APK
+    // autoinstalable, ~/<nombre> si se compiló a mano en el teléfono.
+    private String propio(File prefijo, String nombre) {
+        String local = "/usr/local/" + nombre;
+        return new File(prefijo, local).isDirectory() ? local : home() + "/" + nombre;
     }
 
     private String cargador() {
@@ -202,8 +222,8 @@ public class TerminalService extends Service implements TerminalSessionClient {
 
     // Entorno de los procesos Linux; de paso deja listo el prefijo (DNS, sudo, Wayland).
     private List<String> entorno(File prefijo, String cargador) {
-        File home = new File(prefijo, "home/user");
-        home.mkdirs();
+        File home = new File(prefijo, home());
+        if (!Instalador.falta(this)) home.mkdirs(); // al instalar lo crea primer-arranque.sh
         // shm_open de glibc usa /dev/shm (traducido al prefijo): wlroots, foot...
         new File(prefijo, "dev/shm").mkdirs();
         escribirResolvConf(prefijo);
@@ -215,8 +235,11 @@ public class TerminalService extends Service implements TerminalSessionClient {
         List<String> env = new ArrayList<>(List.of(
                 "GLIBC_PREFIX=" + prefijo,
                 "GLIBC_LOADER=" + cargador,
-                "HOME=/home/user",
-                "USER=user",
+                "HOME=" + home(),
+                "USER=" + usuario(),
+                "LOGNAME=" + usuario(),
+                // nombre del dispositivo por defecto al instalar (primer-arranque.sh)
+                "ANDROID_MODELO=" + Build.MODEL,
                 // kitty y foot abren $SHELL: zsh como en el PC (sway/zsh/), si está instalada
                 "SHELL=" + (new File(prefijo, "usr/bin/zsh").exists() ? "/usr/bin/zsh" : "/usr/bin/bash"),
                 "PATH=/usr/local/bin:/usr/bin",
@@ -229,7 +252,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
                 "WAYLAND_DISPLAY=wayland-0",
                 "WLR_NO_HARDWARE_CURSORS=1", // el anfitrión no dibuja cursor: lo pinta sway
                 // Vulkan: Turnip (KGSL) compilado en el teléfono (turnip/compilar-mesa.sh)
-                "VK_ICD_FILENAMES=/home/user/turnip/share/vulkan/icd.d/freedreno_icd.aarch64.json",
+                "VK_ICD_FILENAMES=" + propio(prefijo, "turnip") + "/share/vulkan/icd.d/freedreno_icd.aarch64.json",
                 // OpenGL: Zink (mesa de Arch) sobre Turnip
                 "MESA_LOADER_DRIVER_OVERRIDE=zink",
                 // gdk-pixbuf carga imágenes con glycin, que las aísla con bwrap (namespaces: no
@@ -246,16 +269,17 @@ public class TerminalService extends Service implements TerminalSessionClient {
         // Escritorio por GPU: wlroots parchado (wlroots/compilar-wlroots.sh) con renderer
         // Vulkan, buffers android-ahb-v1 hacia el anfitrión y linux-dmabuf para los clientes.
         // Sin él, sway por CPU (pixman) y los clientes Vulkan por wl_shm.
-        if (new File(home, "wlroots/lib/libwlroots-0.20.so").exists()) {
+        String wlroots = propio(prefijo, "wlroots");
+        if (new File(prefijo, wlroots + "/lib/libwlroots-0.20.so").exists()) {
             env.add("WLR_RENDERER=vulkan");
-            env.add("LD_LIBRARY_PATH=/home/user/wlroots/lib");
+            env.add("LD_LIBRARY_PATH=" + wlroots + "/lib");
         } else {
             env.add("WLR_RENDERER=pixman");
             env.add("MESA_VK_WSI_DEBUG=sw");
         }
         // EGL en Wayland sin dmabuf: Zink + kopper por wl_shm (turnip/egl-zink.c)
-        if (new File(home, "turnip/lib/libegl-zink.so").exists())
-            env.add("LD_PRELOAD=/home/user/turnip/lib/libegl-zink.so");
+        String eglZink = propio(prefijo, "turnip") + "/lib/libegl-zink.so";
+        if (new File(prefijo, eglZink).exists()) env.add("LD_PRELOAD=" + eglZink);
         entornoPropio(new File(home, ".config/entorno-android"), env);
         return env;
     }

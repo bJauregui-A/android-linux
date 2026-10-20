@@ -1,15 +1,17 @@
 #!/bin/sh
-# /usr/local/bin/con-gpu: corre un programa con el OpenGL de ~/mesa-gl (Zink sobre Turnip por drisw,
+# /usr/local/bin/con-gpu: corre un programa con el OpenGL de mesa-gl (Zink sobre Turnip por drisw,
 # parche mesa-gl/parches/0001: el cuadro se copia a la ventana) en vez de llvmpipe.
-# Sirve para EGL Wayland y GLX (Xwayland). Sin ~/mesa-gl corre el programa tal cual.
+# Sirve para EGL Wayland y GLX (Xwayland). Sin mesa-gl corre el programa tal cual.
+# Lo compilado va en /usr/local/<nombre> (APK autoinstalable) o en ~/<nombre> (compilado a mano).
 #   con-gpu glxgears
-G=$HOME/mesa-gl
+G=/usr/local/mesa-gl; [ -d $G ] || G=$HOME/mesa-gl
+X=/usr/local/turnip-x11; [ -d $X ] || X=$HOME/turnip-x11
 if [ -d "$G/lib" ]; then
   # egl-zink (LD_PRELOAD) es para el camino kopper del mesa de Arch: aquí sobra
   unset LD_PRELOAD LIBGL_ALWAYS_SOFTWARE MESA_LOADER_DRIVER_OVERRIDE
   export LD_LIBRARY_PATH=$G/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
   export GALLIUM_DRIVER=zink
   # turnip-x11: el mismo Turnip con la plataforma x11 (para GLX/Xwayland)
-  export VK_ICD_FILENAMES=$HOME/turnip-x11/share/vulkan/icd.d/freedreno_icd.aarch64.json
+  export VK_ICD_FILENAMES=$X/share/vulkan/icd.d/freedreno_icd.aarch64.json
 fi
 exec "$@"

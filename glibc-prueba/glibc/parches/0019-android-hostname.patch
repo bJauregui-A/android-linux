@@ -1,0 +1,45 @@
+--- a/sysdeps/unix/sysv/linux/aarch64/uname.c	1969-12-31 21:00:00.000000000 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/uname.c	2026-10-20 14:40:20.000000000 -0300
+@@ -0,0 +1,42 @@
++/* Android: el nombre del equipo sale de /etc/hostname (traducido al prefijo,
++   lo escribe el instalador de la app).  Sin root no se puede cambiar el del
++   kernel (sethostname), que en Android es "localhost"; gethostname, hostname,
++   zsh y starship lo leen por aquí.  Sin /etc/hostname queda el del kernel.
++   En C (no stub generado) para poder agregar esto; rtld solo usa el del kernel.  */
++
++#include <fcntl.h>
++#include <string.h>
++#include <sys/utsname.h>
++#include <not-cancel.h>
++#include <sysdep.h>
++
++int
++__uname (struct utsname *u)
++{
++  int r = INLINE_SYSCALL_CALL (uname, u);
++#if IS_IN (libc)
++  if (r == 0)
++    {
++      int fd = __open_nocancel ("/etc/hostname", O_RDONLY | O_CLOEXEC);
++      if (fd >= 0)
++	{
++	  char nombre[sizeof u->nodename];
++	  ssize_t n = __read_nocancel (fd, nombre, sizeof nombre - 1);
++	  __close_nocancel_nostatus (fd);
++	  while (n > 0 && (nombre[n - 1] == '\n' || nombre[n - 1] == ' '
++			   || nombre[n - 1] == '\r' || nombre[n - 1] == '\t'))
++	    n--;
++	  if (n > 0)
++	    {
++	      memcpy (u->nodename, nombre, n);
++	      u->nodename[n] = '\0';
++	    }
++	}
++    }
++#endif
++  return r;
++}
++
++weak_alias (__uname, uname)
++libc_hidden_def (__uname)
++libc_hidden_def (uname)

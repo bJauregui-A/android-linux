@@ -2,9 +2,12 @@
 """Arma capa.tar: lo nuestro encima del Arch de la app (lo que hoy suben los scripts subir-*.sh).
 
   - lo compilado en el teléfono (trabajo/compilados.tar, de apk/traer-compilados.sh):
-    ~/wlroots, ~/sway, ~/turnip, ~/turnip-x11, ~/mesa-gl y /opt/gtk2; los enlaces con la
-    ruta del prefijo de origen pasan al de destino
-  - configs y scripts del repo en su lugar (sway/, android/, mesa-gl/, steam/, lutris/...)
+    ~/wlroots, ~/sway, ~/turnip, ~/turnip-x11 y ~/mesa-gl pasan a /usr/local/<nombre> (el
+    usuario se elige al instalar); /home/user/ dentro de los archivos, binarios incluidos, se
+    cambia por /usr/local/ (mismo largo). /opt/gtk2 queda igual. Los enlaces con la ruta del
+    prefijo de origen pasan al de destino
+  - configs y scripts del repo en su lugar; lo del usuario en /etc/skel (primer-arranque.sh
+    lo copia al home elegido)
   - el instalador (apk/) en /usr/local/share/arch-android
 
 Uso: capa.py --prefix /data/user/0/<paquete>/files/archlinux --compilados trabajo/compilados.tar --out capa.tar
@@ -19,11 +22,13 @@ import tempfile
 import time
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # glibc-prueba/
-H = "home/user"
+H = "etc/skel"  # → /home/<usuario>
 D = "usr/local/share/arch-android"
 STRIP = os.path.expanduser("~/Android/Sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip")
 # Respaldos de bibliotecas (libgallium...so.0001) y documentación: no van
 SALTAR = re.compile(r"\.\d{4}$|/share/(gtk-doc|man|doc)/")
+VIEJO, NUEVO = b"/home/user/", b"/usr/local/"
+assert len(VIEJO) == len(NUEVO)
 
 # (origen en el repo, destino en el prefijo, modo)
 ARCHIVOS = [
@@ -52,7 +57,7 @@ ARCHIVOS = [
     ("android/mimeapps.list", f"{H}/.config/mimeapps.list", 0o644),
     ("mesa-gl/con-gpu", "usr/local/bin/con-gpu", 0o755),
     ("mesa-gl/firefox", "usr/local/bin/firefox", 0o755),
-    ("scripts/adb-conectar", f"{H}/.local/bin/adb-conectar", 0o755),
+    ("scripts/adb-conectar", "usr/local/bin/adb-conectar", 0o755),
     ("apk/sshd-android.conf", "etc/ssh/sshd_config.d/10-android.conf", 0o644),
     # instalador (primer arranque) y lo que instala después
     ("apk/primer-arranque.sh", f"{D}/primer-arranque.sh", 0o755),
@@ -124,6 +129,10 @@ def main():
             nombre = m.name.removeprefix("./")
             if not nombre or SALTAR.search(nombre):
                 continue
+            if nombre.startswith("home/user/"):
+                nombre = "usr/local/" + nombre[len("home/user/"):]
+            elif nombre.rstrip("/") == "home/user":
+                continue
             m.name = nombre
             if m.isdir():
                 if nombre.rstrip("/") not in out.dirs:
@@ -131,9 +140,10 @@ def main():
                 continue
             out.directorio(os.path.dirname(nombre))
             if m.issym():
-                out.t.addfile(m.replace(linkname=origen.sub(prefijo, m.linkname), deep=False))
+                destino = origen.sub(prefijo, m.linkname).replace(VIEJO.decode(), NUEVO.decode())
+                out.t.addfile(m.replace(linkname=destino, deep=False))
             elif m.isfile():
-                data = sin_simbolos(t.extractfile(m).read())
+                data = sin_simbolos(t.extractfile(m).read()).replace(VIEJO, NUEVO)
                 m.size = len(data)
                 out.t.addfile(m, io.BytesIO(data))
 

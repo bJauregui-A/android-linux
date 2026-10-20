@@ -15,9 +15,39 @@ lista() { for g; do sed 's/#.*//' "$D/paquetes-$g.txt"; done | tr -s ' \n' '  ';
 
 printf '\e[1mInstalando Arch Linux\e[0m (lo mínimo baja ~500 MB, más lo que elijas; no cierres la app)\n'
 
+# Usuario y nombre del dispositivo (una vez; quedan en $E/usuario y /etc/hostname, que la app
+# y la glibc leen: TerminalService.usuario(), uname/gethostname desde la 0019)
+if [ ! -s $E/usuario ]; then
+    while :; do
+        read -rp $'\nNombre de usuario (minúsculas, números, - y _): ' N
+        [[ $N =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] && [ "$N" != root ] && break
+        echo "no vale: empieza con letra minúscula o _, sin espacios ni mayúsculas"
+    done
+    echo "$N" > $E/usuario
+fi
+N=$(cat $E/usuario)
+if [ ! -s /etc/hostname ]; then
+    # Sugerido: el modelo de Android en minúsculas ("Redmi 15 5G" → redmi-15-5g)
+    S=$(echo "${ANDROID_MODELO:-android}" | tr 'A-Z ' 'a-z-' | tr -cd 'a-z0-9-' | sed 's/^-*//; s/-*$//')
+    while :; do
+        read -rp "Nombre del dispositivo [${S:-android}]: " H
+        H=${H:-${S:-android}}
+        [[ $H =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$ ]] && break
+        echo "no vale: letras, números y guiones (sin espacios)"
+    done
+    echo "$H" > /etc/hostname
+fi
 U=$(id -u); G=$(id -g)
-grep -q "^user:" /etc/passwd || echo "user:x:$U:$G:Usuario:/home/user:/bin/bash" >> /etc/passwd
-grep -q "^user:" /etc/group || echo "user:x:$G:" >> /etc/group
+grep -q "^$N:" /etc/passwd || echo "$N:x:$U:$G:$N:/home/$N:/usr/bin/zsh" >> /etc/passwd
+grep -q "^$N:" /etc/group || echo "$N:x:$G:" >> /etc/group
+# El home con las configs de /etc/skel (sway, waybar, kitty, zsh...)
+if [ ! -d /home/$N/.config ]; then
+    mkdir -p /home/$N
+    cp -a /etc/skel/. /home/$N/
+fi
+rmdir /home/user 2>/dev/null  # la app lo crea antes de saber el nombre
+export HOME=/home/$N USER=$N LOGNAME=$N
+cd ~
 
 if [ ! -e $E/base-lista ]; then
     paso "Scripts de instalación de la base"
@@ -77,7 +107,7 @@ elegido ssh && { [ -e /etc/ssh/ssh_host_ed25519_key ] || sudo ssh-keygen -A; }
 sed -i '/^tty:x:5:/d' /etc/group
 # Firefox: rutas del prefijo para el sandbox y el .desktop con el envoltorio de GPU
 FF=/usr/lib/firefox/browser/defaults/preferences
-[ -d $FF ] && cp $D/firefox-android.js $FF/android.js
+[ -d $FF ] && sed "s|/home/user/|/home/$N/|g" $D/firefox-android.js > $FF/android.js
 [ -f /usr/share/applications/firefox.desktop ] &&
     sed 's|/usr/lib/firefox/firefox|/usr/local/bin/firefox|' /usr/share/applications/firefox.desktop \
         > ~/.local/share/applications/firefox.desktop
