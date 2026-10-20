@@ -6,7 +6,7 @@ Documento de contexto del proyecto. Resume la idea, las decisiones tomadas (y po
 
 Que el teléfono (Redmi 15 5G, HyperOS, **sin root**) sea a la vez Android y un **Linux real y totalmente modificable**: programas de Arch Linux ARM sin recompilar corriendo nativos (glibc propia dentro de una app normal, sin proot ni emulación), con un **escritorio Wayland mínimo y modificable, tipo Hyprland adaptado al celular**, y **aceleración por GPU** (Turnip en la Adreno 619). Sin perder lo de Android que importa (apps bancarias chilenas, Play Store, cámara, pagos) y todo reversible: es una app, se desinstala y el teléfono queda igual. Más adelante, si se puede, Steam.
 
-## Para retomar (estado al 2026-10-20, 20ª sesión)
+## Para retomar (estado al 2026-10-20, 26ª sesión)
 
 | Frente | Estado |
 |---|---|
@@ -17,6 +17,7 @@ Que el teléfono (Redmi 15 5G, HyperOS, **sin root**) sea a la vez Android y un 
 | GPU | ✅ Vulkan: Turnip (KGSL) compilado en el teléfono. ✅ OpenGL 4.6 / GLES 3.2: Zink sobre Turnip. ✅ **Cero copias** para clientes directos: `AHardwareBuffer` + `ASurfaceControl` (protocolo propio `android-ahb-v1` + parche a la WSI de Mesa) |
 | Escritorio | ✅ sway con los atajos y el aspecto de la config de Hyprland/HyDE del PC (`sway/`), waybar, fuzzel, kitty con la config del PC, modo inmersivo a pantalla completa (1080×2193 px reales). swayfx también funciona por GPU (`~/swayfx`, no es el por defecto); Hyprland instalado pero no arranca (ver "sway, swayfx y Hyprland") |
 | Escritorio por GPU | ✅ sway compone con el renderer **Vulkan** de wlroots (parchado, `wlroots/`) directo en AHardwareBuffers del anfitrión; sus clientes le pasan dmabufs. vkcube dentro de sway: CPU total 8,9 s → 2,1 s cada 10 s |
+| Puente shell local (ADB autónomo) | ✅ `android-tools` en Arch; vinculado y conectado a depuración inalámbrica local (uid 2000 en u:r:shell:s0); script `adb-conectar` en `~/.local/bin` |
 
 **16ª sesión (2026-10-19): ✅ DXVK por GPU (Turnip con X11), ATLYSS jugable a 13–20 fps, teclado físico para juegos.** El usuario confirmó: girar con Undertale abierto ✅, diálogo de archivos de Lutris del tamaño correcto ✅ (sway 0003). No mostraba ocultos → `gsettings set org.gtk.Settings.FileChooser show-hidden true` (GTK3, dconf; lanzado con `swaymsg exec` para usar el D-Bus de sway; CTRL+H también alterna). En `config.vdf` (`CompatToolMapping`) Steam tenía `proton_11-arm64` = "Proton 11.0 (ARM64)" oficial (pressure-vessel, no anda); el nuestro es `proton_arm64_directo` (Steam guarda `config.vdf` al salir). SSH desde el PC: la clave de host cambió (usar otro `UserKnownHostsFile` o limpiar `[127.0.0.1]:8022`).
 - ATLYSS abre con `proton-directo` (lento, WineD3D/llvmpipe) ✅.

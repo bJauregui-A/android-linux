@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+import socket
+import subprocess
+import sys
+
+def is_connected():
+    try:
+        res = subprocess.run(["adb", "get-state"], capture_output=True, text=True, timeout=2)
+        return res.stdout.strip() == "device"
+    except Exception:
+        return False
+
+if is_connected():
+    print("ADB ya está conectado y listo.")
+    sys.exit(0)
+
+print("Buscando puerto de depuración inalámbrica en 127.0.0.1...")
+for p in range(30000, 46000):
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(0.01)
+    if s.connect_ex(("127.0.0.1", p)) == 0:
+        s.close()
+        try:
+            res = subprocess.run(["adb", "connect", f"127.0.0.1:{p}"], capture_output=True, text=True, timeout=3)
+            if "connected to" in res.stdout:
+                print(f"Conectado exitosamente al puerto {p}")
+                sys.exit(0)
+        except Exception:
+            pass
+    else:
+        s.close()
+
+if not is_connected():
+    print("No se encontró ningún puerto de depuración abierto. Asegúrate de tener activada la 'Depuración inalámbrica' en Opciones de desarrollador.")
+    sys.exit(1)
