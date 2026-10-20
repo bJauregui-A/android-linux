@@ -1,0 +1,15 @@
+#!/bin/sh
+# /usr/local/bin/con-gpu: corre un programa con el OpenGL de ~/mesa-gl (Zink sobre Turnip por drisw,
+# parche mesa-gl/parches/0001: el cuadro se copia a la ventana) en vez de llvmpipe.
+# Sirve para EGL Wayland y GLX (Xwayland). Sin ~/mesa-gl corre el programa tal cual.
+#   con-gpu glxgears
+G=$HOME/mesa-gl
+if [ -d "$G/lib" ]; then
+  # egl-zink (LD_PRELOAD) es para el camino kopper del mesa de Arch: aquí sobra
+  unset LD_PRELOAD LIBGL_ALWAYS_SOFTWARE MESA_LOADER_DRIVER_OVERRIDE
+  export LD_LIBRARY_PATH=$G/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+  export GALLIUM_DRIVER=zink
+  # turnip-x11: el mismo Turnip con la plataforma x11 (para GLX/Xwayland)
+  export VK_ICD_FILENAMES=$HOME/turnip-x11/share/vulkan/icd.d/freedreno_icd.aarch64.json
+fi
+exec "$@"

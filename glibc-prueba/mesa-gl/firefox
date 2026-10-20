@@ -1,0 +1,6 @@
+#!/bin/sh
+# /usr/local/bin/firefox: Firefox con WebRender por GPU (con-gpu). Firefox ve el dispositivo de Mesa
+# como "software" y elige WebRender Software; MOZ_WEBRENDER=1 le pide el de GPU.
+# Sin ~/mesa-gl no se fuerza (sería WebRender sobre llvmpipe, más lento que el Software).
+[ -d "$HOME/mesa-gl/lib" ] && export MOZ_WEBRENDER=1
+exec /usr/local/bin/con-gpu /usr/lib/firefox/firefox "$@"

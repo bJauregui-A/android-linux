@@ -11,4 +11,6 @@ unset MESA_LOADER_DRIVER_OVERRIDE
 # El sandbox de CEF necesita namespaces (sin root no hay): "No usable sandbox".
 # Xwayland en píxeles reales (xwayland_scale 2.5 en sway): la UI se agranda sola,
 # un poco menos que 2.5 para que quepa en la pantalla angosta.
-exec "$S/steamrtarm64/steam" -noverifyfiles -no-cef-sandbox -forcedesktopscaling 2 "$@"
+# OpenGL por GPU (proceso GPU de CEF y vgui) con ~/mesa-gl si está (mesa-gl/con-gpu).
+C=; [ -x /usr/local/bin/con-gpu ] && C=/usr/local/bin/con-gpu
+exec $C "$S/steamrtarm64/steam" -noverifyfiles -no-cef-sandbox -forcedesktopscaling 2 "$@"
