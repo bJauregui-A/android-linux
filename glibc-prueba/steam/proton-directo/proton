@@ -6,8 +6,15 @@
 # (steam/instalar-proton-directo.sh) y se elige en Propiedades → Compatibilidad.
 P="$HOME/.local/share/Steam/steamapps/common/Proton 11.0 (ARM64)"
 unset LD_PRELOAD MESA_LOADER_DRIVER_OVERRIDE
-# DXVK necesita Vulkan sobre X11 y Turnip está compilado solo para Wayland
-# (y este Proton no trae winewayland): por ahora D3D → OpenGL por GLX (llvmpipe).
-export PROTON_USE_WINED3D=${PROTON_USE_WINED3D:-1}
+# DXVK (D3D → Vulkan): Wine usa winex11 (este Proton no trae winewayland), así que
+# hace falta Turnip con la plataforma x11 (~/turnip-x11, turnip/compilar-mesa.sh).
+# Xwayland no tiene DRI3 → presentación por CPU (MESA_VK_WSI_DEBUG=sw); la GPU dibuja.
+# Para volver a WineD3D (GL por llvmpipe): PROTON_USE_WINED3D=1 %command% en el juego.
+T="$HOME/turnip-x11/share/vulkan/icd.d/freedreno_icd.aarch64.json"
+[ -e "$T" ] && export VK_ICD_FILENAMES="$T"
+export MESA_VK_WSI_DEBUG=${MESA_VK_WSI_DEBUG:-sw}
+# OpenGL (juegos GL, o WineD3D): GLX sin DRI3 cae en drisw; con GALLIUM_DRIVER=zink
+# drisw usa Zink sobre Turnip en vez de llvmpipe (glxgears ~345 fps).
+[ -e "$T" ] && export GALLIUM_DRIVER=${GALLIUM_DRIVER:-zink}
 export PROTON_LOG=${PROTON_LOG:-1} PROTON_LOG_DIR=${PROTON_LOG_DIR:-/tmp}
 exec python3 "$P/proton" "$@"

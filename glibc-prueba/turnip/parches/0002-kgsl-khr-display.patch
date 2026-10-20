@@ -1,0 +1,16 @@
+--- a/src/freedreno/vulkan/tu_knl_kgsl.cc
++++ b/src/freedreno/vulkan/tu_knl_kgsl.cc
+@@ -1789,10 +1789,9 @@
+ VkResult
+ tu_knl_kgsl_load(struct tu_instance *instance, int fd)
+ {
+-   if (instance->vk.enabled_extensions.KHR_display) {
+-      return vk_errorf(instance, VK_ERROR_INITIALIZATION_FAILED,
+-                       "I can't KHR_display");
+-   }
++   /* Sin DRM no hay pantallas que listar, pero la extensión puede estar
++    * activada igual (vulkaninfo, vkcube sin --wsi, winevulkan): no fallar,
++    * KHR_display simplemente devuelve cero pantallas. */
+ 
+    struct tu_physical_device *device = (struct tu_physical_device *)
+       vk_zalloc(&instance->vk.alloc, sizeof(*device), 8,

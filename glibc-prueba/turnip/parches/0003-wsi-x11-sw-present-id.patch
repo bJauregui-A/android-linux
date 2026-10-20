@@ -1,0 +1,22 @@
+--- a/src/vulkan/wsi/wsi_common_x11.c
++++ b/src/vulkan/wsi/wsi_common_x11.c
+@@ -1909,6 +1909,19 @@
+ 
+    xcb_flush(chain->conn);
+ 
++   /* Sin DRI3 ni MIT-SHM no llegan eventos de Present: el present_id solo
++    * avanzaba en x11_present_to_x11_dri3, y vkWaitForPresent(2)KHR (que se
++    * anuncia soportado) esperaba para siempre (DXVK se colgaba). La copia por
++    * put_image ya se envió: se da el cuadro por presentado aquí. */
++   if (image->present_id) {
++      mtx_lock(&chain->present_progress_mutex);
++      if (image->present_id > chain->present_id) {
++         chain->present_id = image->present_id;
++         u_cnd_monotonic_broadcast(&chain->present_progress_cond);
++      }
++      mtx_unlock(&chain->present_progress_mutex);
++   }
++
+    /* We don't have queued present here.
+     * Immediately let application acquire again, but query geometry first so
+     * we can report OUT_OF_DATE on resize. */

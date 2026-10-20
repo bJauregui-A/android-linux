@@ -30,6 +30,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import java.text.Normalizer;
+import java.util.HashSet;
 import java.util.List;
 
 // Pantalla Wayland: SurfaceView donde el anfitrión dibuja la ventana Linux.
@@ -343,6 +344,8 @@ public class WaylandActivity extends Activity {
     // valor de la tabla: evdev | 0x10000 Shift | 0x20000 AltGr
     // Shift del teclado físico apretado (scancode, o 0)
     private int shiftFisico;
+    // scancodes físicos enviados crudos y aún pulsados: su soltar va crudo pase lo que pase
+    private final HashSet<Integer> crudas = new HashSet<>();
 
     private void pulsarTabla(int v) {
         boolean shift = (v & 0x10000) != 0, altgr = (v & 0x20000) != 0;
@@ -369,6 +372,20 @@ public class WaylandActivity extends Activity {
             if (sc == SHIFT || sc == 54) shiftFisico = abajo ? sc : 0;
             if (sc == ALTGR) sc = ALT;	// en un teclado US el Alt derecho es Alt, no AltGr
             if (e.getRepeatCount() == 0) Wayland.tecla(sc, abajo);
+            return;
+        }
+        // Letras y espacio están en el mismo lugar en US y latam (y los números sin
+        // Shift): van crudas, con su pulsar y soltar reales, para que un juego vea la
+        // tecla mantenida (W para caminar). Antes eran pulsar+soltar al instante y
+        // luego las repeticiones de Android: avanzaba a tirones.
+        int kc = e.getKeyCode();
+        boolean shift = (e.getMetaState() & KeyEvent.META_SHIFT_MASK) != 0;
+        if (crudas.contains(sc) || (abajo && ((kc >= KeyEvent.KEYCODE_A && kc <= KeyEvent.KEYCODE_Z)
+                || kc == KeyEvent.KEYCODE_SPACE || (!shift && kc >= KeyEvent.KEYCODE_0 && kc <= KeyEvent.KEYCODE_9)))) {
+            if (e.getRepeatCount() == 0) {
+                if (abajo) crudas.add(sc); else crudas.remove(sc);
+                Wayland.tecla(sc, abajo);
+            }
             return;
         }
         int sinCtrlAlt = e.getMetaState() & ~(KeyEvent.META_CTRL_MASK | KeyEvent.META_ALT_MASK | KeyEvent.META_META_MASK);
