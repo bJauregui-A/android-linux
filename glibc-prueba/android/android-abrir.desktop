@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Android
+Comment=Abrir con una app de Android
+Exec=android-abrir %u
+NoDisplay=true
+MimeType=x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/mailto;x-scheme-handler/tel;x-scheme-handler/geo;x-scheme-handler/market;x-scheme-handler/intent;

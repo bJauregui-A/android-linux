@@ -1,0 +1,8 @@
+[Default Applications]
+x-scheme-handler/http=android-abrir.desktop
+x-scheme-handler/https=android-abrir.desktop
+x-scheme-handler/mailto=android-abrir.desktop
+x-scheme-handler/tel=android-abrir.desktop
+x-scheme-handler/geo=android-abrir.desktop
+x-scheme-handler/market=android-abrir.desktop
+x-scheme-handler/intent=android-abrir.desktop

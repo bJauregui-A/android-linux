@@ -1,0 +1,5 @@
+#!/bin/sh
+# xdg-open sin xdg-utils: gio usa los programas por defecto (~/.config/mimeapps.list, que
+# manda los links a android-abrir); lo que no tenga programa Linux lo abre Android.
+[ $# -eq 1 ] || { echo "uso: xdg-open <url|archivo>" >&2; exit 1; }
+gio open "$1" 2>/dev/null || exec android-abrir "$1"

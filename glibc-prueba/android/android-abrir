@@ -1,0 +1,23 @@
+#!/usr/bin/python3
+# Abre una URL o un archivo con Android (Abrir.java en la app, por /run/android-abrir.sock).
+# Uso: android-abrir <url|archivo>
+import os, socket, sys
+from urllib.parse import unquote, urlparse
+
+if len(sys.argv) != 2:
+    sys.exit("uso: android-abrir <url|archivo>")
+que = sys.argv[1]
+if que.startswith("file://"):
+    que = unquote(urlparse(que).path)
+# rutas (relativas también) → absolutas y sin enlaces, como las ve Linux
+if os.path.exists(que) or "://" not in que and ":" not in que.split("/")[0]:
+    que = os.path.realpath(que)
+s = socket.socket(socket.AF_UNIX)
+try:
+    s.connect("/run/android-abrir.sock")
+except OSError as e:
+    sys.exit(f"android-abrir: la app no escucha ({e})")
+s.sendall((que + "\n").encode())
+r = s.makefile(encoding="utf-8").readline().strip()
+if r != "ok":
+    sys.exit(f"android-abrir: {r or 'sin respuesta'}")

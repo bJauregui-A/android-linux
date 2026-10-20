@@ -44,6 +44,13 @@
             </intent-filter>
         </activity>
 
+        <!-- xdg-open de archivos del prefijo (Abrir.java): solo con permiso concedido por URI -->
+        <provider
+            android:name=".Archivos"
+            android:authorities="${applicationId}.archivos"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
         <service
             android:name=".TerminalService"
             android:exported="false"

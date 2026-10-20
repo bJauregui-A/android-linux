@@ -195,6 +195,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
         escribirResolvConf(prefijo);
         escribirSudo(prefijo);
         Wayland.iniciar(this);
+        Abrir.iniciar(this);
         List<String> env = new ArrayList<>(List.of(
                 "GLIBC_PREFIX=" + prefijo,
                 "GLIBC_LOADER=" + cargador,
