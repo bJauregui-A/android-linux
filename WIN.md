@@ -50,11 +50,12 @@ Windows on ARM corre sobre un núcleo NT nativo en ARM64 (`aarch64`). Para compa
 ## 4. Hoja de Ruta de Implementación en este Proyecto
 
 ### Fase 1: Optimización Inmediata de Rendimiento (Sincronización y GL)
-- [ ] **Activar `WINEFSYNC=1` por defecto** en `steam/proton-directo/proton` y Lutris.
-  - Verificar soporte de futex en el kernel del teléfono (ya validado en la sesión 14ª).
-  - Aliviar el hilo principal de emuladores y motores como Unity (ej. ATLYSS).
-- [ ] **Generalizar `~/mesa-gl` en `proton-directo`**:
-  - Habilitar aceleración OpenGL por GPU en juegos que corran sobre WineD3D (como Morrowind), eliminando el renderizado por software (llvmpipe).
+- [x] **Generalizar `~/mesa-gl` en `proton-directo`**:
+  - Habilitada aceleración OpenGL por GPU (`~/mesa-gl/lib` con parches 0001/0002) para todos los juegos en [`glibc-prueba/steam/proton-directo/proton`](file:///home/user/android-linux/glibc-prueba/steam/proton-directo/proton).
+  - Eliminado `~/.config/proton-directo/22320` (Morrowind) al quedar cubierto de forma global.
+- [ ] **Desbloquear `WINEFSYNC=1` emulando `futex_waitv` (syscall 449) en glibc**:
+  - *Diagnóstico*: Proton ya activa `WINEFSYNC=1` por defecto, pero `wineserver` comprueba soporte llamando a `syscall(449, 0, 0, 0, 0, 0)`. El filtro seccomp de Android bloquea la syscall 449 con SIGSYS y glibc respondía ENOSYS (`0x26`), haciendo que wineserver vuelva a sincronización por servidor (`wineserver: using server-side synchronization`).
+  - *Solución*: La syscall estándar 98 (`futex`) sí está permitida por Android. Al atrapar la 449 en el manejador de SIGSYS de glibc y responderla vía syscall 98 (o devolver `EINVAL` a la sonda de prueba en vez de `ENOSYS`), `wineserver` activará fsync nativo por futex para todos los juegos.
 
 ### Fase 2: Camino Gráfico Directo (`winewayland`)
 - [ ] **Integrar el driver `winewayland` en Proton/Wine ARM64**:
