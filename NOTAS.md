@@ -21,31 +21,7 @@ Bootloader bloqueado, sin root. Todo se hace por ADB (`pm uninstall --user 0`), 
 
 ## Próximos pasos
 - Limpiar barra de estado
-- Seguir con Mosaico (ver abajo)
 - glibc nativa sin root (ver abajo)
-
-## Mosaico (launcher estilo Hyprland) — `mosaico/`
-Se abre como app normal (sin categoría HOME): no reemplaza a MIUI Home todavía. MIUI Home nunca se desinstala.
-Compilar e instalar: `cd mosaico && ./gradlew assembleDebug && adb install -r app/build/outputs/apk/debug/app-debug.apk`
-(MIUI pide aceptar la instalación en el teléfono, o activar "Instalar vía USB" en opciones de desarrollador).
-
-Hecho (v0.1, 2026-10-18):
-- Barra tipo waybar (escritorios 1–5, batería, hora), buscador tipo rofi (sin acentos), deslizar para cambiar escritorio
-- Escritorio = principal + secundaria (pantalla dividida) + flotante. Tocar un lugar asigna app, mantener lo vacía
-- Mantener una app en el buscador: pantalla completa / al lado / flotante
-
-Aprendido probando en el teléfono (sin freeform de desarrollador, sin Shizuku):
-- Pantalla dividida: `FLAG_ACTIVITY_LAUNCH_ADJACENT` funciona aunque Mosaico esté a pantalla completa
-- Flotante: `setLaunchWindowingMode(5)` (API oculta, vía HiddenApiBypass) usa las ventanas flotantes de HyperOS
-- Lo que se abre desde una mitad de la dividida cae en esa mitad: la flotante se abre primero
-- Apps `nonResizable` (ej. Brújula) ignoran el flotante y abren a pantalla completa
-- Si la app ya estaba abierta, el sistema trae su ventana existente (puede conservar su modo anterior) — por revisar
-
-Pendiente / ideas:
-- [ ] Probar en el uso diario antes de agregar la categoría HOME
-- [ ] Apps ya abiertas que no cambian de modo al abrir el escritorio
-- [ ] Barra flotante sobre las demás apps (overlay) y gestos/atajos (AccessibilityService)
-- [ ] Más adelante, si hace falta más control: Shizuku (redimensionar/mover ventanas existentes)
 
 ## glibc nativa sin root — `glibc-prueba/` (2026-10-19)
 **Contexto completo, decisiones y plan: `glibc-prueba/PROYECTO.md` — empezar por su sección "Para retomar"**

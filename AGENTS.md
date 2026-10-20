@@ -1,6 +1,6 @@
 # Contexto para agentes (Claude Code, agy)
 
-Proyecto: Linux real (Arch ARM con glibc propia, sin root ni proot) dentro de una app de Android, con escritorio sway por GPU. Teléfono: Redmi 15 5G (HyperOS 3, Android 16, bootloader bloqueado). Hay un segundo proyecto menor, `mosaico/` (launcher), y el registro del debloat en `debloat/`.
+Proyecto: Linux real (Arch ARM con glibc propia, sin root ni proot) dentro de una app de Android, con escritorio sway por GPU. Teléfono: Redmi 15 5G (HyperOS 3, Android 16, bootloader bloqueado). Además está el registro del debloat en `debloat/`.
 
 ## Leer primero
 1. `NOTAS.md` — bitácora por sesión; el plan vigente está en "Siguiente sesión (Nª)" (el número más alto).

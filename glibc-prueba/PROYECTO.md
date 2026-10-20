@@ -4,7 +4,7 @@ Documento de contexto del proyecto. Resume la idea, las decisiones tomadas (y po
 
 ## Objetivo principal
 
-Que el teléfono (Redmi 15 5G, HyperOS, **sin root**) sea a la vez Android y un **Linux real y totalmente modificable**: programas de Arch Linux ARM sin recompilar corriendo nativos (glibc propia dentro de una app normal, sin proot ni emulación), con un **escritorio Wayland mínimo y modificable, tipo Hyprland adaptado al celular**, y **aceleración por GPU** (Turnip en la Adreno 619). Sin perder lo de Android que importa (apps bancarias chilenas, Play Store, cámara, pagos) y todo reversible: es una app, se desinstala y el teléfono queda igual. Más adelante: integrarlo con Mosaico (cada ventana Linux como ventana Android) y, si se puede, Steam.
+Que el teléfono (Redmi 15 5G, HyperOS, **sin root**) sea a la vez Android y un **Linux real y totalmente modificable**: programas de Arch Linux ARM sin recompilar corriendo nativos (glibc propia dentro de una app normal, sin proot ni emulación), con un **escritorio Wayland mínimo y modificable, tipo Hyprland adaptado al celular**, y **aceleración por GPU** (Turnip en la Adreno 619). Sin perder lo de Android que importa (apps bancarias chilenas, Play Store, cámara, pagos) y todo reversible: es una app, se desinstala y el teléfono queda igual. Más adelante, si se puede, Steam.
 
 ## Para retomar (estado al 2026-10-20, 20ª sesión)
 
@@ -118,7 +118,7 @@ Lo que lo frenaba, en orden:
 - Antes: pasa semáforos, se relanza, descarga su actualización por HTTPS; lo detienen **gtk2** (`steam/compilar-gtk2.sh` → `/opt/gtk2`, gcc 15 necesita `-std=gnu17` y errores nuevos apagados) y la pantalla X (`XOpenDisplay failed`). Faltan fuentes de la UI de actualización (`m_FontFileRegular`) y el locale `en_US.UTF-8` (menor).
 
 **10ª sesión (2026-10-19):**
-- ✅ **Menús GTK dentro de sway funcionan** (gtk3-widget-factory: el desplegable abre como popup, la opción elegida queda). sway resuelve los popups de sus clientes: los popups del anfitrión solo hacen falta para clientes directos (hoy no se usan; volverán con Mosaico) → bajan a pendiente menor.
+- ✅ **Menús GTK dentro de sway funcionan** (gtk3-widget-factory: el desplegable abre como popup, la opción elegida queda). sway resuelve los popups de sus clientes: los popups del anfitrión solo hacen falta para clientes directos (hoy no se usan) → bajan a pendiente menor.
 - **Las apps GTK se caían con el primer ícono**: gdk-pixbuf 2.44 carga imágenes con glycin 2.2, que corre cada cargador dentro de `bwrap`. bwrap muere leyendo `/proc/sys/kernel/overflowuid` (SELinux) con un mensaje que la detección de glycin (`check_bwrap_syscalls_blocked`: SIGSYS o "Creating new namespace failed"...) no reconoce → cree que bwrap sirve y todo cargador "exited early". Arreglo: `GLYCIN_DISABLE_SANDBOX=i-know-the-risks` (ese texto exacto) en `TerminalService.entorno()` y en `scripts/wl.sh`. **Aplica al reinstalar la app** (sway actual no lo tiene: a mano, `env GLYCIN_DISABLE_SANDBOX=i-know-the-risks <app>`). Alternativa más general (no hecha): /proc sintético para `overflowuid` en el parche 0006, así bwrap fallaría en `unshare` con un error que glycin sí reconoce.
 - `scripts/wl.sh`: `WL_T=<segundos>` cambia el tiempo límite (5 por defecto; pacman necesita más). Instalado `gtk3-demos` (gtk3-widget-factory, gtk3-demo) para probar.
 - ✅ **Ventanas que no caben, achicadas (commit `2b86426`, app reinstalada y probada)**. gtk3-widget-factory pide mínimo 1393×740 lógicos y el tile mide 428×844: sway (como en el PC) mostraba solo la esquina de arriba a la izquierda. Ahora se dibuja entera a escala `min(tile/mínimo)` (≈0,31), centrada en su tile.
@@ -175,7 +175,7 @@ Lo que lo frenaba, en orden:
 1. **Ojo: el usuario suele estar usando el teléfono.** `scripts/correr.sh`, `correr-wl.sh` y `adb install -r` cierran sway y todo lo abierto: avisar antes. Para mirar sin cerrar nada: `adb exec-out screencap -p` y `adb shell "run-as dev.ben4shot.glibcprueba.sdk36 cat files/archlinux/tmp/sway.log"`.
 2. ~~Cursor más grande~~: el usuario dice que está bien. ~~Portapapeles Android ↔ Linux~~ ✅ (8ª sesión).
 3. ~~¿sway se bloquea en segundo plano?~~ No (9ª sesión); frame callbacks sin ventana ✅; estirado al abrir ✅; barra inferior solo con teclado (normal).
-4. ~~Menús dentro de sway~~ ✅ y ventanas que no caben achicadas ✅ (10ª sesión). Ventana principal que no cabe → flotante: el usuario decidió dejarlo como está (11ª sesión). Menor, para clientes directos/Mosaico: popups xdg y `wl_subcompositor` en el anfitrión: hoy `xdg_surface.get_popup` se cierra al pedirse (menús GTK/Qt no andan) y libdecor pide `wl_subcompositor` para las decoraciones.
+4. ~~Menús dentro de sway~~ ✅ y ventanas que no caben achicadas ✅ (10ª sesión). Ventana principal que no cabe → flotante: el usuario decidió dejarlo como está (11ª sesión). Menor, para clientes directos: popups xdg y `wl_subcompositor` en el anfitrión: hoy `xdg_surface.get_popup` se cierra al pedirse (menús GTK/Qt no andan) y libdecor pide `wl_subcompositor` para las decoraciones.
 5. ~~Escala y opacidad~~: el usuario dice que están bien.
 6. **← siguiente (22ª → 23ª), en el Redmi:** ver NOTAS.md "Siguiente sesión (23ª)".
    **Hecho en la 22ª: ✅ OpenGL por GPU para Firefox y Steam** (`mesa-gl/`). Causa de las ventanas negras: bajo `drisw` (el camino sin DRM: EGL Wayland swrast y GLX sin DRI3) `zink_flush_frontbuffer` no hace nada si el buffer no es una swapchain de kopper, y llvmpipe en cambio entrega el cuadro por `put_image` de su displaytarget. Parche **`mesa-gl/parches/0001-drisw-zink-readback`** (`frontends/dri/drisw.c`): si el driver es Zink, `drisw_present_texture` mapea la textura (`PIPE_MAP_READ`) y llama `put_image2` (`DRISW_NO_READBACK=1` lo apaga). GL de Mesa 26.2.5 propio en **`~/mesa-gl`** (`mesa-gl/compilar-mesa-gl.sh`: EGL+GLX+glvnd, gallium `zink,softpipe`, sin LLVM, ~1100 pasos; mismo árbol `~/src/mesa-26.2.5`, carpeta `build-gl`); el mesa de Arch queda intacto (glvnd carga `libEGL_mesa.so.0`/`libGLX_mesa.so.0` por nombre → `LD_LIBRARY_PATH`). **`con-gpu <programa>`** (`/usr/local/bin`) pone `LD_LIBRARY_PATH=~/mesa-gl/lib GALLIUM_DRIVER=zink`, turnip-x11 y quita `LD_PRELOAD` (egl-zink); `firefox` (envoltorio + `~/.local/share/applications/firefox.desktop` propio, el de Arch llama a `/usr/lib/firefox/firefox`) agrega `MOZ_WEBRENDER=1` (sin eso elige WebRender Software: ve el dispositivo como software; `MOZ_ACCELERATED=1` no sirve); `steam.sh` usa `con-gpu`. Instalar: `scripts/subir-mesa-gl.sh`. Medido: es2gears negro sin el parche / visible con él (Turnip cargado, ~4 % CPU); glxgears "Accelerated: yes", ~36 fps a pantalla completa (X11: put_image por el socket); **Firefox con YouTube: hilo `Renderer` 36 % contra 117 % + `SwComposite` 32 % con WebRender Software**, memoria igual (782/841 MB); **Steam se ve** (antes negro), proceso GPU de CEF con Turnip, biblioteca quieta 11 % de un núcleo en total. Lo que queda de CPU en `Renderer` es la copia del cuadro (leer de la GPU + memcpy al `wl_shm`).
@@ -241,7 +241,7 @@ Lo que lo frenaba, en orden:
 5. **Xwayland** (apps X11; Steam lo necesita).
 6. **Steam**: revisar el cliente oficial para ARM que menciona el usuario; si no sirve, FEX-Emu (ver abajo).
 7. Binarios estáticos (cargarlos en espacio de usuario desde `execve`).
-8. Integración con Mosaico: cada ventana Linux = ventana Android (recientes, dividida, flotante). El usuario anotó que más adelante se puede saltar el `SurfaceView`.
+8. Cada ventana Linux = ventana Android (recientes, dividida, flotante). El usuario anotó que más adelante se puede saltar el `SurfaceView`.
 9. Menores: `/dev/shm` es carpeta en disco (¿memfd?); re-ejecutar `instalar-arch.sh` desde cero para validar el bootstrap con todos los arreglos.
 
 ### Compatibilidad completa (lista de la 7ª sesión, de más a menos impacto)
@@ -254,7 +254,7 @@ Lo que lo frenaba, en orden:
 7. Teclado de Android de verdad: `text-input-v3` ↔ `InputConnection` (autocorrector, predicción).
 8. Hardware sintético: batería (`BatteryManager`), red (`getifaddrs`/netlink), sensores.
 9. Mantener la glibc al día (rebase de los parches con cada glibc de Arch ARM).
-10. x86 (Steam) con FEX. 11. Mosaico.
+10. x86 (Steam) con FEX.
 12. **Mandos** (agregado el 2026-10-19, faltaba): sin root no hay `/dev/input` ni `uinput` → SDL y Wine no ven mandos. Opciones: shim `LD_PRELOAD` que finja `/dev/input/eventX` leyendo de un socket de la app (como `evshim` de GameNative), o backend propio para SDL y para Wine (winebus/XInput).
 
 ### Jugar: qué tan posible es (análisis del 2026-10-19, sin probar)
@@ -361,14 +361,13 @@ Si fuera solo por gusto, se reemplazaría HyperOS. No se hace porque se perderí
 
 Relación con los otros frentes del repo (ver `../NOTAS.md`):
 - **Debloat** (`../debloat/`): ya hecho, por ADB y reversible.
-- **Mosaico** (`../mosaico/`): launcher estilo Hyprland (escritorios, mosaico de ventanas, barra tipo waybar, buscador tipo rofi). Las ventanas de los programas Linux deberían integrarse ahí como ventanas Android normales.
 
 ## Qué se espera
 
 - Correr binarios **glibc reales** de Arch Linux ARM tal cual vienen (`pacman`-like), a **velocidad nativa**.
 - **Sin root, sin proot, sin emulación, sin Termux.** El usuario no quiere Termux ni proot: los considera "no reales".
 - Procesos hijos, hilos, señales, pipes, servicios de usuario: todo lo que es espacio de usuario.
-- Gráficos acelerados por GPU (Vulkan/OpenGL) y apps gráficas Linux (Wayland), integradas como ventanas Android (recientes, pantalla dividida, flotante, Mosaico).
+- Gráficos acelerados por GPU (Vulkan/OpenGL) y apps gráficas Linux (Wayland), integradas como ventanas Android (recientes, pantalla dividida, flotante).
 - Todo reversible: es una app, se desinstala y el teléfono queda igual.
 
 ### Qué queda fuera (límites duros sin root)
@@ -402,7 +401,6 @@ Relación con los otros frentes del repo (ver `../NOTAS.md`):
 2. **No Termux / proot.** Termux no es emulado (binarios ARM nativos sobre Bionic), pero el usuario quiere glibc real. proot intercepta syscalls con ptrace: lento en disco/procesos.
 3. **No reemplazar Android** (postmarketOS, Droidian): se pierden los bancos, y el Redmi 15 es muy nuevo (no hay ports).
 4. **Camino elegido: glibc nativa dentro de una app normal**, con una glibc propia parchada (ver Arquitectura).
-5. Para Mosaico (manejo de ventanas existentes) la opción sin root es **Shizuku** (permisos de ADB para la app; se reinicia tras cada reinicio del teléfono vía Depuración inalámbrica). Aún no se instala.
 
 ## Lo que se probó (y funcionó)
 
@@ -525,7 +523,7 @@ Una app ("contenedor" de Linux) con:
 6. **Gráficos**:
    - **Mesa Turnip** (soporta Adreno 619) compilado contra la glibc, usando `/dev/kgsl-3d0` → Vulkan; OpenGL vía Zink.
    - **Compositor Wayland dentro de la app** (wlroots o Smithay) que dibuja en superficies Android.
-   - Meta: cada ventana Linux = una ventana/actividad Android independiente → aparece en recientes, pantalla dividida, flotante y en Mosaico.
+   - Meta: cada ventana Linux = una ventana/actividad Android independiente → aparece en recientes, pantalla dividida y flotante.
 
 Antecedente útil para ver qué parches hacen falta: el proyecto **glibc-packages** de la comunidad Termux (glibc nativa en Android con prefijo propio, sin traducción de rutas).
 
@@ -539,7 +537,6 @@ Antecedente útil para ver qué parches hacen falta: el proyecto **glibc-package
 3. ✅ Terminal dentro de la app (ver "Para retomar"), con DNS de Android en `/etc/resolv.conf` y servicio en primer plano.
 4. Binarios estáticos/static-pie: cargarlos en espacio de usuario desde `execve` (mapear segmentos, armar pila y auxv, saltar al punto de entrada).
 5. ✅ Compositor Wayland (anfitrión propio + sway anidado, ver "Para retomar"). Siguiente: Turnip + `vkcube`, cuadros por GPU (dmabuf/AHardwareBuffer), mejoras de entrada.
-6. Integración con Mosaico.
 
 ## Archivos
 
