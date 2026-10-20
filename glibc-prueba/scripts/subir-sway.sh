@@ -12,7 +12,7 @@ adb shell "run-as $PKG mkdir -p $C/sway $C/waybar $C/fuzzel $C/kitty $C/starship
 adb shell "run-as $PKG sh -c '[ -e $C/sway/config.anterior ] || cp $C/sway/config $C/sway/config.anterior 2>/dev/null || true'"
 copiar() { adb push "$1" /data/local/tmp/ >/dev/null
            adb shell "run-as $PKG cp /data/local/tmp/$(basename $1) $2 && rm /data/local/tmp/$(basename $1)"; }
-for f in sway/config sway/opacidad.py sway/nucleos.py sway/ventanas.sh sway/escritorio-vacio.sh sway/atajos.sh; do copiar $f $C/sway/; done
+for f in sway/config sway/opacidad.py sway/nucleos.py sway/ventanas.sh sway/escritorio-vacio.sh sway/atajos.sh sway/limpiar-tmp.py; do copiar $f $C/sway/; done
 copiar sway/waybar/config.jsonc $C/waybar/
 copiar sway/waybar/style.css $C/waybar/
 copiar sway/fuzzel/fuzzel.ini $C/fuzzel/

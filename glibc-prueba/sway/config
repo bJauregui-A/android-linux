@@ -41,6 +41,8 @@ bar {
 }
 
 ### Al arrancar
+# /dev/shm y sockets sway-ipc de sesiones anteriores (en disco: no los borra el reinicio)
+exec python $s/limpiar-tmp.py > /tmp/limpiar-tmp.log 2>&1
 # dwindle de Hyprland: alterna la división según la forma de la ventana
 exec autotiling
 # opacidad de HyDE: activa 0.90, inactivas 0.75, pantalla completa 1
