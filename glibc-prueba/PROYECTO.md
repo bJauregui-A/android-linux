@@ -10,7 +10,7 @@ Que el teléfono (Redmi 15 5G, HyperOS, **sin root**) sea a la vez Android y un 
 
 | Frente | Estado |
 |---|---|
-| glibc propia + pacman de Arch ARM | ✅ (parches `0001`–`0017`: 0017 `/proc/bus/pci/devices` vacío (libpci salía con exit(1): gfxtest de Firefox, proceso GPU de Chromium/Steam), 0016 SIGSYS de filtros del programa a su manejador (sandbox de Firefox), 0015 capa seccomp propia (Go, `syscall()` crudos), 0014 `sigall_set` sin SIGSYS (Android 11), 0012 mprotect PROT_EXEC → copia anónima (Wine), 0008 SysV IPC, 0009 relanzar /proc/self/exe, 0010 set*id sin cambio, 0011 get_robust_list + sockets largos) |
+| glibc propia + pacman de Arch ARM | ✅ (parches `0001`–`0018`: 0018 manejador de SIGSYS en pila propia por hilo (la traducción usa ~29 KB y desbordaba la pila de señales de Go: `agy` se caía), 0017 `/proc/bus/pci/devices` vacío (libpci salía con exit(1): gfxtest de Firefox, proceso GPU de Chromium/Steam), 0016 SIGSYS de filtros del programa a su manejador (sandbox de Firefox), 0015 capa seccomp propia (Go, `syscall()` crudos), 0014 `sigall_set` sin SIGSYS (Android 11), 0012 mprotect PROT_EXEC → copia anónima (Wine), 0008 SysV IPC, 0009 relanzar /proc/self/exe, 0010 set*id sin cambio, 0011 get_robust_list + sockets largos) |
 | App única "Arch Linux" | ✅ abre el escritorio y arranca sway sola; terminal de rescate en el atajo del ícono |
 | Terminal | ✅ bash interactivo, htop, nano, `sudo pacman` (foot dentro de sway, o la de rescate) |
 | Wayland | ✅ anfitrión propio + sway 1.12 anidado + foot; tacto, scroll, teclado latam; keymap xkb para clientes directos |

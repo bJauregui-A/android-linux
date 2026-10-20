@@ -1,0 +1,128 @@
+--- a/malloc/thread-freeres.c	2026-10-20 12:32:21.341677156 -0300
++++ b/malloc/thread-freeres.c	2026-10-20 12:32:21.345862356 -0300
+@@ -35,6 +35,11 @@
+   call_function_static_weak (__res_thread_freeres);
+   call_function_static_weak (__glibc_tls_internal_free);
+   call_function_static_weak (__libc_dlerror_result_free);
++#ifdef __aarch64__
++  /* Android: pila de la capa seccomp propia (android-path.c).  */
++  extern void __android_sigsys_thread_freeres (void) attribute_hidden;
++  __android_sigsys_thread_freeres ();
++#endif
+ 
+   /* This should come last because it shuts down malloc for this
+      thread and the other shutdown functions might well call free.  */
+--- a/sysdeps/unix/sysv/linux/aarch64/android-path.c	2026-10-20 12:32:21.341505688 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/android-path.c	2026-10-20 12:32:21.344554105 -0300
+@@ -1345,6 +1345,7 @@
+ # include <sys/ucontext.h>
+ # include <tls.h>
+ # include <sys/prctl.h>
++# include <sys/mman.h>
+ # include <linux/audit.h>
+ # include <linux/filter.h>
+ # include <linux/seccomp.h>
+@@ -1468,6 +1469,81 @@
+   return __android_path_syscall (nr, r[0], r[1], r[2], r[3], r[4], r[5]);
+ }
+ 
++/* La traducción usa ~29 KB de pila y la pila de señales de Go mide 32 KB y
++   sale de su heap: pasarse pisaba sus goroutines ("unknown pc" en el GC).
++   trampa corre en una pila propia de cada hilo (se libera al terminar el
++   hilo); el manejador bloquea las demás señales, así ninguna anidada pisa el
++   marco que dejó el kernel en la pila de señales.  */
++# define PILA_SIGSYS (256 * 1024)
++# define GUARDA 4096
++static __thread char *pila_sigsys attribute_tls_model_ie;
++
++/* en_pila (arg, f, tope): f (arg) con la pila en tope.  */
++long int __android_en_pila (void *, long int (*) (void *), void *)
++  attribute_hidden;
++asm (".text\n"
++     ".p2align 2\n"
++     ".hidden __android_en_pila\n"
++     ".type __android_en_pila, %function\n"
++     "__android_en_pila:\n"
++     "	stp x29, x30, [sp, #-16]!\n"
++     "	mov x29, sp\n"
++     "	mov sp, x2\n"
++     "	blr x1\n"
++     "	mov sp, x29\n"
++     "	ldp x29, x30, [sp], #16\n"
++     "	ret\n"
++     ".size __android_en_pila, .-__android_en_pila\n");
++
++struct llamada
++{
++  long int nr;
++  unsigned long long int *r;
++  sigset_t *mascara;
++};
++
++static long int
++trampa_llamada (void *p)
++{
++  struct llamada *l = p;
++  return trampa (l->nr, l->r, l->mascara);
++}
++
++static long int
++trampa_en_pila (long int nr, unsigned long long int *r, sigset_t *mascara)
++{
++  struct llamada l = { nr, r, mascara };
++  /* Sin TLS (hilo de clone crudo): como antes.  */
++  if (__builtin_thread_pointer () == NULL)
++    return trampa (nr, r, mascara);
++  char *p = pila_sigsys;
++  if (p == NULL)
++    {
++      long int q = RAW (__NR_mmap, 0, GUARDA + PILA_SIGSYS,
++			PROT_READ | PROT_WRITE,
++			MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
++      if ((unsigned long int) q > -4096UL)
++	return trampa (nr, r, mascara);
++      RAW (__NR_mprotect, q, GUARDA, PROT_NONE);
++      pila_sigsys = p = (char *) q;
++    }
++  char *sp = __builtin_frame_address (0);
++  if (sp >= p && sp < p + GUARDA + PILA_SIGSYS)
++    return trampa (nr, r, mascara);
++  return __android_en_pila (&l, trampa_llamada, p + GUARDA + PILA_SIGSYS);
++}
++
++void
++__android_sigsys_thread_freeres (void)
++{
++  char *p = pila_sigsys;
++  if (p != NULL)
++    {
++      pila_sigsys = NULL;
++      RAW (__NR_munmap, p, GUARDA + PILA_SIGSYS);
++    }
++}
++
+ static void
+ sigsys_handler (int sig, siginfo_t *si, void *ctx)
+ {
+@@ -1505,7 +1581,8 @@
+   unsigned long long int *r = ((ucontext_t *) ctx)->uc_mcontext.regs;
+   if (si->si_errno == DATOS)
+     {
+-      r[0] = trampa (si->si_syscall, r, &((ucontext_t *) ctx)->uc_sigmask);
++      r[0] = trampa_en_pila (si->si_syscall, r,
++			     &((ucontext_t *) ctx)->uc_sigmask);
+       if (debug_sigsys)
+ 	{
+ 	  char msg[80], *q = msg;
+@@ -1597,6 +1674,11 @@
+ {
+   struct sigaction sa = { .sa_sigaction = sigsys_handler,
+ 			  .sa_flags = SA_SIGINFO | SA_ONSTACK | SA_NODEFER };
++  /* Todas bloqueadas menos SIGSYS (ver trampa_en_pila).  */
++  for (size_t i = 0; i < sizeof sa.sa_mask.__val / sizeof sa.sa_mask.__val[0];
++       i++)
++    sa.sa_mask.__val[i] = ~0UL;
++  sa.sa_mask.__val[0] &= ~(1UL << (SIGSYS - 1));
+   __libc_sigaction (SIGSYS, &sa, NULL);
+   init ();
+   if (state == 2 && !sin_seccomp)
