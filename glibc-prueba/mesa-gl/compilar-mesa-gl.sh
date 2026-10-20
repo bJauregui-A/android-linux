@@ -5,6 +5,7 @@
 # Se copia a ~/compilar-mesa-gl.sh (y parches/ a ~/src/parches-gl) y se corre desde la terminal de la app:
 #   bash ~/compilar-mesa-gl.sh > ~/mesa-gl.log 2>&1 &
 # Parche 0001: Zink bajo drisw (sin kopper) lee el cuadro y lo entrega con put_image (antes: ventanas negras).
+# Parche 0002: en X11 el cuadro va por un segmento SysV shm (XShmPutImage) y no por el socket (glxgears 58→98 fps).
 set -e
 V=26.2.5
 PREFIX=${PREFIX:-$HOME/mesa-gl}

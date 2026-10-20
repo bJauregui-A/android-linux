@@ -1,0 +1,105 @@
+--- a/src/gallium/frontends/dri/drisw.c
++++ b/src/gallium/frontends/dri/drisw.c
+@@ -44,6 +44,7 @@
+ #include "dri_query_renderer.h"
+ 
+ #include "util/libsync.h"
++#include <sys/shm.h>
+ 
+ #ifdef HAVE_LIBDRM
+ #include <xf86drm.h>
+@@ -187,6 +188,38 @@
+    put_image_shm(drawable, shmid, shmaddr, offset, offset_x, x, y, width, height, stride);
+ }
+ 
++/* Shm segment of at least SIZE bytes for the readback, or NULL if the loader
++ * can't take shm images (EGL on wayland) or SysV shm doesn't work.
++ */
++static char *
++readback_shm(struct dri_drawable *drawable, size_t size)
++{
++   const __DRIswrastLoaderExtension *loader = drawable->screen->swrast_loader;
++
++   if (drawable->readback_no_shm ||
++       loader->base.version < 4 || !loader->putImageShm)
++      return NULL;
++   if (drawable->readback_shm && drawable->readback_shm_size >= size)
++      return drawable->readback_shm;
++
++   if (drawable->readback_shm)
++      shmdt(drawable->readback_shm);
++   drawable->readback_shm = NULL;
++
++   int shmid = shmget(IPC_PRIVATE, size, IPC_CREAT | 0600);
++   char *addr = shmid < 0 ? (char *) -1 : shmat(shmid, NULL, 0);
++   if (shmid >= 0)
++      shmctl(shmid, IPC_RMID, NULL);
++   if (addr == (char *) -1) {
++      drawable->readback_no_shm = true;
++      return NULL;
++   }
++   drawable->readback_shm = addr;
++   drawable->readback_shm_size = size;
++   drawable->readback_shmid = shmid;
++   return addr;
++}
++
+ static inline void
+ drisw_present_texture(struct pipe_context *pipe, struct dri_drawable *drawable,
+                       struct pipe_resource *ptex, unsigned nrects, struct pipe_box *sub_box)
+@@ -205,8 +238,16 @@
+                                    0, 0, ptex->width0, ptex->height0,
+                                    &transfer);
+       if (map) {
+-         put_image2(drawable, map, 0, 0, ptex->width0, ptex->height0,
+-                    transfer->stride);
++         size_t size = (size_t) transfer->stride * ptex->height0;
++         char *shm = readback_shm(drawable, size);
++         if (shm) {
++            memcpy(shm, map, size);
++            put_image_shm(drawable, drawable->readback_shmid, shm, 0, 0,
++                          0, 0, ptex->width0, ptex->height0, transfer->stride);
++         } else {
++            put_image2(drawable, map, 0, 0, ptex->width0, ptex->height0,
++                       transfer->stride);
++         }
+          pipe_texture_unmap(pipe, transfer);
+       }
+       return;
+--- a/src/gallium/frontends/dri/dri_drawable.h
++++ b/src/gallium/frontends/dri/dri_drawable.h
+@@ -92,6 +92,13 @@
+    /* generic for swrast */
+    unsigned buffer_age;
+ 
++   /* zink under drisw: SysV shm segment the back buffer is read into, so
++    * the X server gets it with XShmPutImage instead of over the socket */
++   char *readback_shm;
++   size_t readback_shm_size;
++   int readback_shmid;
++   bool readback_no_shm;
++
+    /* kopper */
+    struct kopper_loader_info info;
+    struct dri_image   *image; //texture_from_pixmap
+--- a/src/gallium/frontends/dri/dri_drawable.c
++++ b/src/gallium/frontends/dri/dri_drawable.c
+@@ -38,6 +38,8 @@
+ #include "util/u_memory.h"
+ #include "util/u_inlines.h"
+ 
++#include <sys/shm.h>
++
+ #include "state_tracker/st_context.h"
+ 
+ static uint32_t drifb_ID = 0;
+@@ -217,6 +219,9 @@
+    if (screen->type == DRI_SCREEN_KOPPER)
+       kopper_destroy_drawable(drawable);
+ 
++   if (drawable->readback_shm)
++      shmdt(drawable->readback_shm);
++
+    FREE(drawable->damage_rects);
+    FREE(drawable);
+ }
