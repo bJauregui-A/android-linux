@@ -9,7 +9,7 @@ android {
 
     defaultConfig {
         applicationId = "dev.ben4shot.glibcprueba"
-        minSdk = 31
+        minSdk = 30
         versionCode = 1
         versionName = "0.1"
         ndk { abiFilters += "arm64-v8a" }

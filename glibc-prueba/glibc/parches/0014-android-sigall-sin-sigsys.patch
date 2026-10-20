@@ -1,0 +1,17 @@
+--- a/sysdeps/unix/sysv/linux/internal-signals.h
++++ b/sysdeps/unix/sysv/linux/internal-signals.h
+@@ -64,8 +64,13 @@
+   __sigdelset (set, SIGSYS);
+ }
+ 
++/* Android: sin SIGSYS (ver clear_internal_signals).  pthread_create bloquea
++   todo antes de clone3, y el seccomp de Android 11 no tiene clone3: con
++   SIGSYS bloqueada el proceso moría en vez de recibir ENOSYS y usar clone.  */
+ static const internal_sigset_t sigall_set = {
+-   .__val = {[0 ...  __NSIG_WORDS-1 ] =  -1 }
++   .__val = {[0 ...  __NSIG_WORDS-1 ] =  -1,
++	     [(SIGSYS - 1) / (8 * sizeof (unsigned long int))]
++	       = ~(1UL << ((SIGSYS - 1) % (8 * sizeof (unsigned long int)))) }
+ };
+ 
+ /* Obtain and change blocked signals, including internal glibc ones.  */

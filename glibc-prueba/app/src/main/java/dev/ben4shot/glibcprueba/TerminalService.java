@@ -235,7 +235,26 @@ public class TerminalService extends Service implements TerminalSessionClient {
         // EGL en Wayland sin dmabuf: Zink + kopper por wl_shm (turnip/egl-zink.c)
         if (new File(home, "turnip/lib/libegl-zink.so").exists())
             env.add("LD_PRELOAD=/home/user/turnip/lib/libegl-zink.so");
+        entornoPropio(new File(home, ".config/entorno-android"), env);
         return env;
+    }
+
+    // Variables propias de cada dispositivo (VAR=valor por línea, # comenta): reemplazan a
+    // las de arriba. Ej. la tablet (Adreno 610): Turnip anuncia Vulkan 1.0 y wlroots pide 1.1.
+    private static void entornoPropio(File f, List<String> env) {
+        if (!f.exists()) return;
+        try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(f))) {
+            for (String l; (l = r.readLine()) != null; ) {
+                l = l.trim();
+                int i = l.indexOf('=');
+                if (l.startsWith("#") || i <= 0) continue;
+                String clave = l.substring(0, i + 1);
+                env.removeIf(v -> v.startsWith(clave));
+                env.add(l);
+            }
+        } catch (java.io.IOException e) {
+            Log.e(TAG, "entorno-android", e);
+        }
     }
 
     // DNS de la red activa de Android; 1.1.1.1 de respaldo (glibc usa hasta 3).

@@ -8,14 +8,18 @@ set $mod Mod4
 set $term kitty
 set $menu fuzzel
 set $s ~/.config/sway
+# Escala del teléfono (~400 dpi); cada dispositivo puede cambiarla en config.d
+# (ej. la tablet: set $escala 1.5).  Va antes de usarla: xwayland_scale solo se
+# fija al arrancar y con otro valor cada recarga daría error.
+set $escala 2.5
+include ~/.config/sway/config.d/*
 
 ### Pantalla y entrada
-# ~400 dpi
-output * scale 2.5
+output * scale $escala
 output * bg #000000 solid_color
 # Xwayland en píxeles reales: las apps X11 se ven nítidas y se agrandan solas
 # (Steam: -forcedesktopscaling). Parche sway 0002; solo al arrancar sway.
-xwayland_scale 2.5
+xwayland_scale $escala
 # misma distribución que app/.../Distribucion.java (wayland/generar-teclado.sh)
 input type:keyboard xkb_layout latam
 focus_follows_mouse yes

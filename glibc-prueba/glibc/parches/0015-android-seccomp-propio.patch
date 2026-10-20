@@ -1,0 +1,295 @@
+--- a/sysdeps/unix/sysv/linux/aarch64/android-path.c
++++ b/sysdeps/unix/sysv/linux/aarch64/android-path.c
+@@ -40,6 +40,8 @@
+ #define KEY_FAKEROOT_LEN 15
+ #define KEY_DEBUG "GLIBC_DEBUG_SIGSYS="
+ #define KEY_DEBUG_LEN 19
++#define KEY_SECCOMP "GLIBC_SECCOMP="
++#define KEY_SECCOMP_LEN 14
+ 
+ /* 0 sin iniciar, 1 sin prefijo (no se traduce nada), 2 con prefijo.  */
+ static int state;
+@@ -54,13 +56,45 @@
+ static size_t rlen;
+ static int fakeroot;
+ static int debug_sigsys;
++static int sin_seccomp;		/* GLIBC_SECCOMP=0: sin la capa propia */
+ #define PREFIX (env_prefix + KEY_LEN)
+ #define LOADER (env_loader + KEY_LEN)
+ 
++/* Capa seccomp propia (la instala libc, ver __android_sigsys_init): las
++   syscalls de esta lista hechas fuera de la glibc (Go, syscall(), FEX)
++   llegan como SIGSYS y el manejador las pasa por la traducción.  Las de aquí
++   llevan MARCA en el 6º argumento, que ninguna de ellas usa, y el filtro las
++   deja pasar.  rt_sigaction solo se atrapa para SIGSYS.  */
++#define MARCA 0x2a64696f72646e61L /* "android*" */
++static const unsigned short int trampas[] =
++{
++  __NR_chdir, __NR_chroot, __NR_truncate, __NR_statfs, __NR_acct,
++  __NR_setxattr, __NR_lsetxattr, __NR_getxattr, __NR_lgetxattr,
++  __NR_listxattr, __NR_llistxattr, __NR_removexattr, __NR_lremovexattr,
++  __NR_openat, __NR_openat2, __NR_faccessat, __NR_faccessat2,
++  __NR_newfstatat, __NR_statx, __NR_mkdirat, __NR_mknodat, __NR_unlinkat,
++  __NR_fchmodat, __NR_fchmodat2, __NR_fchownat, __NR_utimensat,
++  __NR_inotify_add_watch, __NR_name_to_handle_at, __NR_linkat,
++  __NR_renameat, __NR_renameat2, __NR_symlinkat, __NR_readlinkat,
++  __NR_getcwd, __NR_bind, __NR_connect, __NR_execve, __NR_execveat,
++  __NR_rt_sigprocmask, __NR_rt_sigaction
++};
++
++static inline int
++marcar (long int nr)
++{
++  for (size_t i = 0; i < sizeof trampas / sizeof trampas[0]; i++)
++    if (trampas[i] == nr)
++      return 1;
++  return 0;
++}
++
+ static inline long int
+ raw (long int nr, long int a0, long int a1, long int a2, long int a3,
+      long int a4, long int a5)
+ {
++  if (marcar (nr))
++    a5 = MARCA;
+   return INTERNAL_SYSCALL_RAW_DIRECT (nr, 6, a0, a1, a2, a3, a4, a5);
+ }
+ #define RAW(nr, ...) raw_n (nr, __VA_ARGS__, 0, 0, 0, 0, 0, 0)
+@@ -122,7 +156,7 @@
+     }
+   char buf[512];
+   size_t idx = 0, np = 0, nl = 0;
+-  int mp = 1, ml = 1, mf = 1, md = 1, gotp = 0, gotl = 0;
++  int mp = 1, ml = 1, mf = 1, md = 1, ms = 1, gotp = 0, gotl = 0;
+   for (;;)
+     {
+       long int n = RAW (__NR_read, fd, buf, sizeof buf);
+@@ -134,7 +168,7 @@
+ 	  if (c == '\0')
+ 	    {
+ 	      idx = 0;
+-	      mp = ml = mf = md = 1;
++	      mp = ml = mf = md = ms = 1;
+ 	      continue;
+ 	    }
+ 	  if (idx < KEY_FAKEROOT_LEN)
+@@ -145,6 +179,10 @@
+ 	    md &= c == KEY_DEBUG[idx];
+ 	  else if (idx == KEY_DEBUG_LEN && md)
+ 	    debug_sigsys = c != '0';
++	  if (idx < KEY_SECCOMP_LEN)
++	    ms &= c == KEY_SECCOMP[idx];
++	  else if (idx == KEY_SECCOMP_LEN && ms)
++	    sin_seccomp = c == '0';
+ 	  if (idx < KEY_LEN)
+ 	    {
+ 	      mp &= c == KEY_PREFIX[idx];
+@@ -994,6 +1032,9 @@
+   init ();
+   switch (nr)
+     {
++    case __NR_rt_sigaction:
++    case __NR_rt_sigprocmask:
++      return raw (nr, a0, a1, a2, a3, a4, a5);
+     case __NR_setuid:
+     case __NR_setgid:
+     case __NR_setreuid:
+@@ -1299,6 +1340,16 @@
+ # include <signal.h>
+ # include <sys/ucontext.h>
+ # include <tls.h>
++# include <sys/prctl.h>
++# include <linux/audit.h>
++# include <linux/filter.h>
++# include <linux/seccomp.h>
++
++/* SECCOMP_RET_DATA de la capa propia: llega en si_errno del SIGSYS (el
++   seccomp de Android usa 0).  SONDA: getpid(SONDA) da -DATOS si el filtro ya
++   está (se hereda en fork y execve: se instala una sola vez por linaje).  */
++# define DATOS 0xa1d
++# define SONDA 0x5ec0a1d
+ 
+ /* El seccomp de las apps responde a las syscalls no permitidas con SIGSYS
+    (SECCOMP_RET_TRAP).  Se atrapa y la syscall devuelve ENOSYS, como en un
+@@ -1343,6 +1394,76 @@
+   return 0;
+ }
+ 
++/* struct sigaction del kernel en aarch64 (sigset de 64 bits).  */
++struct k_sigaction
++{
++  void *handler;
++  unsigned long int flags;
++  void *restorer;
++  unsigned long int mask;
++};
++
++/* Syscall atrapada por la capa propia: hecha fuera de la glibc, sin MARCA.
++   r = registros del programa; mascara = la que restaura el sigreturn.  */
++static long int
++trampa (long int nr, unsigned long long int *r, sigset_t *mascara)
++{
++  switch (nr)
++    {
++    case __NR_rt_sigaction:	/* solo para SIGSYS (ver el filtro) */
++      {
++	const struct k_sigaction *ka = (const struct k_sigaction *) r[1];
++	struct k_sigaction *ko = (struct k_sigaction *) r[2];
++	if (r[3] != sizeof (unsigned long int))
++	  return -EINVAL;
++	struct sigaction n = { 0 }, o;
++	if (ka != NULL)
++	  {
++	    n.sa_handler = ka->handler;
++	    n.sa_flags = ka->flags;
++	    n.sa_mask.__val[0] = ka->mask;
++	  }
++	__android_sigsys_action (ka != NULL ? &n : NULL, &o);
++	if (ko != NULL)
++	  {
++	    ko->handler = o.sa_handler;
++	    ko->flags = o.sa_flags;
++	    ko->restorer = NULL;
++	    ko->mask = o.sa_mask.__val[0];
++	  }
++	return 0;
++      }
++    case __NR_rt_sigprocmask:
++      {
++	/* Sobre la máscara que restaura el sigreturn, y nunca con SIGSYS: Go
++	   bloquea todo antes de vfork y en el hijo hace chdir/execve crudos;
++	   con SIGSYS bloqueada el kernel mataría al proceso.  */
++	if (r[3] != sizeof (unsigned long int))
++	  return -EINVAL;
++	unsigned long int *m = (unsigned long int *) mascara;
++	unsigned long int viejo = *m, nuevo = viejo;
++	if (r[1] != 0)
++	  {
++	    unsigned long int set = *(const unsigned long int *) r[1];
++	    switch (r[0])
++	      {
++	      case SIG_BLOCK: nuevo |= set; break;
++	      case SIG_UNBLOCK: nuevo &= ~set; break;
++	      case SIG_SETMASK: nuevo = set; break;
++	      default: return -EINVAL;
++	      }
++	  }
++	nuevo &= ~((1UL << (SIGSYS - 1)) | (1UL << (SIGKILL - 1))
++		   | (1UL << (SIGSTOP - 1)));
++	if (r[2] != 0)
++	  *(unsigned long int *) r[2] = viejo;
++	*m = nuevo;
++	return 0;
++      }
++    }
++  return __android_path_syscall (nr, r[0], r[1], r[2], r[3], r[4], r[5]);
++}
++
+ static void
+ sigsys_handler (int sig, siginfo_t *si, void *ctx)
+ {
+@@ -1368,6 +1489,19 @@
+       return;
+     }
+   unsigned long long int *r = ((ucontext_t *) ctx)->uc_mcontext.regs;
++  if (si->si_errno == DATOS)
++    {
++      r[0] = trampa (si->si_syscall, r, &((ucontext_t *) ctx)->uc_sigmask);
++      if (debug_sigsys)
++	{
++	  char msg[80], *q = msg;
++	  mcopy (q, "glibc: syscall ", 15);
++	  q = utoa (q + 15, si->si_syscall);
++	  mcopy (q, " atrapada por la capa propia\n", 29);
++	  RAW (__NR_write, 2, msg, q + 29 - msg);
++	}
++      return;
++    }
+   if (si->si_syscall == __NR_get_robust_list)
+     {
+       r[0] = get_robust_list (r[0], (void **) r[1], (size_t *) r[2]);
+@@ -1385,11 +1519,73 @@
+     }
+ }
+ 
++/* Filtro de la capa propia (ver trampas[] y MARCA): deja pasar lo marcado y
++   atrapa el resto de las syscalls de la lista; rt_sigaction solo para SIGSYS,
++   así un programa que la llame crudo no le quita el manejador a la glibc.  */
++static void
++seccomp_propio (void)
++{
++  if (RAW (__NR_getpid, SONDA) == -DATOS)
++    return;
++  enum { N = sizeof trampas / sizeof trampas[0] };
++  _Static_assert (N < 200, "saltos de BPF de 8 bits");
++  struct sock_filter f[20 + N];
++  size_t n = 0;
++# define I(code, k) f[n++] = (struct sock_filter) BPF_STMT (code, k)
++# define J(k, jt, jf) \
++  f[n++] = (struct sock_filter) BPF_JUMP (BPF_JMP | BPF_JEQ | BPF_K, k, jt, jf)
++# define LD(campo) \
++  I (BPF_LD | BPF_W | BPF_ABS, offsetof (struct seccomp_data, campo))
++  LD (arch);
++  J (AUDIT_ARCH_AARCH64, 1, 0);
++  I (BPF_RET | BPF_K, SECCOMP_RET_ALLOW);
++  /* Sonda.  */
++  LD (nr);
++  J (__NR_getpid, 0, 3);
++  LD (args[0]);
++  J (SONDA, 0, 1);
++  I (BPF_RET | BPF_K, SECCOMP_RET_ERRNO | DATOS);
++  /* Con la marca (64 bits, little endian): pasa.  */
++  LD (args[5]);
++  J ((unsigned int) MARCA, 0, 3);
++  I (BPF_LD | BPF_W | BPF_ABS, offsetof (struct seccomp_data, args[5]) + 4);
++  J ((unsigned int) (MARCA >> 32), 0, 1);
++  I (BPF_RET | BPF_K, SECCOMP_RET_ALLOW);
++  LD (nr);
++  /* La lista, sin rt_sigaction (la última): cada una salta a TRAP, que
++     queda N + 2 - i instrucciones más abajo.  */
++  for (size_t i = 0; i < N - 1; i++)
++    J (trampas[i], N + 2 - i, 0);
++  J (__NR_rt_sigaction, 0, 2);
++  LD (args[0]);
++  J (SIGSYS, 1, 0);
++  I (BPF_RET | BPF_K, SECCOMP_RET_ALLOW);
++  I (BPF_RET | BPF_K, SECCOMP_RET_TRAP | DATOS);
++# undef I
++# undef J
++# undef LD
++  struct sock_fprog prog = { .len = n, .filter = f };
++  long int r = RAW (__NR_prctl, PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
++  if (r == 0)
++    r = RAW (__NR_seccomp, SECCOMP_SET_MODE_FILTER, 0, &prog);
++  if (r != 0 && debug_sigsys)
++    {
++      char msg[64], *q = msg;
++      mcopy (q, "glibc: capa seccomp: error ", 27);
++      q = utoa (q + 27, -r);
++      *q++ = '\n';
++      RAW (__NR_write, 2, msg, q - msg);
++    }
++}
++
+ void
+ __android_sigsys_init (void)
+ {
+   struct sigaction sa = { .sa_sigaction = sigsys_handler,
+ 			  .sa_flags = SA_SIGINFO | SA_ONSTACK | SA_NODEFER };
+   __libc_sigaction (SIGSYS, &sa, NULL);
++  init ();
++  if (state == 2 && !sin_seccomp)
++    seccomp_propio ();
+ }
+ #endif
+--- a/sysdeps/unix/sysv/linux/aarch64/sysdep.h
++++ b/sysdeps/unix/sysv/linux/aarch64/sysdep.h
+@@ -216,6 +216,8 @@
+     case __NR_getresuid: case __NR_getresgid: case __NR_fchown:
+     case __NR_setuid: case __NR_setgid: case __NR_setreuid:
+     case __NR_setregid: case __NR_setresuid: case __NR_setresgid:
++    /* Para que salgan con la marca de la capa seccomp propia.  */
++    case __NR_rt_sigaction: case __NR_rt_sigprocmask:
+       return 1;
+     }
+   return 0;

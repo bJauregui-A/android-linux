@@ -472,7 +472,14 @@ struct ahb
   AHardwareBuffer *ahb;
   int fd;			/* dmabuf del AHardwareBuffer */
   int w, h, refs;		/* refs: el recurso + cada transacción que lo nombra */
+  int stride;			/* en bytes */
+  bool bgra;
 };
+
+/* La capa ASurfaceControl necesita Android 12 (API 31).  Antes, el
+   AHardwareBuffer se lee por CPU y se copia a la ventana (mostrar_ahb_cpu):
+   los clientes (Turnip, sway por GPU) no se enteran.  */
+static bool con_capa;
 
 /* Una transacción en vuelo; al completarse vuelve al hilo del anfitrión.  */
 struct transaccion
@@ -581,7 +588,8 @@ ahb_crear (struct wl_client *c, struct wl_resource *r, uint32_t id,
     .width = w, .height = h, .layers = 1,
     .usage = AHARDWAREBUFFER_USAGE_GPU_COLOR_OUTPUT
 	     | AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE
-	     | AHARDWAREBUFFER_USAGE_COMPOSER_OVERLAY,
+	     | (con_capa ? AHARDWAREBUFFER_USAGE_COMPOSER_OVERLAY
+			 : AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN),
   };
   switch (formato)
     {
@@ -609,6 +617,8 @@ ahb_crear (struct wl_client *c, struct wl_resource *r, uint32_t id,
   b->w = w;
   b->h = h;
   b->refs = 1;
+  b->stride = desc.stride * 4;
+  b->bgra = formato == DRM_ARGB8888 || formato == DRM_XRGB8888;
   wl_resource_set_user_data (res, b);
   android_ahb_v1_send_listo (r, res, fd, 0, desc.stride * 4);
 }
@@ -775,6 +785,37 @@ presentar (struct ahb *b, struct wl_list *cbs)
   ASurfaceTransaction_apply (tr);
   ASurfaceTransaction_delete (tr);
   pthread_mutex_unlock (&mtx);
+}
+
+/* Sin capa (Android < 12): espera el render (fence implícita del dmabuf),
+   lo lee con AHardwareBuffer_lock y lo copia a la ventana.  El buffer se
+   libera al volver: la ventana se queda con la copia.  */
+static void
+mostrar_ahb_cpu (struct superficie *s, struct ahb *b)
+{
+  struct pollfd pfd = { b->fd, POLLIN, 0 };
+  poll (&pfd, 1, 100);
+  void *datos = NULL;
+  if (AHardwareBuffer_lock (b->ahb, AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN, -1, NULL,
+			    &datos) != 0)
+    {
+      LOG ("AHardwareBuffer_lock falló");
+      return;
+    }
+  s->buf_w = b->w;
+  s->buf_h = b->h;
+  pthread_mutex_lock (&mtx);
+  soltar_retenido ();
+  fuente.datos = datos;
+  fuente.stride = b->stride;
+  fuente.w = b->w;
+  fuente.h = b->h;
+  fuente.bgra = b->bgra;
+  fuente.fd = -1;
+  mostrar ();
+  fuente.datos = NULL;
+  pthread_mutex_unlock (&mtx);
+  AHardwareBuffer_unlock (b->ahb, NULL);
 }
 
 /* Cambio de camino (shm/dmabuf por CPU <-> capa): uno oculta al otro.  */
@@ -944,7 +985,9 @@ surface_commit (struct wl_client *c, struct wl_resource *r)
 	    }
 	  struct dmabuf *dmabuf = shm == NULL ? dmabuf_de (buffer) : NULL;
 	  struct ahb *ahb = shm == NULL && dmabuf == NULL ? ahb_de (buffer) : NULL;
-	  if (ahb != NULL && s == foco)
+	  if (ahb != NULL && s == foco && !con_capa)
+	    mostrar_ahb_cpu (s, ahb);	/* y se libera abajo */
+	  else if (ahb != NULL && s == foco)
 	    {
 	      /* Lo libera SurfaceFlinger; los frame callbacks, al mostrarse.  */
 	      s->buf_w = ahb->w;
@@ -1814,6 +1857,8 @@ Java_dev_ben4shot_glibcprueba_Wayland_iniciar (JNIEnv *env, jclass cls, jstring 
   wl_global_create (display, &wl_output_interface, 4, NULL, output_bind);
   wl_global_create (display, &zwp_pointer_gestures_v1_interface, 3, NULL, gestos_bind);
   wl_global_create (display, &zwp_linux_dmabuf_v1_interface, 3, NULL, linux_dmabuf_bind);
+  if (__builtin_available (android 31, *))
+    con_capa = true;
   wl_global_create (display, &android_ahb_v1_interface, 1, NULL, android_ahb_bind);
 
   wl_list_init (&para_vsync);
@@ -1855,7 +1900,8 @@ Java_dev_ben4shot_glibcprueba_Wayland_ventana (JNIEnv *env, jclass cls, jobject 
       mm_w = mmw;
       mm_h = mmh;
       mostrar ();
-      capa = ASurfaceControl_createFromWindow (ventana, "linux");
+      if (con_capa)
+	capa = ASurfaceControl_createFromWindow (ventana, "linux");
       if (capa != NULL && en_pantalla != NULL)
 	{
 	  /* Volver a mostrar el último cuadro (SurfaceFlinger aún lo retiene).  */
