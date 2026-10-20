@@ -14,7 +14,7 @@
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 
     <application
-        android:label="Arch Linux">
+        android:label="${etiqueta}">
         <!-- Pruebas por ADB (scripts/correr.sh la abre por nombre) -->
         <activity
             android:name=".MainActivity"
@@ -36,7 +36,7 @@
         <activity
             android:name=".WaylandActivity"
             android:exported="true"
-            android:label="Arch Linux"
+            android:label="${etiqueta}"
             android:theme="@android:style/Theme.Material.NoActionBar"
             android:windowSoftInputMode="adjustResize"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density"

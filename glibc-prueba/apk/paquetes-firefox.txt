@@ -1,0 +1,2 @@
+# Firefox con GPU (mesa-gl/firefox); ffmpeg para AAC/H.264
+firefox ffmpeg

@@ -1,0 +1,5 @@
+# Juegos (opcional, se pregunta al empezar): Lutris y lo que pide Steam ARM64
+lutris sdl2-compat openal libva libvdpau libice libsm libnm libibus nspr nss unzip
+# gtk2 de /opt/gtk2 (steam/compilar-gtk2.sh)
+at-spi2-core fontconfig freetype2 harfbuzz libxcomposite libxcursor libxdamage libxfixes
+libxi libxinerama libxrandr libxrender

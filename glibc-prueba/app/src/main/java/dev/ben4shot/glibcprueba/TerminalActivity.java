@@ -92,7 +92,7 @@ public class TerminalActivity extends Activity implements TerminalViewClient {
     private LinearLayout filaTeclas() {
         LinearLayout fila = new LinearLayout(this);
         fila.setBackgroundColor(0xff1a1a1a);
-        String[] teclas = {"ESC", "TAB", "CTRL", "ALT", "-", "/", "|", "~", "←", "↓", "↑", "→"};
+        String[] teclas = {"⌨", "ESC", "TAB", "CTRL", "ALT", "-", "/", "|", "~", "←", "↓", "↑", "→"};
         for (String t : teclas) {
             TextView b = new TextView(this);
             b.setText(t);
@@ -110,6 +110,10 @@ public class TerminalActivity extends Activity implements TerminalViewClient {
 
     private void tecla(String t) {
         switch (t) {
+            case "⌨":
+                vista.requestFocus();
+                getSystemService(InputMethodManager.class).showSoftInput(vista, 0);
+                return;
             case "CTRL": ctrl = !ctrl; marcar(); return;
             case "ALT": alt = !alt; marcar(); return;
             case "ESC": codigo(KeyEvent.KEYCODE_ESCAPE); return;

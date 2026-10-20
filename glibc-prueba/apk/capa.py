@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+"""Arma capa.tar: lo nuestro encima del Arch de la app (lo que hoy suben los scripts subir-*.sh).
+
+  - lo compilado en el teléfono (trabajo/compilados.tar, de apk/traer-compilados.sh):
+    ~/wlroots, ~/sway, ~/turnip, ~/turnip-x11, ~/mesa-gl y /opt/gtk2; los enlaces con la
+    ruta del prefijo de origen pasan al de destino
+  - configs y scripts del repo en su lugar (sway/, android/, mesa-gl/, steam/, lutris/...)
+  - el instalador (apk/) en /usr/local/share/arch-android
+
+Uso: capa.py --prefix /data/user/0/<paquete>/files/archlinux --compilados trabajo/compilados.tar --out capa.tar
+"""
+import argparse
+import io
+import os
+import re
+import subprocess
+import tarfile
+import tempfile
+import time
+
+RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # glibc-prueba/
+H = "home/user"
+D = "usr/local/share/arch-android"
+STRIP = os.path.expanduser("~/Android/Sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip")
+# Respaldos de bibliotecas (libgallium...so.0001) y documentación: no van
+SALTAR = re.compile(r"\.\d{4}$|/share/(gtk-doc|man|doc)/")
+
+# (origen en el repo, destino en el prefijo, modo)
+ARCHIVOS = [
+    ("sway/config", f"{H}/.config/sway/config", 0o644),
+    ("sway/opacidad.py", f"{H}/.config/sway/opacidad.py", 0o644),
+    ("sway/nucleos.py", f"{H}/.config/sway/nucleos.py", 0o644),
+    ("sway/ventanas.sh", f"{H}/.config/sway/ventanas.sh", 0o755),
+    ("sway/escritorio-vacio.sh", f"{H}/.config/sway/escritorio-vacio.sh", 0o755),
+    ("sway/atajos.sh", f"{H}/.config/sway/atajos.sh", 0o755),
+    ("sway/waybar/config.jsonc", f"{H}/.config/waybar/config.jsonc", 0o644),
+    ("sway/waybar/style.css", f"{H}/.config/waybar/style.css", 0o644),
+    ("sway/fuzzel/fuzzel.ini", f"{H}/.config/fuzzel/fuzzel.ini", 0o644),
+    ("sway/kitty/kitty.conf", f"{H}/.config/kitty/kitty.conf", 0o644),
+    ("sway/kitty/hyde.conf", f"{H}/.config/kitty/hyde.conf", 0o644),
+    ("sway/kitty/theme.conf", f"{H}/.config/kitty/theme.conf", 0o644),
+    ("sway/zsh/.zshrc", f"{H}/.zshrc", 0o644),
+    ("sway/zsh/starship.toml", f"{H}/.config/starship/starship.toml", 0o644),
+    ("sway/pipewire/10-android.conf", f"{H}/.config/pipewire/pipewire.conf.d/10-android.conf", 0o644),
+    ("sway/dbus-sesion.sh", "etc/profile.d/dbus-sesion.sh", 0o644),
+    ("android/android-abrir", "usr/local/bin/android-abrir", 0o755),
+    ("android/xdg-open", "usr/local/bin/xdg-open", 0o755),
+    ("android/android-notificaciones", "usr/local/bin/android-notificaciones", 0o755),
+    ("android/org.freedesktop.Notifications.service",
+     f"{H}/.local/share/dbus-1/services/org.freedesktop.Notifications.service", 0o644),
+    ("android/android-abrir.desktop", f"{H}/.local/share/applications/android-abrir.desktop", 0o644),
+    ("android/mimeapps.list", f"{H}/.config/mimeapps.list", 0o644),
+    ("mesa-gl/con-gpu", "usr/local/bin/con-gpu", 0o755),
+    ("mesa-gl/firefox", "usr/local/bin/firefox", 0o755),
+    ("scripts/adb-conectar", f"{H}/.local/bin/adb-conectar", 0o755),
+    ("apk/sshd-android.conf", "etc/ssh/sshd_config.d/10-android.conf", 0o644),
+    # instalador (primer arranque) y lo que instala después
+    ("apk/primer-arranque.sh", f"{D}/primer-arranque.sh", 0o755),
+    ("apk/juegos.sh", f"{D}/juegos.sh", 0o755),
+    ("apk/paquetes-escritorio.txt", f"{D}/paquetes-escritorio.txt", 0o644),
+    ("apk/paquetes-firefox.txt", f"{D}/paquetes-firefox.txt", 0o644),
+    ("apk/paquetes-desarrollo.txt", f"{D}/paquetes-desarrollo.txt", 0o644),
+    ("apk/paquetes-juegos.txt", f"{D}/paquetes-juegos.txt", 0o644),
+    ("steam/steam.sh", f"{D}/juegos/steam", 0o755),
+    ("steam/lsof.py", f"{D}/juegos/lsof", 0o755),
+    ("steam/proton-directo/compatibilitytool.vdf", f"{D}/juegos/proton-directo/compatibilitytool.vdf", 0o644),
+    ("steam/proton-directo/toolmanifest.vdf", f"{D}/juegos/proton-directo/toolmanifest.vdf", 0o644),
+    ("steam/proton-directo/proton", f"{D}/juegos/proton-directo/proton", 0o755),
+    ("lutris/wine", f"{D}/juegos/lutris/wine", 0o755),
+    ("lutris/wine.yml", f"{D}/juegos/lutris/wine.yml", 0o644),
+    ("lutris/system.yml", f"{D}/juegos/lutris/system.yml", 0o644),
+]
+# Con @P@ = <paquete>/files/archlinux (como scripts/subir-android.sh)
+PLANTILLAS = [
+    ("android/android-prefijo.conf", "etc/ld.so.conf.d/android-prefijo.conf"),
+    ("android/firefox-android.js", f"{D}/firefox-android.js"),
+]
+
+
+class Salida:
+    def __init__(self, path):
+        self.t = tarfile.open(path, "w", format=tarfile.GNU_FORMAT)
+        self.dirs = set()
+
+    def directorio(self, nombre):
+        partes = nombre.strip("/").split("/")
+        for i in range(1, len(partes) + 1):
+            d = "/".join(partes[:i])
+            if d and d not in self.dirs:
+                ti = tarfile.TarInfo(d)
+                ti.type, ti.mode = tarfile.DIRTYPE, 0o755
+                self.t.addfile(ti)
+                self.dirs.add(d)
+
+    def archivo(self, nombre, data, modo):
+        self.directorio(os.path.dirname(nombre))
+        ti = tarfile.TarInfo(nombre)
+        ti.size, ti.mode, ti.mtime = len(data), modo, int(time.time())
+        self.t.addfile(ti, io.BytesIO(data))
+
+
+def sin_simbolos(data):
+    """Los .so compilados en el teléfono traen depuración (Turnip: 80 MB → ~15 MB)."""
+    if not data.startswith(b"\x7fELF"):
+        return data
+    with tempfile.NamedTemporaryFile() as f:
+        f.write(data)
+        f.flush()
+        subprocess.run([STRIP, "--strip-unneeded", f.name], check=True)
+        return open(f.name, "rb").read()
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--prefix", required=True)
+    ap.add_argument("--compilados", required=True)
+    ap.add_argument("--out", required=True)
+    a = ap.parse_args()
+    prefijo = a.prefix.rstrip("/")
+    paquete = prefijo.split("/")[-3]  # /data/user/0/<paquete>/files/archlinux
+    out = Salida(a.out)
+
+    # Compilados: enlaces absolutos al prefijo del teléfono de origen → al nuevo
+    origen = re.compile(r"^/data/(?:user/0|data)/[^/]+/files/archlinux")
+    with tarfile.open(a.compilados) as t:
+        for m in t:
+            m = m.replace(uid=0, gid=0, uname="", gname="", deep=False)
+            nombre = m.name.removeprefix("./")
+            if not nombre or SALTAR.search(nombre):
+                continue
+            m.name = nombre
+            if m.isdir():
+                if nombre.rstrip("/") not in out.dirs:
+                    out.directorio(nombre)
+                continue
+            out.directorio(os.path.dirname(nombre))
+            if m.issym():
+                out.t.addfile(m.replace(linkname=origen.sub(prefijo, m.linkname), deep=False))
+            elif m.isfile():
+                data = sin_simbolos(t.extractfile(m).read())
+                m.size = len(data)
+                out.t.addfile(m, io.BytesIO(data))
+
+    for src, dst, modo in ARCHIVOS:
+        out.archivo(dst, open(os.path.join(RAIZ, src), "rb").read(), modo)
+    for src, dst in PLANTILLAS:
+        texto = open(os.path.join(RAIZ, src)).read().replace("@P@", f"{paquete}/files/archlinux")
+        out.archivo(dst, texto.encode(), 0o644)
+    out.t.close()
+
+
+if __name__ == "__main__":
+    main()

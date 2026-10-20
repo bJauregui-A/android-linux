@@ -13,6 +13,7 @@ android {
         versionCode = 1
         versionName = "0.1"
         ndk { abiFilters += "arm64-v8a" }
+        manifestPlaceholders["etiqueta"] = "Arch Linux"
     }
 
     // Anfitrión Wayland (necesita wayland/compilar.sh antes)
@@ -36,6 +37,22 @@ android {
             applicationIdSuffix = ".sdk36"
             targetSdk = 36
         }
+        // Igual a sdk36 pero aparte: para probar el APK autoinstalable desde cero sin tocar el Arch de la sdk36
+        create("prueba") {
+            dimension = "target"
+            applicationIdSuffix = ".prueba"
+            targetSdk = 36
+            manifestPlaceholders["etiqueta"] = "Arch (prueba)"
+        }
+    }
+
+    // APK autoinstalable: assets de apk/armar.sh <variante> (base.tgz, capa.tgz, instalar.sh).
+    // Sin comprimir: instalar.sh los lee directo del APK por offset (Instalador.java).
+    sourceSets {
+        for (v in listOf("sdk28", "sdk36", "prueba")) getByName(v).assets.srcDir("../trabajo/assets-$v")
+    }
+    androidResources {
+        noCompress += "tgz"
     }
 
     compileOptions {

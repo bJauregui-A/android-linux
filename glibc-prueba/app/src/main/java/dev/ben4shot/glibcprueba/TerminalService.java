@@ -37,6 +37,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
 
     private final IBinder binder = new Local();
     private TerminalSession sesion;
+    private boolean instalando; // la sesión es el instalador (Instalador.java)
     private TerminalView vista; // la de la activity visible, o null
     private Process sway;
     private List<String> entornoSway; // el de sway, para los programas que se le conectan
@@ -106,6 +107,18 @@ public class TerminalService extends Service implements TerminalSessionClient {
     // (el pty lo abre libtermux.so, que es bionic), el resto ya va dentro del prefijo.
     private TerminalSession crearSesion() {
         File prefijo = new File(getFilesDir(), PREFIJO);
+        if (Instalador.falta(this) && Instalador.disponible(this)) {
+            new File(prefijo, "etc").mkdirs();
+            List<String> env = entorno(prefijo, cargador());
+            try {
+                String[] args = Instalador.comando(this, env);
+                instalando = true;
+                return new TerminalSession("/system/bin/sh", getFilesDir().getAbsolutePath(), args,
+                        env.toArray(new String[0]), 5000, this);
+            } catch (java.io.IOException e) {
+                Log.e(TAG, "instalador", e);
+            }
+        }
         if (!new File(prefijo, "usr/bin/bash").exists()) {
             String msg = "falta " + prefijo + " (instalar con scripts/instalar-arch.sh)";
             return new TerminalSession("/system/bin/sh", getFilesDir().getAbsolutePath(),
@@ -122,6 +135,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
     // sway en segundo plano (bash -l para tomar /etc/profile), log en /tmp/sway.log.
     synchronized void iniciarSway() {
         if (sway != null && sway.isAlive()) return;
+        if (Instalador.falta(this) && Instalador.disponible(this)) return; // primero el instalador
         File prefijo = new File(getFilesDir(), PREFIJO);
         if (!new File(prefijo, "usr/bin/sway").exists()) {
             Log.e(TAG, "falta sway en " + prefijo);
@@ -197,6 +211,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
         Wayland.iniciar(this);
         Abrir.iniciar(this);
         Notificar.iniciar(this);
+        PuertoAdb.iniciar(this);
         List<String> env = new ArrayList<>(List.of(
                 "GLIBC_PREFIX=" + prefijo,
                 "GLIBC_LOADER=" + cargador,
@@ -264,10 +279,10 @@ public class TerminalService extends Service implements TerminalSessionClient {
     }
 
     // DNS de la red activa de Android; 1.1.1.1 de respaldo (glibc usa hasta 3).
-    private void escribirResolvConf(File prefijo) {
+    static List<String> servidoresDns(android.content.Context c) {
         List<String> servidores = new ArrayList<>();
         try {
-            ConnectivityManager cm = getSystemService(ConnectivityManager.class);
+            ConnectivityManager cm = c.getSystemService(ConnectivityManager.class);
             LinkProperties lp = cm.getLinkProperties(cm.getActiveNetwork());
             if (lp != null) {
                 for (InetAddress a : lp.getDnsServers()) {
@@ -278,6 +293,11 @@ public class TerminalService extends Service implements TerminalSessionClient {
             Log.e(TAG, "DNS de Android", e);
         }
         servidores.add("1.1.1.1");
+        return servidores;
+    }
+
+    private void escribirResolvConf(File prefijo) {
+        List<String> servidores = servidoresDns(this);
         StringBuilder sb = new StringBuilder("# escrito por la app al abrir la terminal\n");
         for (String s : servidores) sb.append("nameserver ").append(s).append('\n');
         File f = new File(prefijo, "etc/resolv.conf");
@@ -312,6 +332,17 @@ public class TerminalService extends Service implements TerminalSessionClient {
 
     @Override
     public void onSessionFinished(TerminalSession s) {
+        if (instalando && s == sesion) {
+            // Terminó el instalador: si quedó todo, al escritorio (la terminal vuelve a ser bash)
+            instalando = false;
+            sesion = null;
+            if (!Instalador.falta(this)) {
+                if (vista != null && vista.getContext() instanceof android.app.Activity)
+                    ((android.app.Activity) vista.getContext()).finish();
+                startActivity(new Intent(this, WaylandActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                return;
+            }
+        }
         if (vista != null) vista.onScreenUpdated();
         else terminarSiNoQuedaNada();
     }

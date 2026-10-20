@@ -1,35 +1,93 @@
 #!/usr/bin/env python3
+"""Conecta el adb de Arch a la depuración inalámbrica del propio teléfono (uid shell, sin PC).
+
+El puerto cambia cada vez que se activa la depuración inalámbrica. Se busca en orden:
+  1. /tmp/adb-puerto: lo escribe la app (PuertoAdb.java) con el mDNS de Android
+  2. `adb mdns services` (dentro de la app hoy no ve nada: sin netlink no hay interfaces)
+  3. escaneo de 127.0.0.1:30000-65535 (último recurso)
+Si no está vinculado: con el diálogo "Vincular con código" abierto, la app deja el puerto en
+/tmp/adb-emparejar y este script pide el código.
+"""
+import os
 import socket
 import subprocess
 import sys
 
-def is_connected():
+
+def adb(*args, timeout=5):
     try:
-        res = subprocess.run(["adb", "get-state"], capture_output=True, text=True, timeout=2)
-        return res.stdout.strip() == "device"
-    except Exception:
+        r = subprocess.run(["adb", *args], capture_output=True, text=True, timeout=timeout)
+        return r.stdout + r.stderr
+    except Exception as e:
+        return str(e)
+
+
+def conectado():
+    return "\tdevice" in adb("devices")
+
+
+def conectar(puerto):
+    salida = adb("connect", f"127.0.0.1:{puerto}")
+    if "connected to" in salida and "failed" not in salida and conectado():
+        print(f"Conectado a 127.0.0.1:{puerto}")
+        return True
+    return False
+
+
+def leer(archivo):
+    try:
+        return int(open(archivo).read().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def mdns():
+    for linea in adb("mdns", "services").splitlines():
+        partes = linea.split()
+        if len(partes) >= 3 and partes[1].startswith("_adb-tls-connect"):
+            yield int(partes[2].rsplit(":", 1)[1])
+
+
+def escanear():
+    print("Buscando el puerto en 127.0.0.1 (escaneo)...")
+    for p in range(30000, 65536):
+        with socket.socket() as s:
+            s.settimeout(0.01)
+            if s.connect_ex(("127.0.0.1", p)) == 0:
+                yield p
+
+
+def emparejar():
+    p = leer("/tmp/adb-emparejar")
+    if p is None:
+        print("No está vinculado (o la depuración inalámbrica está apagada). En Android:\n"
+              "  Opciones de desarrollador → Depuración inalámbrica → Vincular con código\n"
+              "y con el diálogo abierto, vuelve a correr adb-conectar.")
         return False
+    codigo = input(f"Código de vinculación que muestra Android (puerto {p}): ").strip()
+    print(adb("pair", f"127.0.0.1:{p}", codigo, timeout=15).strip())
+    return True
 
-if is_connected():
-    print("ADB ya está conectado y listo.")
-    sys.exit(0)
 
-print("Buscando puerto de depuración inalámbrica en 127.0.0.1...")
-for p in range(30000, 46000):
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.settimeout(0.01)
-    if s.connect_ex(("127.0.0.1", p)) == 0:
-        s.close()
-        try:
-            res = subprocess.run(["adb", "connect", f"127.0.0.1:{p}"], capture_output=True, text=True, timeout=3)
-            if "connected to" in res.stdout:
-                print(f"Conectado exitosamente al puerto {p}")
-                sys.exit(0)
-        except Exception:
-            pass
-    else:
-        s.close()
+def main():
+    if conectado():
+        print("ADB ya está conectado.")
+        return 0
+    p = leer("/tmp/adb-puerto")
+    if p and conectar(p):
+        return 0
+    if any(conectar(p) for p in mdns()):
+        return 0
+    # Antes de escanear: si hay diálogo de vinculación abierto, vincular primero
+    if os.path.exists("/tmp/adb-emparejar") and emparejar():
+        p = leer("/tmp/adb-puerto")
+        if p and conectar(p):
+            return 0
+    if any(conectar(p) for p in escanear()):
+        return 0
+    emparejar()
+    return 1
 
-if not is_connected():
-    print("No se encontró ningún puerto de depuración abierto. Asegúrate de tener activada la 'Depuración inalámbrica' en Opciones de desarrollador.")
-    sys.exit(1)
+
+if __name__ == "__main__":
+    sys.exit(main())

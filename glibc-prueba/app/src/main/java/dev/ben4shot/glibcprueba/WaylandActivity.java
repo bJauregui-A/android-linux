@@ -111,6 +111,12 @@ public class WaylandActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // Primera vez (APK autoinstalable): la terminal con el instalador; al terminar vuelve aquí
+        if (Instalador.falta(this) && Instalador.disponible(this)) {
+            startActivity(new Intent(this, TerminalActivity.class));
+            finish();
+            return;
+        }
         Wayland.iniciar(this);
         // El escritorio arranca solo: el servicio lanza sway si no está corriendo
         startForegroundService(new Intent(this, TerminalService.class).setAction(TerminalService.SWAY));
