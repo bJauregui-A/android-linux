@@ -27,10 +27,6 @@ final class Instalador {
         return !new File(e, "instalando").exists() && new File(p, "usr/bin/sway").exists();
     }
 
-    static boolean falta(Context c) {
-        return !instalada(c);
-    }
-
     // Este APK trae el instalador (los assets los arma apk/armar.sh; sin ellos, solo el cargador).
     static boolean disponible(Context c) {
         try (InputStream i = c.getAssets().open("instalar.sh")) {

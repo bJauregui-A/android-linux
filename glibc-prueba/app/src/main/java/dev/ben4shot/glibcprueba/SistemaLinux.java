@@ -11,6 +11,7 @@ import java.util.List;
 // Arch usa el prefijo histórico "archlinux" y tiene instalador en el APK.
 final class SistemaLinux {
     static final String ARCH = "arch-arm64";
+    private static final AdaptadorInstalacion ADAPTADOR_ARCH = new AdaptadorArchArm64();
 
     static final class Opcion {
         final String id;
@@ -31,8 +32,9 @@ final class SistemaLinux {
     private SistemaLinux() { }
 
     static List<Opcion> opciones(Context c) {
-        boolean instalado = Instalador.instalada(c);
-        boolean instalable = Instalador.disponible(c);
+        AdaptadorInstalacion arch = adaptador(ARCH);
+        boolean instalado = arch.instalada(c);
+        boolean instalable = arch.instaladorDisponible(c);
         String estadoArch = instalado ? "Instalado" : instalable ? "Listo para instalar" : "No instalado";
         return Arrays.asList(
                 new Opcion(ARCH, "Arch Linux ARM", "ARM64", estadoArch, instalado || instalable),
@@ -58,12 +60,20 @@ final class SistemaLinux {
     }
 
     static File raiz(Context c, String id) {
-        if (ARCH.equals(id)) return new File(c.getFilesDir(), TerminalService.PREFIJO);
-        throw new IllegalArgumentException("Sin rootfs registrado para " + id);
+        return adaptador(id).raiz(c);
     }
 
     static File raizSeleccionada(Context c) {
-        return raiz(c, seleccionado(c));
+        return adaptadorSeleccionado(c).raiz(c);
+    }
+
+    static AdaptadorInstalacion adaptador(String id) {
+        if (ARCH.equals(id)) return ADAPTADOR_ARCH;
+        throw new IllegalArgumentException("Sin adaptador registrado para " + id);
+    }
+
+    static AdaptadorInstalacion adaptadorSeleccionado(Context c) {
+        return adaptador(seleccionado(c));
     }
 
     private static SharedPreferences preferencias(Context c) {

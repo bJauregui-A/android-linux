@@ -154,8 +154,10 @@ el ID elegido y solo habilita Arch, si existe o el APK trae su instalador.
    Arch + sway como ruta funcional.
 2. **Orquestador común (en curso):** todos los perfiles pasan por `sesion-android`; ya centraliza
    bus D-Bus de sesión, entorno de activación, readiness/logs básicos y cierre de los servicios que
-   inicia. Siguiente: quitar rutas Arch/sway de `TerminalService` mediante adaptadores de
-   instalación. La validación en teléfono queda para cuando el usuario la solicite.
+   inicia. `AdaptadorInstalacion` ya separa rootfs, cargador, usuario/shell, instalación y entorno
+   gráfico específico de Arch del ciclo de vida Android. Siguiente: describir requisitos y estados
+   de readiness de cada proveedor/perfil, y quitar las suposiciones restantes antes de registrar
+   otra distribución.
 3. **Sesión estándar:** evaluar `systemd --user` bajo Android; resolver D-Bus de sistema/sesión y
    portales a través de servicios reales o adaptadores explícitos. No declarar Plasma compatible
    hasta cumplir sus readiness checks.

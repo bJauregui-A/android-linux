@@ -31,7 +31,6 @@ import java.util.List;
 public class TerminalService extends Service implements TerminalSessionClient {
     private static final String TAG = "TERMINAL";
     private static final String CANAL = "terminal";
-    static final String PREFIJO = "archlinux";
     // WaylandActivity lo manda al abrirse: arrancar la sesión gráfica si no está corriendo.
     static final String INICIAR_ESCRITORIO = "dev.ben4shot.glibcprueba.INICIAR_ESCRITORIO";
 
@@ -57,7 +56,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
                 new Intent(this, WaylandActivity.class), PendingIntent.FLAG_IMMUTABLE);
         Notification n = new Notification.Builder(this, CANAL)
                 .setSmallIcon(android.R.drawable.ic_menu_manage)
-                .setContentTitle("Arch Linux")
+                .setContentTitle("Linux")
                 .setContentText("procesos Linux corriendo")
                 .setContentIntent(abrir)
                 .setOngoing(true)
@@ -103,15 +102,16 @@ public class TerminalService extends Service implements TerminalSessionClient {
         stopSelf();
     }
 
-    // bash -l de Arch a través del cargador de la glibc propia; el cwd es la ruta real
+    // Shell de la instalación seleccionada a través de su cargador; el cwd es la ruta real
     // (el pty lo abre libtermux.so, que es bionic), el resto ya va dentro del prefijo.
     private TerminalSession crearSesion() {
-        File prefijo = SistemaLinux.raizSeleccionada(this);
-        if (Instalador.falta(this) && Instalador.disponible(this)) {
+        AdaptadorInstalacion instalacion = SistemaLinux.adaptadorSeleccionado(this);
+        File prefijo = instalacion.raiz(this);
+        if (!instalacion.instalada(this) && instalacion.instaladorDisponible(this)) {
             new File(prefijo, "etc").mkdirs();
-            List<String> env = entorno(prefijo, cargador());
+            List<String> env = entorno(instalacion, prefijo);
             try {
-                String[] args = Instalador.comando(this, env);
+                String[] args = instalacion.comandoInstalacion(this, env);
                 instalando = true;
                 return new TerminalSession("/system/bin/sh", getFilesDir().getAbsolutePath(), args,
                         env.toArray(new String[0]), 5000, this);
@@ -120,29 +120,32 @@ public class TerminalService extends Service implements TerminalSessionClient {
             }
         }
         if (!new File(prefijo, "usr/bin/bash").exists()) {
-            String msg = "falta " + prefijo + " (instalar con scripts/instalar-arch.sh)";
+            String msg = "falta la shell en " + prefijo + " (revisar la instalación Linux)";
             return new TerminalSession("/system/bin/sh", getFilesDir().getAbsolutePath(),
                     new String[]{"sh", "-c", "echo '" + msg + "'"}, new String[0], 2000, this);
         }
-        String cargador = cargador();
-        List<String> env = entorno(prefijo, cargador);
+        String cargador = instalacion.cargador(this);
+        List<String> env = entorno(instalacion, prefijo);
         agregarBusSesion(env, prefijo);
-        String[] args = {"libldp.so", "/usr/bin/bash", "-l"};
-        Log.i(TAG, "sesión: " + cargador + " /usr/bin/bash -l, prefijo " + prefijo);
-        return new TerminalSession(cargador, new File(prefijo, home()).getAbsolutePath(), args,
+        String[] args = instalacion.comandoTerminal(this);
+        Log.i(TAG, "sesión Linux: " + instalacion.id() + ", cargador " + cargador + ", prefijo " + prefijo);
+        return new TerminalSession(cargador, new File(prefijo, instalacion.home(prefijo)).getAbsolutePath(), args,
                 env.toArray(new String[0]), 5000, this);
     }
 
     // Sesión Wayland en segundo plano (bash -l para tomar /etc/profile).
     synchronized void iniciarEscritorio() {
         if (escritorio != null && escritorio.isAlive()) return;
-        if (Instalador.falta(this) && Instalador.disponible(this)) return; // primero el instalador
-        File prefijo = SistemaLinux.raizSeleccionada(this);
-        entornoEscritorio = entorno(prefijo, cargador());
+        AdaptadorInstalacion instalacion = SistemaLinux.adaptadorSeleccionado(this);
+        if (!instalacion.instalada(this) && instalacion.instaladorDisponible(this)) return; // primero el instalador
+        File prefijo = instalacion.raiz(this);
+        String cargador = instalacion.cargador(this);
+        entornoEscritorio = entorno(instalacion, prefijo);
         // HyperOS ata algunos hilos de la app (el que lanza procesos) a los núcleos grandes
         // (6-7) y todo lo de sway lo heredaba: juego, Wine, Xwayland y Steam en 2 núcleos.
         // El cpuset top-app permite 0-7; abrir la afinidad no necesita root.
-        String cmd = "taskset -p ff $$ > /dev/null 2>&1; exec sway > /tmp/sway.log 2>&1";
+        String cmd = "taskset -p ff $$ > /dev/null 2>&1; exec "
+                + instalacion.comandoRescate() + " > /tmp/rescate-grafico.log 2>&1";
         if (BuildConfig.DIAGNOSTICO) {
             try {
                 File script = new File(prefijo, "tmp/probar-escritorios.sh");
@@ -160,13 +163,13 @@ public class TerminalService extends Service implements TerminalSessionClient {
         }
         // El selector administra el compositor elegido y usa sway como rescate. El perfil
         // gráfico crea un bus D-Bus efímero que comparte con el compositor y sus servicios.
-        String sesion = "/usr/local/bin/sesion-android";
+        String sesion = instalacion.supervisorSesion();
         boolean supervisor = !BuildConfig.DIAGNOSTICO && new File(prefijo, sesion).exists();
         ProcessBuilder pb;
         if (supervisor) {
-            pb = new ProcessBuilder(cargador(), "/usr/bin/bash", "-lc", "exec " + sesion);
+            pb = new ProcessBuilder(cargador, "/usr/bin/bash", "-lc", "exec " + sesion);
         } else {
-            pb = new ProcessBuilder(cargador(), "/usr/bin/bash", "-lc", cmd);
+            pb = new ProcessBuilder(cargador, "/usr/bin/bash", "-lc", cmd);
         }
         entornoLinux(pb);
         if (supervisor) pb.environment().put("ARCH_ANDROID_SESSION_START", "1");
@@ -197,7 +200,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
 
     // El supervisor publica el socket real del compositor anidado tras detectarlo.
     private String waylandDisplay() {
-        File f = new File(SistemaLinux.raizSeleccionada(this), Wayland.runtimeDir().substring(1) + "/arch-android-display");
+        File f = new File(SistemaLinux.adaptadorSeleccionado(this).raiz(this), Wayland.runtimeDir().substring(1) + "/arch-android-display");
         try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(f))) {
             String s = r.readLine();
             if (s != null && s.matches("[A-Za-z0-9_.-]+")) return s;
@@ -207,8 +210,9 @@ public class TerminalService extends Service implements TerminalSessionClient {
 
     // Un programa Linux conectado al compositor elegido.
     ProcessBuilder linux(String... args) {
+        AdaptadorInstalacion instalacion = SistemaLinux.adaptadorSeleccionado(this);
         String[] todo = new String[args.length + 1];
-        todo[0] = cargador();
+        todo[0] = instalacion.cargador(this);
         System.arraycopy(args, 0, todo, 1, args.length);
         ProcessBuilder pb = new ProcessBuilder(todo);
         entornoLinux(pb);
@@ -217,13 +221,14 @@ public class TerminalService extends Service implements TerminalSessionClient {
     }
 
     private void entornoLinux(ProcessBuilder pb) {
-        pb.directory(new File(SistemaLinux.raizSeleccionada(this), home()));
+        AdaptadorInstalacion instalacion = SistemaLinux.adaptadorSeleccionado(this);
+        pb.directory(new File(instalacion.raiz(this), instalacion.home(instalacion.raiz(this))));
         pb.environment().clear();
         for (String v : entornoEscritorio) {
             int i = v.indexOf('=');
             pb.environment().put(v.substring(0, i), v.substring(i + 1));
         }
-        String bus = leerBusSesion(SistemaLinux.raizSeleccionada(this));
+        String bus = leerBusSesion(instalacion.raiz(this));
         if (bus != null) pb.environment().put("DBUS_SESSION_BUS_ADDRESS", bus);
     }
 
@@ -242,111 +247,27 @@ public class TerminalService extends Service implements TerminalSessionClient {
         }
     }
 
-    // Usuario de Linux: lo elige el instalador (primer-arranque.sh); "user" en los Arch de antes.
-    String usuario() {
-        File f = new File(SistemaLinux.raizSeleccionada(this), "var/lib/arch-android/usuario");
-        try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(f))) {
-            String u = r.readLine();
-            if (u != null && u.trim().matches("[a-z_][a-z0-9_-]*")) return u.trim();
-        } catch (java.io.IOException ignorada) {
-        }
-        return "user";
-    }
-
-    private String home() { return "/home/" + usuario(); }
-
-    // Lo compilado propio (wlroots, sway, Turnip, mesa-gl): /usr/local/<nombre> con el APK
-    // autoinstalable, ~/<nombre> si se compiló a mano en el teléfono.
-    private String propio(File prefijo, String nombre) {
-        String local = "/usr/local/" + nombre;
-        return new File(prefijo, local).isDirectory() ? local : home() + "/" + nombre;
-    }
-
-    private String cargador() {
-        return getApplicationInfo().nativeLibraryDir + "/libldp.so";
-    }
-
-    // Entorno de los procesos Linux; de paso deja listo el prefijo (DNS, sudo, Wayland).
-    private List<String> entorno(File prefijo, String cargador) {
-        File home = new File(prefijo, home());
-        if (!Instalador.falta(this)) home.mkdirs(); // al instalar lo crea primer-arranque.sh
-        // shm_open de glibc usa /dev/shm (traducido al prefijo): wlroots, foot...
-        new File(prefijo, "dev/shm").mkdirs();
+    // Entorno del host Android común a las instalaciones Linux.
+    private List<String> entorno(AdaptadorInstalacion instalacion, File prefijo) {
+        String homeLinux = instalacion.home(prefijo);
+        File home = new File(prefijo, homeLinux);
+        if (instalacion.instalada(this)) home.mkdirs(); // al instalar lo crea el adaptador
+        instalacion.preparar(this, prefijo);
         escribirResolvConf(prefijo);
-        escribirSudo(prefijo);
         Wayland.iniciar(this);
         Abrir.iniciar(this);
         Notificar.iniciar(this);
         PuertoAdb.iniciar(this);
         List<String> env = new ArrayList<>(List.of(
-                "GLIBC_PREFIX=" + prefijo,
-                "GLIBC_LOADER=" + cargador,
-                "HOME=" + home(),
-                "USER=" + usuario(),
-                "LOGNAME=" + usuario(),
-                // nombre del dispositivo por defecto al instalar (primer-arranque.sh)
                 "ANDROID_MODELO=" + Build.MODEL,
-                // kitty y foot abren $SHELL: zsh como en el PC (sway/zsh/), si está instalada
-                "SHELL=" + (new File(prefijo, "usr/bin/zsh").exists() ? "/usr/bin/zsh" : "/usr/bin/bash"),
-                "PATH=/usr/local/bin:/usr/bin",
                 "TERM=xterm-256color",
                 "COLORTERM=truecolor",
-                "LANG=C.UTF-8",
-                "ANDROID_MODELO=" + Build.MODEL,
-                "TMPDIR=/tmp",
                 "TZ=" + java.util.TimeZone.getDefault().getID(),
                 "XDG_RUNTIME_DIR=" + Wayland.runtimeDir(),
                 "WAYLAND_DISPLAY=wayland-0",
-                "WLR_NO_HARDWARE_CURSORS=1", // el anfitrión no dibuja cursor: lo pinta sway
-                // Vulkan: Turnip (KGSL) compilado en el teléfono (turnip/compilar-mesa.sh)
-                "VK_ICD_FILENAMES=" + propio(prefijo, "turnip") + "/share/vulkan/icd.d/freedreno_icd.aarch64.json",
-                // OpenGL: Zink (mesa de Arch) sobre Turnip
-                "MESA_LOADER_DRIVER_OVERRIDE=zink",
-                // gdk-pixbuf carga imágenes con glycin, que las aísla con bwrap (namespaces: no
-                // sin root). bwrap falla leyendo /proc/sys/kernel/overflowuid, glycin no reconoce
-                // ese error y las apps GTK se caen con el primer ícono. La app ya es un sandbox.
-                "GLYCIN_DISABLE_SANDBOX=i-know-the-risks",
-                // Firefox: SELinux no deja reabrir un memfd por /proc/self/fd, el proceso
-                // principal cae a /dev/shm sin sellos y los de contenido exigían F_SEAL_SHRINK
-                // ("Shared memory PlatformHandle is not safe to map", señal 11).
-                "MOZ_SHM_NO_SEALS=1",
-                // Mandos: SDL (y Wine por SDL) los busca en /dev/input (Mandos.java); por udev
-                // no los vería (Android no deja leer /sys/class/input ni los uevents).
-                "SDL_JOYSTICK_DISABLE_UDEV=1"));
-        // Escritorio por GPU: wlroots parchado (wlroots/compilar-wlroots.sh) con renderer
-        // Vulkan, buffers android-ahb-v1 hacia el anfitrión y linux-dmabuf para los clientes.
-        // Sin él, sway por CPU (pixman) y los clientes Vulkan por wl_shm.
-        String wlroots = propio(prefijo, "wlroots");
-        if (new File(prefijo, wlroots + "/lib/libwlroots-0.20.so").exists()) {
-            env.add("WLR_RENDERER=vulkan");
-            env.add("LD_LIBRARY_PATH=" + wlroots + "/lib");
-        } else {
-            env.add("WLR_RENDERER=pixman");
-            env.add("MESA_VK_WSI_DEBUG=sw");
-        }
-        // EGL en Wayland sin dmabuf: Zink + kopper por wl_shm (turnip/egl-zink.c)
-        String eglZink = propio(prefijo, "turnip") + "/lib/libegl-zink.so";
-        if (new File(prefijo, eglZink).exists()) env.add("LD_PRELOAD=" + eglZink);
-        entornoPropio(new File(home, ".config/entorno-android"), env);
+                "WLR_NO_HARDWARE_CURSORS=1"));
+        instalacion.agregarEntorno(this, prefijo, env);
         return env;
-    }
-
-    // Variables propias de cada dispositivo (VAR=valor por línea, # comenta): reemplazan a
-    // las de arriba. Ej. la tablet (Adreno 610): Turnip anuncia Vulkan 1.0 y wlroots pide 1.1.
-    private static void entornoPropio(File f, List<String> env) {
-        if (!f.exists()) return;
-        try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(f))) {
-            for (String l; (l = r.readLine()) != null; ) {
-                l = l.trim();
-                int i = l.indexOf('=');
-                if (l.startsWith("#") || i <= 0) continue;
-                String clave = l.substring(0, i + 1);
-                env.removeIf(v -> v.startsWith(clave));
-                env.add(l);
-            }
-        } catch (java.io.IOException e) {
-            Log.e(TAG, "entorno-android", e);
-        }
     }
 
     // DNS de la red activa de Android; 1.1.1.1 de respaldo (glibc usa hasta 3).
@@ -380,19 +301,6 @@ public class TerminalService extends Service implements TerminalSessionClient {
         }
     }
 
-    // "sudo" = modo fakeroot de la glibc (pacman exige uid 0).
-    private void escribirSudo(File prefijo) {
-        File f = new File(prefijo, "usr/local/bin/sudo");
-        if (f.exists()) return;
-        f.getParentFile().mkdirs();
-        try (FileWriter w = new FileWriter(f)) {
-            w.write("#!/usr/bin/bash\n# fakeroot de la glibc propia, escrito por la app\nGLIBC_FAKEROOT=1 exec \"$@\"\n");
-        } catch (Exception e) {
-            Log.e(TAG, "sudo", e);
-        }
-        f.setExecutable(true, false);
-    }
-
     // --- TerminalSessionClient ---
 
     @Override
@@ -407,7 +315,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
             // Terminó el instalador: si quedó todo, al escritorio (la terminal vuelve a ser bash)
             instalando = false;
             sesion = null;
-            if (!Instalador.falta(this)) {
+            if (SistemaLinux.adaptadorSeleccionado(this).instalada(this)) {
                 if (vista != null && vista.getContext() instanceof android.app.Activity)
                     ((android.app.Activity) vista.getContext()).finish();
                 startActivity(new Intent(this, WaylandActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));

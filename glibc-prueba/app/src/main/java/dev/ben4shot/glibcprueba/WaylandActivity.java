@@ -112,7 +112,8 @@ public class WaylandActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         // Primera vez (APK autoinstalable): la terminal con el instalador; al terminar vuelve aquí
-        if (Instalador.falta(this) && Instalador.disponible(this)) {
+        AdaptadorInstalacion instalacion = SistemaLinux.adaptadorSeleccionado(this);
+        if (!instalacion.instalada(this) && instalacion.instaladorDisponible(this)) {
             startActivity(new Intent(this, TerminalActivity.class));
             finish();
             return;
