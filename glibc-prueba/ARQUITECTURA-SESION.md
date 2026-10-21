@@ -45,11 +45,19 @@ El flujo objetivo, equivalente en sus contratos visibles a una sesión de escrit
    puede suspender la app; una reanudación debe reconectar a la misma instalación sin dejar
    sockets o procesos huérfanos.
 
-El supervisor actual (`TerminalService` + `sesion-android`) ya cubre parcialmente los pasos 1, 5 y
-7 para Wayland. D-Bus todavía se prepara por un script de perfil de shell. El primer cambio de
-orquestación hace que `sesion-android` inicie los servicios comunes después de detectar el socket
-para cualquier perfil; antes sway los iniciaba desde su configuración y los otros perfiles desde
-el supervisor. El ciclo de vida y el cierre ordenado de esos servicios siguen pendientes.
+El host (`TerminalService`) lanza `sesion-android` con una marca para que el perfil de login no
+cree un bus persistente. El supervisor envuelve la sesión con `dbus-run-session`, guarda su
+dirección mientras vive y, al detectar el socket anidado, actualiza el entorno de activación D-Bus
+con `WAYLAND_DISPLAY` y el escritorio. TerminalService consulta ese archivo para conectar los
+procesos Linux posteriores al mismo bus. Después inicia `autostart-android`, que mantiene los PID
+de los servicios que creó; al cerrar, pide a sway que cierre Steam ordenadamente y termina los
+servicios antes de señalizar al compositor. `dbus-run-session` destruye el bus al salir.
+
+Esto implementa un bus **de sesión**. No se inicia un bus D-Bus **de sistema**: todavía no hay un
+servicio de esta sesión que lo requiera y el sandbox no ofrece systemd/logind. El supervisor cubre
+el orden básico y el cierre de procesos propios; aún falta readiness por servicio y comprobarlo en
+el dispositivo. El perfil D-Bus de login conserva un bus de rescate para la terminal cuando no hay
+sesión gráfica.
 
 ## Capas y contratos
 
@@ -141,10 +149,10 @@ el ID elegido y solo habilita Arch, si existe o el APK trae su instalador.
 
 1. **Contrato y modelo (actual):** registrar capas, ciclo de vida, capacidades y límites; mantener
    Arch + sway como ruta funcional.
-2. **Orquestador común (en curso):** todos los perfiles pasan por `sesion-android`, que descubre el
-   socket y arranca los servicios comunes; quitar dependencias del config de sway. Siguiente:
-   centralizar D-Bus/entorno y que el supervisor sea dueño del ciclo de vida de esos servicios.
-   Después separar `TerminalService` de rutas Arch/sway y añadir logs por fase.
+2. **Orquestador común (en curso):** todos los perfiles pasan por `sesion-android`; ya centraliza
+   bus D-Bus de sesión, entorno de activación y cierre de los servicios que inicia. Siguiente:
+   comprobar este ciclo en el Redmi, añadir readiness/logs por servicio y luego quitar rutas
+   Arch/sway de `TerminalService` mediante adaptadores de instalación.
 3. **Sesión estándar:** evaluar `systemd --user` bajo Android; resolver D-Bus de sistema/sesión y
    portales a través de servicios reales o adaptadores explícitos. No declarar Plasma compatible
    hasta cumplir sus readiness checks.
@@ -167,6 +175,15 @@ sesión Linux activa.
 prompt, paleta de terminal y etiquetas de estado. La compilación `sdk36Debug` se completó. La APK
 anterior se había instalado; esta compilación con el rediseño sigue pendiente de instalación y
 validación en el dispositivo.
+
+**38ª sesión, continuación (repo):** `sesion-android` crea el bus D-Bus efímero y publica su
+dirección para TerminalService; después del socket del compositor actualiza el entorno de activación
+y lanza el supervisor de servicios. `autostart-android` conserva los PID de lo que inicia y al
+cierre solicita apagar Steam por sway IPC antes de detener esos servicios. `dbus-run-session`
+termina el bus cuando acaba el supervisor. KDE/Plasma Mobile dejan de crear un bus anidado. El bus
+de sistema no se inicia porque ningún servicio actual lo necesita. La APK `sdk36Debug` y su capa
+Linux ya se regeneraron; falta instalarla y validar arranque, terminales, notificaciones, audio y
+cierre ordenado en el Redmi.
 
 No se instalarán entornos en el teléfono como parte de estas fases sin revisar su tamaño y el
 estado de la sesión; los prototipos de proveedor y gestor se validan primero aislados cuando sea

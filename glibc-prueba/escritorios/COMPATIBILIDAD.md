@@ -13,6 +13,10 @@ que ya esté probado. `escritorio.conf` conserva `ESTADO=sin-probar` hasta valid
   `wayland-1`. Si no aparece en 20 segundos, termina el intento y abre sway como rescate.
 - `sesion-android` también inicia `autostart-android` tras detectar el socket, incluidos los
   servicios comunes que antes iniciaba sway desde su configuración.
+- `sesion-android` crea un único bus D-Bus de sesión, publica su dirección y actualiza el entorno
+  de activación cuando ya conoce `WAYLAND_DISPLAY`. KDE/Plasma Mobile usan este mismo bus.
+- `autostart-android` supervisa los procesos de servicio que inicia. Al cerrar solicita primero
+  el cierre ordenado de Steam por sway IPC cuando está disponible y luego detiene esos procesos.
 - Las dependencias del escritorio van en `paquetes.txt`; las variables y la configuración
   específicas del compositor van en su perfil, no en `TerminalService`.
 
@@ -30,8 +34,8 @@ por lo que los perfiles sin Xwayland no obtienen Steam automáticamente.
 
 ## Riesgos encontrados al revisar los perfiles
 
-- **KDE Plasma y Plasma Mobile:** `sesion` los envuelve con `dbus-run-session`. KDE avanzó hasta
-  activar servicios de Plasma, pero luego cerró; los registros muestran que no hay
+- **KDE Plasma y Plasma Mobile:** usan el bus común de `sesion-android`. KDE avanzó hasta activar
+  servicios de Plasma, pero luego cerró; los registros muestran que no hay
   `org.freedesktop.systemd1` y que el portal de documentos no puede montar por falta de permiso a
   `/dev/fuse`. Son fallos observados, no una causa confirmada del cierre de KWin. La APK de
   diagnóstico puede capturar por perfil el resultado básico de arranque.

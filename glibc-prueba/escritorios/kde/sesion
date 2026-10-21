@@ -1,6 +1,5 @@
 # kwin_wayland ve WAYLAND_DISPLAY y corre anidado (backend wayland) dentro del anfitrión.
 # Sin systemd: arranque clásico (~/.config/startkderc).
 export XDG_CURRENT_DESKTOP=KDE KDE_SESSION_VERSION=6
-# Plasma espera un bus de sesión D-Bus propio al iniciar el escritorio. Sway ya
-# comparte el bus de la sesión Android, pero Plasma necesita preparar su sesión.
-exec dbus-run-session startplasma-wayland
+# sesion-android ya proporciona un bus de sesión común para compositor y servicios.
+exec startplasma-wayland

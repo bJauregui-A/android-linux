@@ -126,6 +126,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
         }
         String cargador = cargador();
         List<String> env = entorno(prefijo, cargador);
+        agregarBusSesion(env, prefijo);
         String[] args = {"libldp.so", "/usr/bin/bash", "-l"};
         Log.i(TAG, "sesión: " + cargador + " /usr/bin/bash -l, prefijo " + prefijo);
         return new TerminalSession(cargador, new File(prefijo, home()).getAbsolutePath(), args,
@@ -157,11 +158,18 @@ public class TerminalService extends Service implements TerminalSessionClient {
                 Log.e(TAG, "script de diagnóstico", e);
             }
         }
-        // El selector administra el compositor elegido y usa sway como rescate.
+        // El selector administra el compositor elegido y usa sway como rescate. El perfil
+        // gráfico crea un bus D-Bus efímero que comparte con el compositor y sus servicios.
         String sesion = "/usr/local/bin/sesion-android";
-        if (!BuildConfig.DIAGNOSTICO && new File(prefijo, sesion).exists()) cmd = "exec " + sesion;
-        ProcessBuilder pb = new ProcessBuilder(cargador(), "/usr/bin/bash", "-lc", cmd);
+        boolean supervisor = !BuildConfig.DIAGNOSTICO && new File(prefijo, sesion).exists();
+        ProcessBuilder pb;
+        if (supervisor) {
+            pb = new ProcessBuilder(cargador(), "/usr/bin/bash", "-lc", "exec " + sesion);
+        } else {
+            pb = new ProcessBuilder(cargador(), "/usr/bin/bash", "-lc", cmd);
+        }
         entornoLinux(pb);
+        if (supervisor) pb.environment().put("ARCH_ANDROID_SESSION_START", "1");
         try {
             Process p = pb.start();
             escritorio = p;
@@ -214,6 +222,23 @@ public class TerminalService extends Service implements TerminalSessionClient {
         for (String v : entornoEscritorio) {
             int i = v.indexOf('=');
             pb.environment().put(v.substring(0, i), v.substring(i + 1));
+        }
+        String bus = leerBusSesion(SistemaLinux.raizSeleccionada(this));
+        if (bus != null) pb.environment().put("DBUS_SESSION_BUS_ADDRESS", bus);
+    }
+
+    private void agregarBusSesion(List<String> env, File prefijo) {
+        String bus = leerBusSesion(prefijo);
+        if (bus != null) env.add("DBUS_SESSION_BUS_ADDRESS=" + bus);
+    }
+
+    private String leerBusSesion(File prefijo) {
+        File f = new File(prefijo, Wayland.runtimeDir().substring(1) + "/arch-android-bus");
+        try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(f))) {
+            String bus = r.readLine();
+            return bus == null || bus.isBlank() ? null : bus;
+        } catch (java.io.IOException ignorada) {
+            return null;
         }
     }
 

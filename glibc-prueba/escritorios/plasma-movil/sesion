@@ -1,2 +1,2 @@
 export XDG_CURRENT_DESKTOP=KDE KDE_SESSION_VERSION=6
-exec dbus-run-session startplasmamobile
+exec startplasmamobile

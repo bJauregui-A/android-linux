@@ -1,39 +1,117 @@
 #!/usr/bin/bash
-# Servicios comunes de una sesión: historial del portapapeles (SUPER+V), sshd, PipeWire y Steam.
-# sesion-android lo ejecuta después de detectar y publicar el socket del compositor; --esperar
-# vuelve a comprobarlo y establece WAYLAND_DISPLAY antes de configurar la escala. sshd, PipeWire
-# y Steam sobreviven al compositor mientras la app siga viva; no se lanzan de nuevo si ya corren.
+# Supervisor de los servicios comunes de una sesión gráfica. Comparte el D-Bus y el
+# compositor publicados por sesion-android; al salir, cierra Steam y detiene lo que inició.
 if [ "$1" = --esperar ]; then
+    listo=
     for i in $(seq 120); do
-        [ -s "$XDG_RUNTIME_DIR/arch-android-display" ] && break
+        if [ -s "$XDG_RUNTIME_DIR/arch-android-display" ]; then
+            display=$(cat "$XDG_RUNTIME_DIR/arch-android-display")
+            if [ -S "$XDG_RUNTIME_DIR/$display" ]; then
+                export WAYLAND_DISPLAY=$display
+                listo=1
+                break
+            fi
+        fi
         sleep 0.5
     done
-    [ -s "$XDG_RUNTIME_DIR/arch-android-display" ] &&
-        export WAYLAND_DISPLAY=$(cat "$XDG_RUNTIME_DIR/arch-android-display")
-    for i in $(seq 120); do
-        [ -n "$WAYLAND_DISPLAY" ] && [ -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ] && break
+    [ -n "$listo" ] || { echo "no apareció el socket Wayland"; exit 1; }
+fi
+
+pids=()
+steam_iniciado=
+cerrando=
+
+iniciar() {
+    log=$1
+    shift
+    "$@" > "$log" 2>&1 &
+    pids+=("$!")
+}
+
+pedir_cierre_steam() {
+    [ -n "$steam_iniciado" ] || return 0
+    pgrep -x steam >/dev/null 2>&1 || return 0
+
+    # Pedir primero al compositor que cierre Steam, como en el cierre manual recomendado.
+    pedido=
+    for sock in "$XDG_RUNTIME_DIR"/sway-ipc.*.sock; do
+        [ -S "$sock" ] || continue
+        if swaymsg -s "$sock" -t get_version >/dev/null 2>&1; then
+            swaymsg -s "$sock" exec "steam -shutdown" >/dev/null 2>&1 && pedido=1
+            break
+        fi
+    done
+    # Otros compositores no implementan sway IPC; solicitar el mismo cierre directamente.
+    [ -n "$pedido" ] || /usr/local/bin/steam -shutdown >/dev/null 2>&1
+
+    for i in $(seq 40); do
+        pgrep -x steam >/dev/null 2>&1 || return 0
         sleep 0.5
     done
-    sleep 1
-    # wlr-output-management (labwc, wayfire, river, qtile, niri...); los demás la toman de su config
-    wlr-randr 2> /dev/null | awk '/^[^ ]/ { print $1 }' | while read -r o; do
-        wlr-randr --output "$o" --scale "${ANDROID_ESCALA:-2.5}"
+    echo "Steam no cerró en 20 s; envío shutdown directo" >> /tmp/autostart-android.log
+    /usr/local/bin/steam -shutdown >/dev/null 2>&1
+    for i in $(seq 20); do
+        pgrep -x steam >/dev/null 2>&1 || return 0
+        sleep 0.5
+    done
+    echo "Steam sigue activo tras solicitar el cierre ordenado" >> /tmp/autostart-android.log
+}
+
+cerrar() {
+    [ -n "$cerrando" ] && return
+    cerrando=1
+    trap - EXIT TERM HUP INT
+    pedir_cierre_steam
+    for pid in "${pids[@]}"; do kill -TERM "$pid" 2>/dev/null; done
+    for i in $(seq 20); do
+        vivos=
+        for pid in "${pids[@]}"; do
+            if kill -0 "$pid" 2>/dev/null; then vivos=1; break; fi
+        done
+        [ -z "$vivos" ] && break
+        sleep 0.25
+    done
+    for pid in "${pids[@]}"; do kill -KILL "$pid" 2>/dev/null; done
+    for pid in "${pids[@]}"; do wait "$pid" 2>/dev/null; done
+}
+trap cerrar EXIT
+trap 'exit 0' TERM HUP INT
+
+# Escala para compositores wlroots; los demás la configuran en su propio perfil.
+if command -v wlr-randr >/dev/null 2>&1; then
+    wlr-randr 2>/dev/null | awk '/^[^ ]/ { print $1 }' | while read -r salida; do
+        wlr-randr --output "$salida" --scale "${ANDROID_ESCALA:-2.5}"
     done
 fi
-wl-paste --type text --watch cliphist store &
-wl-paste --type image --watch cliphist store &
-# servidor SSH en el puerto 8022 (/etc/ssh/sshd_config.d/10-android.conf); sin sudo: como
-# no-root no hace privsep
-[ -x /usr/bin/sshd ] && ! pgrep -x sshd > /dev/null && /usr/bin/sshd
-# audio: PipeWire con un sink "Android" que escribe a un FIFO; la app lo toca (Audio.java).
-# pipewire-pulse da PulseAudio (Wine, SDL, navegadores); wireplumber conecta las apps al sink
-if [ -x /usr/bin/pipewire ] && ! pgrep -x pipewire > /dev/null; then
-    pipewire > /tmp/pipewire.log 2>&1 &
-    sleep 1
-    wireplumber > /tmp/wireplumber.log 2>&1 &
-    pipewire-pulse > /tmp/pipewire-pulse.log 2>&1 &
+
+# Portapapeles Linux → historial de SUPER+V.
+command -v wl-paste >/dev/null 2>&1 && command -v cliphist >/dev/null 2>&1 && {
+    iniciar /tmp/cliphist-texto.log wl-paste --type text --watch cliphist store
+    iniciar /tmp/cliphist-imagen.log wl-paste --type image --watch cliphist store
+}
+
+# sshd en foreground para que el supervisor pueda detener exactamente su proceso.
+if [ -x /usr/bin/sshd ] && ! pgrep -x sshd >/dev/null 2>&1; then
+    iniciar /tmp/sshd-android.log /usr/bin/sshd -D
 fi
-# Steam al abrir (steam/steam.sh = /usr/local/bin/steam); necesita el DISPLAY de Xwayland,
-# que solo sway le pasa
-[ -n "$DISPLAY" ] && [ -x /usr/local/bin/steam ] && ! pgrep -x steam > /dev/null &&
-    /usr/local/bin/steam > /tmp/steam.log 2>&1 &
+
+# PipeWire → FIFO → AudioTrack de Android y compatibilidad PulseAudio para Linux/Wine.
+if [ -x /usr/bin/pipewire ] && ! pgrep -x pipewire >/dev/null 2>&1; then
+    iniciar /tmp/pipewire.log /usr/bin/pipewire
+    sleep 1
+    [ -x /usr/bin/wireplumber ] && iniciar /tmp/wireplumber.log /usr/bin/wireplumber
+    [ -x /usr/bin/pipewire-pulse ] && iniciar /tmp/pipewire-pulse.log /usr/bin/pipewire-pulse
+fi
+
+# Steam se lanza desde el entorno de sway cuando Xwayland publica DISPLAY.
+if [ -n "$DISPLAY" ] && [ -x /usr/local/bin/steam ] && ! pgrep -x steam >/dev/null 2>&1; then
+    iniciar /tmp/steam.log /usr/local/bin/steam
+    steam_iniciado=1
+fi
+
+# Seguir vivo aunque esta instalación no tenga servicios opcionales instalados.
+if [ "${#pids[@]}" -eq 0 ]; then
+    sleep 86400 &
+    pids+=("$!")
+fi
+wait "${pids[@]}"

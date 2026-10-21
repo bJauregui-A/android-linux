@@ -2,6 +2,15 @@
 # Arranca el escritorio elegido al instalar (/var/lib/arch-android/escritorio, uno de
 # escritorios/ del repo). TerminalService lo lanza dentro del anfitrión Wayland de Android.
 # Cada compositor anidado publica su socket; lo detectamos para los clientes y los servicios puente.
+if [ -z "${ARCH_ANDROID_DBUS_WRAPPED:-}" ]; then
+    command -v dbus-run-session >/dev/null 2>&1 || {
+        echo "falta dbus-run-session; no se puede iniciar una sesión gráfica" >&2
+        exit 127
+    }
+    exec dbus-run-session -- /usr/bin/env ARCH_ANDROID_DBUS_WRAPPED=1 \
+        /usr/bin/bash "$0" "$@"
+fi
+
 D=/usr/local/share/arch-android/escritorios
 E=/var/lib/arch-android
 # HyperOS ata algunos hilos de la app (el que lanza procesos) a los núcleos grandes (6-7) y el
@@ -14,6 +23,11 @@ export XDG_SESSION_TYPE=wayland
 id=${ARCH_ESCRITORIO:-$(cat "$E/escritorio" 2>/dev/null)}
 [ -f "$D/$id/sesion" ] || id=sway
 cd ~
+
+# Publicar el bus efímero para terminales Android y procesos que TerminalService lance después.
+bus_file="$XDG_RUNTIME_DIR/arch-android-bus"
+bus_tmp="$bus_file.$$"
+printf '%s\n' "$DBUS_SESSION_BUS_ADDRESS" > "$bus_tmp" && mv -f "$bus_tmp" "$bus_file"
 
 # La config del escritorio va al home la primera vez que se usa (el skel solo se copia al crear
 # el usuario, y el escritorio se puede cambiar después). @ESCALA@ = $ANDROID_ESCALA.
@@ -42,6 +56,29 @@ inicio=$SECONDS
 # dbus-run-session puede envolverlos; terminar solo el PID del wrapper deja procesos huérfanos.
 setsid /usr/bin/bash "$D/$id/sesion" > "/tmp/$id.log" 2>&1 &
 hijo=$!
+auto=
+
+detener_servicios() {
+    [ -n "$auto" ] || return 0
+    kill -TERM "$auto" 2>/dev/null
+    wait "$auto" 2>/dev/null
+    auto=
+}
+
+limpiar_bus() {
+    actual=$(cat "$bus_file" 2>/dev/null)
+    [ "$actual" = "$DBUS_SESSION_BUS_ADDRESS" ] && rm -f "$bus_file"
+    rm -f "$bus_tmp"
+}
+
+cerrar_sesion() {
+    cerrando=1
+    # Da tiempo a que Steam cierre ordenadamente y los puentes suelten la sesión antes del WM.
+    detener_servicios
+    kill -TERM -- "-$hijo" 2>/dev/null
+}
+
+trap cerrar_sesion TERM HUP INT
 # Esperar a que aparezca un socket distinto al del anfitrión (normalmente wayland-1) y
 # publicarlo para Java, clipboard y audio. No fijamos su nombre: respetamos WAYLAND_DISPLAY.
 for i in $(seq 80); do
@@ -57,8 +94,11 @@ for i in $(seq 80); do
     sleep 0.25
 done
 if [ -s "$XDG_RUNTIME_DIR/arch-android-display" ]; then
-    # Servicios de la sesión (bus ya preparado por /etc/profile.d, portapapeles,
-    # audio, sshd e integración con Android) pertenecen al supervisor, no al WM.
+    export WAYLAND_DISPLAY=$(cat "$XDG_RUNTIME_DIR/arch-android-display")
+    export XDG_CURRENT_DESKTOP=${XDG_CURRENT_DESKTOP:-$id}
+    # Los servicios activados por D-Bus deben heredar la pantalla del compositor anidado.
+    dbus-update-activation-environment --all > /tmp/dbus-activation.log 2>&1 || true
+    # Los servicios comparten este bus y el ciclo de vida del supervisor, no el del WM.
     autostart-android --esperar > /tmp/autostart-android.log 2>&1 &
     auto=$!
 else
@@ -66,16 +106,14 @@ else
     echo "el compositor $id no publicó un socket Wayland en 20 s" >> "/tmp/$id.log"
     kill -TERM -- "-$hijo" 2>/dev/null
 fi
-# Al cerrar la app TerminalService termina este bash: que le llegue al escritorio
-trap 'cerrando=1; kill -TERM -- "-$hijo" 2> /dev/null' TERM HUP INT
 while :; do
     wait $hijo
     r=$?
     kill -0 $hijo 2> /dev/null || break  # wait cortado por la señal: esperar de nuevo
 done
+detener_servicios
 dura=$((SECONDS - inicio))
 if { [ $dura -lt 20 ] || [ -n "$sin_socket" ]; } && [ -z "$cerrando" ]; then
-    [ -n "$auto" ] && kill $auto 2> /dev/null
     . "$D/$id/escritorio.conf"
     echo "$NOMBRE terminó a los $dura s (código $r): abro sway; log en /tmp/$id.log" >> /tmp/sway.log
     notify-send -u critical "$NOMBRE no arrancó" "Se abrió sway. Log: /tmp/$id.log" 2> /dev/null
@@ -87,4 +125,5 @@ if { [ $dura -lt 20 ] || [ -n "$sin_socket" ]; } && [ -z "$cerrando" ]; then
     fi
 fi
 rm -f "$XDG_RUNTIME_DIR/arch-android-display"
+limpiar_bus
 exit $r

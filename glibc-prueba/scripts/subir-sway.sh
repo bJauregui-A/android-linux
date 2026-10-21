@@ -1,6 +1,7 @@
 #!/bin/bash
 # Copia la config de sway del repo (sway/: config, scripts, waybar, fuzzel, kitty, zsh + starship) a ~/.config del Arch de la app,
-# y sway/dbus-sesion.sh a /etc/profile.d (bus de sesión D-Bus: waybar lo necesita).
+# y sway/dbus-sesion.sh a /etc/profile.d (terminal de rescate; el escritorio usa el bus
+# efímero que gestiona sesion-android).
 # La primera vez respalda la config anterior en ~/.config/sway/config.anterior.
 # Paquetes que usa: TIEMPO=600 scripts/correr.sh sdk36 scripts/test-sway-config.sh (instala y valida).
 # Se aplica al reiniciar sway (cerrar la app o SUPER+Delete y volver a abrir el ícono).
