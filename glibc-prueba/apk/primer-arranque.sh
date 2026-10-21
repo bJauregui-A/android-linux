@@ -49,6 +49,38 @@ if [ ! -d /home/$N/.config ]; then
     cp -a /etc/skel/. /home/$N/
 fi
 rmdir /home/user 2>/dev/null  # la app lo crea antes de saber el nombre
+
+# Contraseña del usuario: la piden el bloqueo de pantalla de los escritorios (KDE, COSMIC, phosh...),
+# SSH y las ventanas de autenticación. Se guarda su hash (SHA-512) en /etc/shadow, que es del usuario
+# de la app. Para cambiarla después:  bash /usr/local/share/arch-android/primer-arranque.sh --contrasena
+contrasena_definida() { grep -q "^$N:[^!*:][^:]*:" /etc/shadow 2>/dev/null; }
+pedir_contrasena() {
+    local p1 p2 h
+    printf '\n\e[1mContraseña de %s\e[0m (la piden el bloqueo de pantalla, SSH y los avisos de autenticación).\n' "$N"
+    while :; do
+        read -rsp "Contraseña: " p1; echo
+        [ -n "$p1" ] || { echo "no puede estar vacía"; continue; }
+        read -rsp "Repítela: " p2; echo
+        [ "$p1" = "$p2" ] && break
+        echo "no coinciden, otra vez"
+    done
+    h=$(printf '%s' "$p1" | openssl passwd -6 -stdin) && [ -n "$h" ] || return 1
+    touch /etc/shadow && chmod 600 /etc/shadow
+    if grep -q "^$N:" /etc/shadow; then
+        H=$h D=$(( $(date +%s) / 86400 )) awk -F: -v OFS=: -v n="$N" \
+            '$1 == n { $2 = ENVIRON["H"]; $3 = ENVIRON["D"] } { print }' /etc/shadow > /etc/shadow.nuevo \
+            && cat /etc/shadow.nuevo > /etc/shadow && rm -f /etc/shadow.nuevo || return 1
+    else
+        printf '%s:%s:%s:0:99999:7:::\n' "$N" "$h" "$(( $(date +%s) / 86400 ))" >> /etc/shadow
+    fi
+    chmod 600 /etc/shadow
+    printf '\e[32mContraseña guardada.\e[0m\n'
+}
+if [ "$1" = --contrasena ]; then
+    pedir_contrasena || falla "no se pudo guardar la contraseña"
+    exit 0
+fi
+contrasena_definida || pedir_contrasena || falla "no se pudo guardar la contraseña"
 export HOME=/home/$N USER=$N LOGNAME=$N
 cd ~
 
