@@ -2,6 +2,17 @@ plugins {
     id("com.android.application")
 }
 
+val sessionLayerAssets = layout.buildDirectory.dir("generated/session-layer-assets").get().asFile
+val packageSessionLayer = tasks.register<Exec>("packageSessionLayer") {
+    val archive = sessionLayerAssets.resolve("session-layer.tgz")
+    inputs.dir(file("../escritorios"))
+    inputs.file(file("../apk/primer-arranque.sh"))
+    outputs.file(archive)
+    doFirst { archive.parentFile.mkdirs() }
+    commandLine("tar", "-czf", archive.absolutePath, "-C", file("..").absolutePath,
+        "escritorios", "apk/primer-arranque.sh")
+}
+
 android {
     namespace = "dev.ben4shot.glibcprueba"
     compileSdk = 37
@@ -66,6 +77,7 @@ android {
     // APK autoinstalable: assets de apk/armar.sh <variante> (base.tgz, capa.tgz, instalar.sh).
     // Sin comprimir: instalar.sh los lee directo del APK por offset (Instalador.java).
     sourceSets {
+        getByName("main").assets.srcDir(sessionLayerAssets)
         for (v in listOf("sdk28", "sdk36", "prueba")) getByName(v).assets.srcDir("../trabajo/assets-$v")
     }
     androidResources {
@@ -87,6 +99,8 @@ android {
         checkReleaseBuilds = false
     }
 }
+
+tasks.named("preBuild").configure { dependsOn(packageSessionLayer) }
 
 dependencies {
     implementation("com.github.termux.termux-app:terminal-view:v0.118.3")

@@ -26,6 +26,7 @@ done
   -Dgbm=disabled -Dllvm=disabled -Dvideo-codecs= -Dvalgrind=disabled -Dlibunwind=disabled -Dlmsensors=disabled
 time ninja -C $B
 ninja -C $B install
-# OpenGL: Zink (del mesa de Arch) sobre este Turnip; ver egl-zink.c
+# OpenGL: Zink (del mesa de Arch) sobre este Turnip; ver egl-zink.c y udmabuf-shim.c
 gcc -O2 -shared -fPIC -o $PREFIX/lib/libegl-zink.so ~/src/egl-zink.c
+[ -f ~/src/udmabuf-shim.c ] && gcc -O2 -shared -fPIC -o /usr/local/lib/libudmabuf-shim.so ~/src/udmabuf-shim.c -ldl
 echo "=== mesa listo"

@@ -1,0 +1,30 @@
+#!/usr/bin/bash
+# Sesión Plasma mínima asociada al ciclo de vida de kwin_wayland. El supervisor
+# común ya proporciona D-Bus, runtime Wayland y los servicios Android/Linux.
+export KDE_FULL_SESSION=true KDE_SESSION_VERSION=6
+export KDE_SESSION_UID="$(id -u)" XDG_CURRENT_DESKTOP=KDE
+export XDG_SESSION_TYPE=wayland XDG_MENU_PREFIX=plasma-
+export KDE_APPLICATIONS_AS_SCOPE=1
+
+kded=$(command -v kded6 || command -v kded) || {
+    echo 'KDE: no se encontró kded6/kded en PATH' >&2
+    exit 127
+}
+shell=$(command -v plasmashell) || {
+    echo 'KDE: no se encontró plasmashell en PATH' >&2
+    exit 127
+}
+
+"$kded" --replace > /tmp/kde-kded.log 2>&1 &
+kded_pid=$!
+cleanup() {
+    kill -TERM "$kded_pid" 2>/dev/null || true
+    wait "$kded_pid" 2>/dev/null || true
+}
+trap cleanup EXIT HUP INT TERM
+
+# Mantener Plasma como proceso de sesión; KWin lo supervisa con
+# --exit-with-session y el supervisor Android sigue observando al compositor.
+"$shell" --no-respawn
+resultado=$?
+exit "$resultado"

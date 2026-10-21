@@ -58,6 +58,11 @@ fi
 mkdir -p "$OUT/proto"
 for X in /usr/share/wayland-protocols/stable/xdg-shell/xdg-shell \
          /usr/share/wayland-protocols/stable/linux-dmabuf/linux-dmabuf-v1 \
+         /usr/share/wayland-protocols/stable/viewporter/viewporter \
+         /usr/share/wayland-protocols/stable/presentation-time/presentation-time \
+         /usr/share/wayland-protocols/staging/single-pixel-buffer/single-pixel-buffer-v1 \
+         /usr/share/wayland-protocols/unstable/pointer-constraints/pointer-constraints-unstable-v1 \
+         /usr/share/wayland-protocols/unstable/relative-pointer/relative-pointer-unstable-v1 \
          /usr/share/wayland-protocols/unstable/pointer-gestures/pointer-gestures-unstable-v1 $PWD/android-ahb-v1; do
   N=$(basename $X)
   wayland-scanner server-header $X.xml "$OUT/proto/$N-server-protocol.h"

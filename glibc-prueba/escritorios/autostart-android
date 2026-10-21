@@ -6,7 +6,7 @@ if [ "$1" = --esperar ]; then
     for i in $(seq 120); do
         case "${ARCH_ANDROID_READY_CHECK:-}" in
             socket-wayland)
-                marker=${ARCH_ANDROID_SCREEN_MARKER:-arch-android-display}
+                marker=${ARCH_ANDROID_SCREEN_MARKER:-linux-session-display}
                 variable=${ARCH_ANDROID_SCREEN_ENV:-WAYLAND_DISPLAY}
                 if [ -s "$XDG_RUNTIME_DIR/$marker" ]; then
                     display=$(cat "$XDG_RUNTIME_DIR/$marker")
@@ -28,7 +28,7 @@ pids=()
 names=()
 steam_iniciado=
 cerrando=
-log_dir=/tmp/arch-android-servicios
+log_dir=/tmp/linux-session-services
 mkdir -p "$log_dir"
 registro() { printf '%s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$*" >> /tmp/autostart-android.log; }
 
@@ -138,10 +138,11 @@ fi
 ;; esac
 
 # Portapapeles Linux → historial de SUPER+V.
-command -v wl-paste >/dev/null 2>&1 && command -v cliphist >/dev/null 2>&1 && {
+if [ "${ARCH_ANDROID_SCREEN_PROTOCOL:-}" = wayland ] \
+        && command -v wl-paste >/dev/null 2>&1 && command -v cliphist >/dev/null 2>&1; then
     iniciar cliphist-texto proceso wl-paste --type text --watch cliphist store
     iniciar cliphist-imagen proceso wl-paste --type image --watch cliphist store
-}
+fi
 
 # sshd en foreground para que el supervisor pueda detener exactamente su proceso.
 if [ -x /usr/bin/sshd ] && ! pgrep -x sshd >/dev/null 2>&1; then

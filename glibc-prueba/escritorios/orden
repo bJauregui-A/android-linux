@@ -4,6 +4,7 @@
 #   sesion           lo corre sesion-android (bash; exec del compositor)
 #   home/            config que va al home la primera vez (@ESCALA@ = $ANDROID_ESCALA)
 sway
+hyprland
 labwc
 xfce
 lxqt

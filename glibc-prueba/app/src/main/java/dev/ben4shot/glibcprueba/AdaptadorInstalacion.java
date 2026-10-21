@@ -16,7 +16,9 @@ interface AdaptadorInstalacion {
     String home(File raiz);
     String shell(File raiz);
     String supervisorSesion();
-    String comandoRescate();
+    String perfilesSesion();
+    String estadoSesion();
+    String perfilRescate();
     String[] comandoTerminal(Context contexto);
     boolean instalada(Context contexto);
     boolean instaladorDisponible(Context contexto);

@@ -39,7 +39,11 @@ final class AdaptadorArchArm64 implements AdaptadorInstalacion {
 
     @Override public String supervisorSesion() { return "/usr/local/bin/sesion-android"; }
 
-    @Override public String comandoRescate() { return "sway"; }
+    @Override public String perfilesSesion() { return "/usr/local/share/arch-android/escritorios"; }
+
+    @Override public String estadoSesion() { return "/var/lib/arch-android"; }
+
+    @Override public String perfilRescate() { return "sway"; }
 
     @Override public String[] comandoTerminal(Context contexto) {
         return new String[]{"libldp.so", "/usr/bin/bash", "-l"};
@@ -70,6 +74,9 @@ final class AdaptadorArchArm64 implements AdaptadorInstalacion {
         entorno.add("PATH=/usr/local/bin:/usr/bin");
         entorno.add("LANG=C.UTF-8");
         entorno.add("TMPDIR=/tmp");
+        entorno.add("LINUX_SESSION_PROFILES_DIR=" + perfilesSesion());
+        entorno.add("LINUX_SESSION_STATE_DIR=" + estadoSesion());
+        entorno.add("LINUX_SESSION_RECOVERY_PROFILE=" + perfilRescate());
 
         // Entorno gráfico específico de Arch + Mesa Turnip y wlroots compilados para Android.
         entorno.add("VK_ICD_FILENAMES=" + propio(raiz, "turnip") + "/share/vulkan/icd.d/freedreno_icd.aarch64.json");

@@ -91,6 +91,32 @@ if [ ! -s $E/escritorio ]; then
     echo "${IDS[r - 1]}" > $E/escritorio
 fi
 ESC=$(cat $E/escritorio)
+if [[ ! "$ESC" =~ ^[a-z0-9-]+$ ]] || [ ! -f "$ED/$ESC/escritorio.conf" ] || [ ! -f "$ED/$ESC/sesion" ]; then
+    falla "no existe la receta de escritorio '$ESC' para esta instalación"
+fi
+
+# Aplica la parte de configuración de la receta durante la instalación/selección, no al arrancar
+# cada sesión. Cada perfil aporta home/ como overlay inicial; los archivos del usuario nunca se
+# pisan. La distro (este instalador es Arch ARM64) y el DE quedan identificados juntos para que
+# futuras capas Debian/Ubuntu puedan tener recetas distintas sin fingir que usan los mismos paquetes.
+SISTEMA_LINUX=arch-arm64
+HOME_LINUX=/home/$N
+ESCALA=${ANDROID_ESCALA:-2.5}
+configurar_escritorio() {
+    local perfil=$1 fuente destino archivo
+    if [ -d "$ED/$perfil/home" ]; then
+        while IFS= read -r -d '' archivo; do
+            fuente=${archivo#"$ED/$perfil/home/"}
+            destino="$HOME_LINUX/$fuente"
+            [ -e "$destino" ] && continue
+            mkdir -p "$(dirname "$destino")" || return 1
+            sed "s/@ESCALA@/$ESCALA/g" "$archivo" > "$destino" || return 1
+            if [ -x "$archivo" ]; then chmod +x "$destino" || return 1; fi
+        done < <(find "$ED/$perfil/home" -type f -print0)
+    fi
+}
+paso "Aplicando configuración inicial de $ESC para $SISTEMA_LINUX"
+configurar_escritorio "$ESC" || falla "no se pudo aplicar la receta de $ESC"
 GRUPOS=(ssh audio firefox juegos desarrollo adb utilidades)
 TEXTOS=("SSH: servidor en el puerto 8022 (~5 MB)"
         "audio: PipeWire → altavoz de Android (~25 MB)"
@@ -143,6 +169,7 @@ for i in 1 2 3; do
     printf '\n\e[33mfalló la descarga, reintento %d de 2...\e[0m\n' $i
     sleep 3
 done
+printf '%s\n' "$SISTEMA_LINUX:$ESC" > "$E/receta-aplicada" || falla "no se pudo registrar la receta instalada"
 
 paso "Ajustes"
 # sshd (sway lo arranca): claves de host. Sin grupo tty, sshd no toca el pty (SELinux lo niega)

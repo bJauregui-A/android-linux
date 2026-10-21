@@ -1,8 +1,9 @@
 # Contrato de escritorios y proveedores de pantalla
 
-Los perfiles de `escritorios/` describen sesiones y los proveedores de
-`escritorios/proveedores/` describen cómo conectarlas a una pantalla. Son capas independientes:
-que un paquete exista o que su comando esté en `sesion` no significa que ya esté probado.
+Los perfiles de `escritorios/` describen configuración y arranque; los proveedores de
+`escritorios/proveedores/` describen cómo conectarlos a una pantalla. La receta efectiva combina
+distribución + escritorio: paquetes y ajustes del OS no se presuponen intercambiables. Que un
+paquete exista o que su comando esté en `sesion` no significa que ya esté probado.
 `escritorio.conf` conserva `ESTADO=sin-probar` hasta validar el entorno real.
 
 ## Contrato del perfil (`escritorio.conf`)
@@ -14,7 +15,8 @@ que un paquete exista o que su comando esté en `sesion` no significa que ya est
   pasó su comprobación y que el proceso del perfil sigue vivo; no acredita presentación, entrada ni
   interactividad.
 - `sesion`: inicia los procesos del perfil en primer plano; normalmente termina con `exec`.
-- `paquetes.txt`, `home/` y `ESTADO`: dependencias, configuración inicial y nivel de validación.
+- `paquetes.txt`, `home/` y `ESTADO`: dependencias para la distribución que instala el perfil,
+  configuración inicial y nivel de validación.
 
 ## Contrato del proveedor (`proveedor.conf`)
 
@@ -31,27 +33,45 @@ un socket Wayland nuevo. Todos los perfiles actuales lo solicitan explícitament
 disponibilidad del endpoint, no que el compositor haya presentado un cuadro. Otros proveedores
 (por ejemplo, X11 anidado) necesitan su contrato y su comprobación de readiness antes de usarse.
 
-## Ciclo común
+## Ciclo común (mínimo)
 
-- `sesion-android` carga los contratos del perfil y proveedor, valida los requisitos y arranca el
-  perfil con las variables declaradas por el proveedor.
+- `primer-arranque.sh` (hoy solo Arch ARM64) instala sus paquetes y aplica el overlay `home/` de la
+  receta al seleccionar/instalar el perfil, sin sobrescribir configuraciones existentes.
+- `sesion-android` carga el perfil y proveedor, valida los requisitos declarados y ejecuta el
+  lanzador específico del escritorio. Expone `ARCH_ANDROID_DESKTOP` y reserva
+  `ARCH_ANDROID_WAYLAND_SOCKET` para recetas que deben declarar el socket del compositor.
 - Al superar readiness, publica el endpoint y lanza los servicios comunes. Si falla, termina el
-  intento y abre sway como rescate (hasta que el rescate también sea configurable).
+  intento y conserva la elección y su log; Sway solo se usa como rescate de una receta ausente o
+  cuando `LINUX_SESSION_FALLBACK_ON_FAILURE=1` se solicita explícitamente.
 - `sesion-android` también inicia `autostart-android` tras detectar el socket, incluidos los
   servicios comunes que antes iniciaba sway desde su configuración.
+- Antes de iniciar el escritorio, Android sincroniza desde la APK solo los supervisores/perfiles
+  Linux gestionados por el proyecto, con hash de versión; no reextrae ni pisa el rootfs entero.
+- Al llegar a readiness, `sesion-android` publica `linux-session.properties` con protocolo,
+  variable de conexión, endpoint y capacidades. `TerminalService` usa ese contrato para conectar
+  clientes Linux y ya no fuerza Wayland cuando el proveedor declara X11. El marcador específico del
+  proveedor sigue usándose para readiness.
 - `sesion-android` crea un único bus D-Bus de sesión, publica su dirección y actualiza el entorno
-  de activación cuando ya conoce `WAYLAND_DISPLAY`. KDE/Plasma Mobile usan este mismo bus.
+  de activación cuando conoce el endpoint. Solo intenta iniciar un `systemd --user` real si el
+  perfil lo exige; cuando está disponible importa el entorno gráfico e inicia/detiene
+  `graphical-session.target`. Android no arrancó con systemd, así que no se debe asumir que ese
+  gestor puede iniciarse como hijo ni simular `org.freedesktop.systemd1`. Los perfiles que lo
+  requieran fallan de forma explícita al rescate; los entornos con modo clásico deben declarar
+  sus propios requisitos.
 - `autostart-android` supervisa los procesos de servicio que inicia. Al cerrar solicita primero
   el cierre ordenado de Steam por sway IPC cuando está disponible y luego detiene esos procesos.
-- Las dependencias van en `paquetes.txt`; las variables del perfil están en su receta y las de
-  conexión/readiness en el proveedor, no en `TerminalService`.
+- El puente del portapapeles Android usa `wl-paste`/`wl-copy` y se activa solo con Wayland; para X11
+  se requiere un backend de portapapeles compatible antes de declarar esa capacidad.
+- Las dependencias van en manifiestos específicos de distribución; las variables/pasos propios del
+  DE pertenecen a su receta, y las de conexión/readiness al proveedor, no a `TerminalService`.
 
 ## Límites conocidos
 
 El anfitrión Android actual ofrece una superficie Wayland anidada. No ofrece DRM/KMS, sesión
-logind, udev completo ni systemd de usuario. Los perfiles activos declaran Wayland; modos DRM, TTY
-o sesiones que exijan logind/systemd no son compatibles sin adaptaciones. La arquitectura acepta
-otros proveedores, pero eso no significa que estén implementados.
+logind, udev completo ni systemd de sistema. No se puede iniciar un systemd de usuario convencional
+sin ese system manager; los perfiles activos declaran
+Wayland; modos DRM, TTY o sesiones que exijan logind/systemd no son compatibles sin adaptaciones.
+La arquitectura acepta otros proveedores, pero eso no significa que estén implementados.
 
 La ruta Vulkan/Android AHardwareBuffer está implementada en el wlroots parcheado. Solo los
 compositores que realmente carguen esa biblioteca aprovechan ese camino; otros pueden necesitar
@@ -59,32 +79,18 @@ renderer software o su propio soporte de buffers. Xwayland tampoco es una capaci
 debe comprobarse compositor por compositor. El arranque de Steam sigue dependiendo de `DISPLAY`,
 por lo que los perfiles sin Xwayland no obtienen Steam automáticamente.
 
-## Riesgos encontrados al revisar los perfiles
+## Estado del anfitrión Wayland y shim DRM/GBM/DMA-BUF (51ª sesión)
 
-- **KDE Plasma y Plasma Mobile:** usan el bus común de `sesion-android`. KDE avanzó hasta activar
-  servicios de Plasma, pero luego cerró; los registros muestran que no hay
-  `org.freedesktop.systemd1` y que el portal de documentos no puede montar por falta de permiso a
-  `/dev/fuse`. Son fallos observados, no una causa confirmada del cierre de KWin. La APK de
-  diagnóstico puede capturar por perfil el resultado básico de arranque.
-- **COSMIC:** el perfil omite el wrapper upstream `start-cosmic` y no fija el backend anidado.
-  COSMIC admite `winit` sobre Wayland, pero el perfil debe seleccionar `COSMIC_BACKEND=winit` y
-  `WINIT_UNIX_BACKEND=wayland`; faltan probar además sus servicios de sesión sin systemd de usuario.
-- **Niri y COSMIC:** usan backend anidado EGL. Su inicio puede fallar si la EGL disponible no
-  implementa `EGL_WL_bind_wayland_display`; la disponibilidad de esa extensión no está comprobada
-  en esta instalación.
-- **labwc, Wayfire, Phosh, River, Qtile, XFCE y LXQt:** comparten wlroots, renderer Vulkan y la
-  biblioteca parcheada. El backend Wayland se elige automáticamente al heredar `WAYLAND_DISPLAY`,
-  pero el resto depende de que sus versiones sean ABI compatibles con `libwlroots-0.20.so` y de
-  que cada compositor soporte el renderer parcheado. No hay todavía evidencia de ejecución para
-  estos perfiles.
-- **LXQt:** `startlxqtwayland` inicia el compositor configurado en `~/.config/lxqt/session.conf`;
-  `labwc` está configurado allí. La sesión y su panel aún no se han probado.
-- **Weston:** usa su backend Wayland anidado, pero la escala se redondea al entero más cercano
-  (`2.5` pasa a `3`); puede quedar sobredimensionado aunque el compositor arranque.
-- **Hyprland (objetivo explícito):** aún no se ofrece como perfil arrancable. Aquamarine necesita
-  versiones de `xdg_wm_base`, `wl_seat` y linux-dmabuf superiores a las del anfitrión, y su
-  allocator/renderizador actual depende de DRM/GBM. El camino pendiente es adaptar Aquamarine a
-  AHardwareBuffer y dar a Hyprland EGL/Zink sin DRM; ver el análisis y fuentes en `PROYECTO.md`.
+- **Anfitrión Wayland nativo (`app/src/main/cpp/anfitrion.c`):** expone `wl_compositor` v6, `wl_subcompositor` v1 (resolviendo subsurfaces hijas a la superficie raíz en `surface_commit`), `wl_shm` v1, `wl_output` v4, `wl_seat` v9, `xdg_wm_base` v6, `zwp_linux_dmabuf_v1` v4 (con `get_default_feedback`/`get_surface_feedback` y tabla `memfd` sellada anunciando `makedev(10, 123)`), `wp_viewporter` v1, `wp_single_pixel_buffer_manager_v1` v1, `wp_presentation` v1, `zwp_pointer_constraints_v1` v1, `zwp_relative_pointer_manager_v1` v1 y `android_ahb_v1`.
+- **Shim universal (`turnip/udmabuf-shim.c` → `/usr/local/lib/libudmabuf-shim.so`):** inyectado por `proveedores/wayland-anidado/proveedor.conf`. Emula `/dev/udmabuf`, `/dev/dri/renderD128` y `/dev/dri/card0` sobre DMA-BUFs reales del kernel Android (`/dev/dma_heap/system` con fallback `/dev/kgsl-3d0`), implementa las APIs de `libdrm` y `libgbm` requeridas por compositores Wayland y `Xwayland`, y expone `EGLDeviceEXT` con nodo DRM virtual para que `kwin_wayland`, `Hyprland`/`Aquamarine` y demás compositores aceleren por GPU con Zink+Turnip sin DRM del kernel.
+
+## Notas por perfil
+
+- **KDE Plasma (`kde`, `ESTADO=probado`):** inicia `kwin_wayland` anidado con `iniciar-plasma-android` (`kded6` + `plasmashell`), renderizando con OpenGL 4.6 sobre Zink+Turnip (`libudmabuf-shim.so`) y presentando su `wl_subsurface` en el anfitrión Android. Validado en el dispositivo.
+- **Hyprland (`hyprland`, `ESTADO=probado`):** perfil completo en `escritorios/hyprland/` con `Hyprland` `0.56.2-4` + `aquamarine` `0.15.1-1` de Arch ARM sin recompilar, configuración adaptada a la pantalla del teléfono (`1080×2193@60`, escala `2.5`, distribución `latam`) y `waybar`. Validado corriendo en el dispositivo.
+- **COSMIC (`cosmic`):** el perfil selecciona `COSMIC_BACKEND=winit` y `WINIT_UNIX_BACKEND=wayland`; paquetes instalados en el teléfono, pendiente prueba interactiva.
+- **Niri (`niri`):** paquetes e `home/` instalados en el teléfono; pendiente prueba interactiva.
+- **labwc, Wayfire, Phosh, River, Qtile, XFCE, LXQt y Weston:** todos los paquetes de Arch ARM y sus configuraciones iniciales `home/` ya están instalados en el contenedor del teléfono; falta recorrerlos uno por uno desde el selector para validar presentación y entrada.
 
 ## Validación pendiente
 

@@ -21,10 +21,12 @@ import com.termux.terminal.TerminalSessionClient;
 import com.termux.view.TerminalView;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileWriter;
 import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Properties;
 
 // Servicio en primer plano dueño de los procesos Linux (el escritorio y la sesión de bash):
 // las activities se pueden cerrar (o girar) sin que Android mate los procesos glibc.
@@ -39,7 +41,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
     private boolean instalando; // la sesión es el instalador (Instalador.java)
     private TerminalView vista; // la de la activity visible, o null
     private Process escritorio;
-    private List<String> entornoEscritorio; // entorno común de la sesión Wayland
+    private List<String> entornoEscritorio; // entorno común de la sesión gráfica
 
     class Local extends Binder {
         TerminalService servicio() { return TerminalService.this; }
@@ -139,13 +141,18 @@ public class TerminalService extends Service implements TerminalSessionClient {
         AdaptadorInstalacion instalacion = SistemaLinux.adaptadorSeleccionado(this);
         if (!instalacion.instalada(this) && instalacion.instaladorDisponible(this)) return; // primero el instalador
         File prefijo = instalacion.raiz(this);
+        if (!BuildConfig.DIAGNOSTICO && !CapaSesion.actualizar(this, instalacion, prefijo)) return;
         String cargador = instalacion.cargador(this);
         entornoEscritorio = entorno(instalacion, prefijo);
+        String sesion = instalacion.supervisorSesion();
+        boolean supervisor = !BuildConfig.DIAGNOSTICO && new File(prefijo, sesion).isFile();
+        if (!BuildConfig.DIAGNOSTICO && !supervisor) {
+            Log.e(TAG, "no inicio el escritorio: falta el supervisor común " + sesion);
+            return;
+        }
         // HyperOS ata algunos hilos de la app (el que lanza procesos) a los núcleos grandes
-        // (6-7) y todo lo de sway lo heredaba: juego, Wine, Xwayland y Steam en 2 núcleos.
-        // El cpuset top-app permite 0-7; abrir la afinidad no necesita root.
-        String cmd = "taskset -p ff $$ > /dev/null 2>&1; exec "
-                + instalacion.comandoRescate() + " > /tmp/rescate-grafico.log 2>&1";
+        // (6-7); el supervisor recibe la afinidad abierta para todo perfil y sus hijos.
+        String cmd = "taskset -p ff $$ > /dev/null 2>&1; exec sway > /tmp/rescate-grafico.log 2>&1";
         if (BuildConfig.DIAGNOSTICO) {
             try {
                 File script = new File(prefijo, "tmp/probar-escritorios.sh");
@@ -161,10 +168,6 @@ public class TerminalService extends Service implements TerminalSessionClient {
                 Log.e(TAG, "script de diagnóstico", e);
             }
         }
-        // El selector administra el compositor elegido y usa sway como rescate. El perfil
-        // gráfico crea un bus D-Bus efímero que comparte con el compositor y sus servicios.
-        String sesion = instalacion.supervisorSesion();
-        boolean supervisor = !BuildConfig.DIAGNOSTICO && new File(prefijo, sesion).exists();
         ProcessBuilder pb;
         if (supervisor) {
             pb = new ProcessBuilder(cargador, "/usr/bin/bash", "-lc", "exec " + sesion);
@@ -200,7 +203,9 @@ public class TerminalService extends Service implements TerminalSessionClient {
 
     // El supervisor publica el socket real del compositor anidado tras detectarlo.
     private String waylandDisplay() {
-        File f = new File(SistemaLinux.adaptadorSeleccionado(this).raiz(this), Wayland.runtimeDir().substring(1) + "/arch-android-display");
+        File raiz = SistemaLinux.adaptadorSeleccionado(this).raiz(this);
+        File f = new File(raiz, Wayland.runtimeDir().substring(1) + "/linux-session-display");
+        if (!f.isFile()) f = new File(raiz, Wayland.runtimeDir().substring(1) + "/arch-android-display");
         try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(f))) {
             String s = r.readLine();
             if (s != null && s.matches("[A-Za-z0-9_.-]+")) return s;
@@ -216,8 +221,61 @@ public class TerminalService extends Service implements TerminalSessionClient {
         System.arraycopy(args, 0, todo, 1, args.length);
         ProcessBuilder pb = new ProcessBuilder(todo);
         entornoLinux(pb);
-        pb.environment().put("WAYLAND_DISPLAY", waylandDisplay());
+        aplicarEndpointPantalla(pb);
         return pb;
+    }
+
+    private File archivoSesionGrafica(File prefijo) {
+        return new File(prefijo, Wayland.runtimeDir().substring(1)
+                + "/linux-session.properties");
+    }
+
+    private Properties sesionGrafica() {
+        AdaptadorInstalacion instalacion = SistemaLinux.adaptadorSeleccionado(this);
+        Properties p = new Properties();
+        File archivo = archivoSesionGrafica(instalacion.raiz(this));
+        try (FileInputStream in = new FileInputStream(archivo)) {
+            p.load(in);
+            return p;
+        } catch (java.io.IOException ignorada) {
+            // Compatibilidad con una sesión levantada por versiones anteriores del supervisor.
+            File anterior = new File(instalacion.raiz(this), Wayland.runtimeDir().substring(1)
+                    + "/arch-android-session.properties");
+            try (FileInputStream in = new FileInputStream(anterior)) {
+                p.load(in);
+                return p;
+            } catch (java.io.IOException tambienIgnorada) {
+                return null;
+            }
+        }
+    }
+
+    String protocoloPantalla() {
+        Properties p = sesionGrafica();
+        if (p != null) return p.getProperty("protocol");
+        // Compatibilidad con prefijos donde aún corre el supervisor anterior.
+        AdaptadorInstalacion instalacion = SistemaLinux.adaptadorSeleccionado(this);
+        File runtime = new File(instalacion.raiz(this), Wayland.runtimeDir().substring(1));
+        return new File(runtime, "linux-session-display").isFile()
+                || new File(runtime, "arch-android-display").isFile() ? "wayland" : null;
+    }
+
+    private void aplicarEndpointPantalla(ProcessBuilder pb) {
+        Properties p = sesionGrafica();
+        if (p == null) {
+            pb.environment().put("WAYLAND_DISPLAY", waylandDisplay());
+            return;
+        }
+        String protocolo = p.getProperty("protocol", "");
+        String variable = p.getProperty("connection_variable", "");
+        String endpoint = p.getProperty("endpoint", "");
+        boolean wayland = "wayland".equals(protocolo) && "WAYLAND_DISPLAY".equals(variable);
+        boolean x11 = "x11".equals(protocolo) && "DISPLAY".equals(variable);
+        pb.environment().remove("WAYLAND_DISPLAY");
+        pb.environment().remove("DISPLAY");
+        if ((!wayland && !x11) || !endpoint.matches("[A-Za-z0-9_.:-]+")) return;
+        pb.environment().put(variable, endpoint);
+        pb.environment().put("XDG_SESSION_TYPE", protocolo);
     }
 
     private void entornoLinux(ProcessBuilder pb) {
@@ -238,12 +296,18 @@ public class TerminalService extends Service implements TerminalSessionClient {
     }
 
     private String leerBusSesion(File prefijo) {
-        File f = new File(prefijo, Wayland.runtimeDir().substring(1) + "/arch-android-bus");
+        File f = new File(prefijo, Wayland.runtimeDir().substring(1) + "/linux-session-bus");
         try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(f))) {
             String bus = r.readLine();
             return bus == null || bus.isBlank() ? null : bus;
         } catch (java.io.IOException ignorada) {
-            return null;
+            f = new File(prefijo, Wayland.runtimeDir().substring(1) + "/arch-android-bus");
+            try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(f))) {
+                String bus = r.readLine();
+                return bus == null || bus.isBlank() ? null : bus;
+            } catch (java.io.IOException tambienIgnorada) {
+                return null;
+            }
         }
     }
 

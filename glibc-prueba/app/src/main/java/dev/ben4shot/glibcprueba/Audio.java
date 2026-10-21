@@ -13,7 +13,7 @@ import android.util.Log;
 import java.io.File;
 import java.io.FileDescriptor;
 
-// Audio Linux → Android. PipeWire (dentro de sway) tiene un sink "Android" de
+// Audio Linux → Android. PipeWire (dentro de la sesión) tiene un sink "Android" de
 // module-pipe-tunnel que escribe PCM S16LE 48 kHz estéreo en /tmp/audio-android
 // (sway/pipewire/10-android.conf); aquí se lee ese FIFO y se toca con un AudioTrack.
 //  - El FIFO se abre O_RDWR: no bloquea si PipeWire aún no lo abrió y no da EOF si se reinicia.

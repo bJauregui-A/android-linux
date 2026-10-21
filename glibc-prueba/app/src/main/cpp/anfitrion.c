@@ -35,6 +35,7 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
+#include <sys/sysmacros.h>
 #include <time.h>
 #include <unistd.h>
 #include <wayland-server.h>
@@ -42,7 +43,12 @@
 #include "android-ahb-v1-server-protocol.h"
 #include "keymap.h"
 #include "linux-dmabuf-v1-server-protocol.h"
+#include "pointer-constraints-unstable-v1-server-protocol.h"
 #include "pointer-gestures-unstable-v1-server-protocol.h"
+#include "presentation-time-server-protocol.h"
+#include "relative-pointer-unstable-v1-server-protocol.h"
+#include "single-pixel-buffer-v1-server-protocol.h"
+#include "viewporter-server-protocol.h"
 #include "xdg-shell-server-protocol.h"
 
 #define LOG(...) __android_log_print (ANDROID_LOG_INFO, "WAYLAND", __VA_ARGS__)
@@ -54,7 +60,11 @@ struct superficie
   struct wl_listener buffer_destruido;
   bool adjuntado;
   struct wl_list callbacks;	/* wl_callback pendientes */
+  struct wl_list feedbacks;	/* wp_presentation_feedback pendientes */
   struct wl_resource *xdg_surface, *toplevel;
+  struct wl_resource *subsurface, *viewport;
+  struct superficie *padre;
+  int dst_w, dst_h;
   bool configurado, mapeado;
   int buf_w, buf_h;
   struct wl_list link;		/* en toplevels */
@@ -430,9 +440,94 @@ dmabuf_create_params (struct wl_client *c, struct wl_resource *r, uint32_t id)
   wl_resource_set_implementation (p, &params_impl, d, params_destruidos);
 }
 
+/* Dispositivo sintético para zwp_linux_dmabuf_feedback_v1 (v4): coincide con
+   el st_rdev de /dev/udmabuf emulado en espacio de usuario (makedev(10, 123)),
+   de modo que KWin 6.8 seleccione su RenderDevice sobre udmabuf/Mesa sin nodo DRM.  */
+#define DMABUF_MAIN_DEV makedev (10, 123)
+
+struct entrada_tabla_dmabuf
+{
+  uint32_t formato;
+  uint32_t pad;
+  uint64_t modificador;
+};
+
+static const struct zwp_linux_dmabuf_feedback_v1_interface dmabuf_feedback_impl = {
+  .destroy = destruir_recurso,
+};
+
+static void
+enviar_dmabuf_feedback (struct wl_resource *f)
+{
+  size_t n = sizeof formatos_dmabuf / sizeof *formatos_dmabuf;
+  struct entrada_tabla_dmabuf tabla[sizeof formatos_dmabuf / sizeof *formatos_dmabuf];
+  uint16_t indices[sizeof formatos_dmabuf / sizeof *formatos_dmabuf];
+  for (size_t i = 0; i < n; i++)
+    {
+      tabla[i].formato = formatos_dmabuf[i];
+      tabla[i].pad = 0;
+      tabla[i].modificador = MOD_LINEAR;
+      indices[i] = (uint16_t) i;
+    }
+  int fd = memfd_create ("dmabuf-format-table", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+  if (fd >= 0)
+    {
+      if (write (fd, tabla, sizeof tabla) == (ssize_t) sizeof tabla)
+	{
+	  fcntl (fd, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE | F_SEAL_SEAL);
+	  zwp_linux_dmabuf_feedback_v1_send_format_table (f, fd, sizeof tabla);
+	}
+      close (fd);
+    }
+  dev_t dev = DMABUF_MAIN_DEV;
+  struct wl_array arr_dev;
+  wl_array_init (&arr_dev);
+  dev_t *p_dev = wl_array_add (&arr_dev, sizeof dev);
+  if (p_dev != NULL)
+    *p_dev = dev;
+  zwp_linux_dmabuf_feedback_v1_send_main_device (f, &arr_dev);
+  zwp_linux_dmabuf_feedback_v1_send_tranche_target_device (f, &arr_dev);
+  wl_array_release (&arr_dev);
+
+  struct wl_array arr_idx;
+  wl_array_init (&arr_idx);
+  void *p_idx = wl_array_add (&arr_idx, sizeof indices);
+  if (p_idx != NULL)
+    memcpy (p_idx, indices, sizeof indices);
+  zwp_linux_dmabuf_feedback_v1_send_tranche_formats (f, &arr_idx);
+  wl_array_release (&arr_idx);
+
+  zwp_linux_dmabuf_feedback_v1_send_tranche_flags (f, 0);
+  zwp_linux_dmabuf_feedback_v1_send_tranche_done (f);
+  zwp_linux_dmabuf_feedback_v1_send_done (f);
+}
+
+static void
+dmabuf_get_default_feedback (struct wl_client *c, struct wl_resource *r, uint32_t id)
+{
+  struct wl_resource *f = wl_resource_create (c, &zwp_linux_dmabuf_feedback_v1_interface,
+					      wl_resource_get_version (r), id);
+  if (f == NULL)
+    {
+      wl_client_post_no_memory (c);
+      return;
+    }
+  wl_resource_set_implementation (f, &dmabuf_feedback_impl, NULL, NULL);
+  enviar_dmabuf_feedback (f);
+}
+
+static void
+dmabuf_get_surface_feedback (struct wl_client *c, struct wl_resource *r, uint32_t id,
+			     struct wl_resource *surface)
+{
+  dmabuf_get_default_feedback (c, r, id);
+}
+
 static const struct zwp_linux_dmabuf_v1_interface linux_dmabuf_impl = {
   .destroy = destruir_recurso,
   .create_params = dmabuf_create_params,
+  .get_default_feedback = dmabuf_get_default_feedback,
+  .get_surface_feedback = dmabuf_get_surface_feedback,
 };
 
 static void
@@ -445,13 +540,14 @@ linux_dmabuf_bind (struct wl_client *c, void *data, uint32_t version, uint32_t i
       return;
     }
   wl_resource_set_implementation (r, &linux_dmabuf_impl, NULL, NULL);
-  for (size_t i = 0; i < sizeof formatos_dmabuf / sizeof *formatos_dmabuf; i++)
-    {
-      zwp_linux_dmabuf_v1_send_format (r, formatos_dmabuf[i]);
-      if (version >= ZWP_LINUX_DMABUF_V1_MODIFIER_SINCE_VERSION)
-	zwp_linux_dmabuf_v1_send_modifier (r, formatos_dmabuf[i], MOD_LINEAR >> 32,
-					   MOD_LINEAR & 0xffffffff);
-    }
+  if (version < ZWP_LINUX_DMABUF_V1_GET_DEFAULT_FEEDBACK_SINCE_VERSION)
+    for (size_t i = 0; i < sizeof formatos_dmabuf / sizeof *formatos_dmabuf; i++)
+      {
+	zwp_linux_dmabuf_v1_send_format (r, formatos_dmabuf[i]);
+	if (version >= ZWP_LINUX_DMABUF_V1_MODIFIER_SINCE_VERSION)
+	  zwp_linux_dmabuf_v1_send_modifier (r, formatos_dmabuf[i], MOD_LINEAR >> 32,
+					     MOD_LINEAR & 0xffffffff);
+      }
 }
 
 /* ---------- android-ahb-v1: cero copias ----------
@@ -886,21 +982,126 @@ enviar_configure (struct superficie *s)
 {
   if (s->toplevel == NULL || s->xdg_surface == NULL)
     return;
+  pthread_mutex_lock (&mtx);
+  int w = vent_w, h = vent_h;
+  pthread_mutex_unlock (&mtx);
+  uint32_t ver = wl_resource_get_version (s->toplevel);
+  if (ver >= XDG_TOPLEVEL_CONFIGURE_BOUNDS_SINCE_VERSION && w > 0 && h > 0)
+    xdg_toplevel_send_configure_bounds (s->toplevel, w, h);
+  if (ver >= XDG_TOPLEVEL_WM_CAPABILITIES_SINCE_VERSION && !s->configurado)
+    {
+      struct wl_array caps;
+      wl_array_init (&caps);
+      uint32_t *c = wl_array_add (&caps, 2 * sizeof (uint32_t));
+      if (c != NULL)
+	{
+	  c[0] = XDG_TOPLEVEL_WM_CAPABILITIES_MAXIMIZE;
+	  c[1] = XDG_TOPLEVEL_WM_CAPABILITIES_FULLSCREEN;
+	}
+      xdg_toplevel_send_wm_capabilities (s->toplevel, &caps);
+      wl_array_release (&caps);
+    }
   struct wl_array estados;
   wl_array_init (&estados);
   uint32_t *e = wl_array_add (&estados, 2 * sizeof (uint32_t));
   e[0] = XDG_TOPLEVEL_STATE_ACTIVATED;
   e[1] = XDG_TOPLEVEL_STATE_FULLSCREEN;
-  pthread_mutex_lock (&mtx);
-  int w = vent_w, h = vent_h;
-  pthread_mutex_unlock (&mtx);
   xdg_toplevel_send_configure (s->toplevel, w, h, &estados);
   xdg_surface_send_configure (s->xdg_surface, wl_display_next_serial (display));
   wl_array_release (&estados);
   s->configurado = true;
 }
 
+/* ---------- wp_single_pixel_buffer_v1 ---------- */
+
+struct pixel_unico
+{
+  uint32_t rgba;
+};
+
+static const struct wl_buffer_interface single_pixel_buffer_impl = {
+  .destroy = destruir_recurso,
+};
+
+static void
+single_pixel_destruido (struct wl_resource *r)
+{
+  free (wl_resource_get_user_data (r));
+}
+
+static struct pixel_unico *
+single_pixel_de (struct wl_resource *buffer)
+{
+  if (!wl_resource_instance_of (buffer, &wl_buffer_interface, &single_pixel_buffer_impl))
+    return NULL;
+  return wl_resource_get_user_data (buffer);
+}
+
+static void
+spb_create_u32_rgba (struct wl_client *c, struct wl_resource *r, uint32_t id,
+		     uint32_t red, uint32_t green, uint32_t blue, uint32_t alpha)
+{
+  struct pixel_unico *p = calloc (1, sizeof *p);
+  struct wl_resource *b = wl_resource_create (c, &wl_buffer_interface, 1, id);
+  if (p == NULL || b == NULL)
+    {
+      free (p);
+      wl_client_post_no_memory (c);
+      return;
+    }
+  p->rgba = ((red >> 24) & 0xff)
+	    | (((green >> 24) & 0xff) << 8)
+	    | (((blue >> 24) & 0xff) << 16)
+	    | (((alpha >> 24) & 0xff) << 24);
+  wl_resource_set_implementation (b, &single_pixel_buffer_impl, p, single_pixel_destruido);
+}
+
+static const struct wp_single_pixel_buffer_manager_v1_interface spb_manager_impl = {
+  .destroy = destruir_recurso,
+  .create_u32_rgba_buffer = spb_create_u32_rgba,
+};
+
+static void
+spb_manager_bind (struct wl_client *c, void *data, uint32_t version, uint32_t id)
+{
+  struct wl_resource *r = wl_resource_create (c, &wp_single_pixel_buffer_manager_v1_interface,
+					      version, id);
+  if (r == NULL)
+    wl_client_post_no_memory (c);
+  else
+    wl_resource_set_implementation (r, &spb_manager_impl, NULL, NULL);
+}
+
 /* ---------- wl_surface ---------- */
+
+static void
+responder_feedbacks (struct wl_list *fbs)
+{
+  struct timespec ts;
+  clock_gettime (CLOCK_MONOTONIC, &ts);
+  uint32_t sec_hi = (uint64_t) ts.tv_sec >> 32;
+  uint32_t sec_lo = (uint32_t) ts.tv_sec;
+  uint32_t nsec = (uint32_t) ts.tv_nsec;
+  static uint64_t seq;
+  seq++;
+  struct wl_resource *fb, *tmp;
+  wl_resource_for_each_safe (fb, tmp, fbs)
+    {
+      wp_presentation_feedback_send_presented (fb, sec_hi, sec_lo, nsec,
+					       16666666, seq >> 32, (uint32_t) seq,
+					       WP_PRESENTATION_FEEDBACK_KIND_VSYNC);
+      wl_resource_destroy (fb);
+    }
+}
+
+static struct superficie *
+raiz_de (struct superficie *s)
+{
+  int n = 0;
+  while (s != NULL && s->padre != NULL && n++ < 16)
+    s = s->padre;
+  return s;
+}
 
 static void
 buffer_destruido (struct wl_listener *l, void *data)
@@ -954,6 +1155,8 @@ static void
 surface_commit (struct wl_client *c, struct wl_resource *r)
 {
   struct superficie *s = wl_resource_get_user_data (r);
+  struct superficie *raiz = raiz_de (s);
+  bool es_foco = (s == foco || raiz == foco);
   if (s->adjuntado)
     {
       s->adjuntado = false;
@@ -972,46 +1175,73 @@ surface_commit (struct wl_client *c, struct wl_resource *r)
       else
 	{
 	  struct wl_shm_buffer *shm = wl_shm_buffer_get (buffer);
+	  struct pixel_unico *spb = shm == NULL ? single_pixel_de (buffer) : NULL;
 	  if (s->toplevel != NULL && s->configurado && !s->mapeado)
 	    {
 	      s->mapeado = true;
 	      wl_list_remove (&s->link);
 	      wl_list_insert (toplevels.prev, &s->link);
 	      elegir_foco ();
+	      es_foco = (s == foco || raiz == foco);
 	      /* El backend wayland de wlroots ignora el tamaño del configure que
 		 llega mientras activa la salida: sin otro, sway se quedaba en
 		 1280×720 (estirado) hasta que la ventana cambiara de tamaño.  */
 	      enviar_configure (s);
 	    }
-	  struct dmabuf *dmabuf = shm == NULL ? dmabuf_de (buffer) : NULL;
-	  struct ahb *ahb = shm == NULL && dmabuf == NULL ? ahb_de (buffer) : NULL;
-	  if (ahb != NULL && s == foco && !con_capa)
-	    mostrar_ahb_cpu (s, ahb);	/* y se libera abajo */
-	  else if (ahb != NULL && s == foco)
+	  if (spb != NULL)
 	    {
-	      /* Lo libera SurfaceFlinger; los frame callbacks, al mostrarse.  */
-	      s->buf_w = ahb->w;
-	      s->buf_h = ahb->h;
-	      liberar_cpu ();
-	      presentar (ahb, &s->callbacks);
-	      return;
-	    }
-	  if (shm != NULL && s == foco)
-	    {
-	      ocultar_capa ();
-	      copiar_shm (s, shm);
-	    }
-	  if (dmabuf != NULL && s == foco)
-	    {
-	      ocultar_capa ();
-	      mostrar_dmabuf (s, dmabuf);	/* lo libera al llegar el siguiente */
+	      /* Buffer 1×1 (p. ej. el fondo negro del toplevel en KWin 6.8):
+		 actualiza las dimensiones lógicas de la superficie según wp_viewport,
+		 pero deja que la subsuperficie hija pinte el contenido real.  */
+	      s->buf_w = s->dst_w > 0 ? s->dst_w : (vent_w > 0 ? vent_w : 1);
+	      s->buf_h = s->dst_h > 0 ? s->dst_h : (vent_h > 0 ? vent_h : 1);
+	      wl_buffer_send_release (buffer);
 	    }
 	  else
-	    wl_buffer_send_release (buffer);
+	    {
+	      struct dmabuf *dmabuf = shm == NULL ? dmabuf_de (buffer) : NULL;
+	      struct ahb *ahb = shm == NULL && dmabuf == NULL ? ahb_de (buffer) : NULL;
+	      if (ahb != NULL && es_foco && !con_capa)
+		{
+		  mostrar_ahb_cpu (raiz, ahb);	/* y se libera abajo */
+		  s->buf_w = ahb->w;
+		  s->buf_h = ahb->h;
+		}
+	      else if (ahb != NULL && es_foco)
+		{
+		  /* Lo libera SurfaceFlinger; los frame callbacks, al mostrarse.  */
+		  s->buf_w = ahb->w;
+		  s->buf_h = ahb->h;
+		  raiz->buf_w = ahb->w;
+		  raiz->buf_h = ahb->h;
+		  liberar_cpu ();
+		  responder_feedbacks (&s->feedbacks);
+		  presentar (ahb, &s->callbacks);
+		  return;
+		}
+	      if (shm != NULL && es_foco)
+		{
+		  ocultar_capa ();
+		  copiar_shm (raiz, shm);
+		  s->buf_w = raiz->buf_w;
+		  s->buf_h = raiz->buf_h;
+		}
+	      if (dmabuf != NULL && es_foco)
+		{
+		  ocultar_capa ();
+		  mostrar_dmabuf (raiz, dmabuf);	/* lo libera al llegar el siguiente */
+		  s->buf_w = raiz->buf_w;
+		  s->buf_h = raiz->buf_h;
+		}
+	      else
+		wl_buffer_send_release (buffer);
+	    }
 	}
     }
   else if (s->toplevel != NULL && !s->configurado)
     enviar_configure (s);	/* commit inicial, sin buffer */
+
+  responder_feedbacks (&s->feedbacks);
 
   pthread_mutex_lock (&mtx);
   bool hay_ventana = ventana != NULL;
@@ -1061,12 +1291,21 @@ surface_destruida (struct wl_resource *r)
   struct wl_resource *cb, *tmp;
   wl_resource_for_each_safe (cb, tmp, &s->callbacks)
     wl_resource_destroy (cb);
+  wl_resource_for_each_safe (cb, tmp, &s->feedbacks)
+    {
+      wp_presentation_feedback_send_discarded (cb);
+      wl_resource_destroy (cb);
+    }
   wl_list_remove (&s->buffer_destruido.link);
   wl_list_remove (&s->link);
   if (s->xdg_surface != NULL)
     wl_resource_set_user_data (s->xdg_surface, NULL);
   if (s->toplevel != NULL)
     wl_resource_set_user_data (s->toplevel, NULL);
+  if (s->subsurface != NULL)
+    wl_resource_set_user_data (s->subsurface, NULL);
+  if (s->viewport != NULL)
+    wl_resource_set_user_data (s->viewport, NULL);
   if (foco_puntero == s)
     foco_puntero = NULL;
   if (foco == s)
@@ -1102,6 +1341,7 @@ compositor_create_surface (struct wl_client *c, struct wl_resource *r, uint32_t 
       return;
     }
   wl_list_init (&s->callbacks);
+  wl_list_init (&s->feedbacks);
   wl_list_init (&s->link);
   wl_list_init (&s->buffer_destruido.link);
   s->buffer_destruido.notify = buffer_destruido;
@@ -1130,6 +1370,180 @@ compositor_bind (struct wl_client *c, void *data, uint32_t version, uint32_t id)
   wl_resource_set_implementation (r, &compositor_impl, NULL, NULL);
 }
 
+/* ---------- wl_subcompositor / wl_subsurface ---------- */
+
+static void sub_pos (struct wl_client *c, struct wl_resource *r, int32_t x, int32_t y) { }
+static void sub_place (struct wl_client *c, struct wl_resource *r, struct wl_resource *sib) { }
+static void sub_nada (struct wl_client *c, struct wl_resource *r) { }
+
+static const struct wl_subsurface_interface subsurface_impl = {
+  .destroy = destruir_recurso,
+  .set_position = sub_pos,
+  .place_above = sub_place,
+  .place_below = sub_place,
+  .set_sync = sub_nada,
+  .set_desync = sub_nada,
+};
+
+static void
+subsurface_destruida (struct wl_resource *r)
+{
+  struct superficie *s = wl_resource_get_user_data (r);
+  if (s != NULL)
+    {
+      s->subsurface = NULL;
+      s->padre = NULL;
+    }
+}
+
+static void
+subcompositor_get_subsurface (struct wl_client *c, struct wl_resource *r, uint32_t id,
+			      struct wl_resource *surface, struct wl_resource *parent)
+{
+  struct superficie *s = wl_resource_get_user_data (surface);
+  struct superficie *p = wl_resource_get_user_data (parent);
+  struct wl_resource *sub = wl_resource_create (c, &wl_subsurface_interface, 1, id);
+  if (sub == NULL)
+    {
+      wl_client_post_no_memory (c);
+      return;
+    }
+  wl_resource_set_implementation (sub, &subsurface_impl, s, subsurface_destruida);
+  if (s != NULL)
+    {
+      s->subsurface = sub;
+      s->padre = p;
+    }
+}
+
+static const struct wl_subcompositor_interface subcompositor_impl = {
+  .destroy = destruir_recurso,
+  .get_subsurface = subcompositor_get_subsurface,
+};
+
+static void
+subcompositor_bind (struct wl_client *c, void *data, uint32_t version, uint32_t id)
+{
+  struct wl_resource *r = wl_resource_create (c, &wl_subcompositor_interface, version, id);
+  if (r == NULL)
+    wl_client_post_no_memory (c);
+  else
+    wl_resource_set_implementation (r, &subcompositor_impl, NULL, NULL);
+}
+
+/* ---------- wp_viewporter / wp_viewport ---------- */
+
+static void
+viewport_set_source (struct wl_client *c, struct wl_resource *r,
+		     wl_fixed_t x, wl_fixed_t y, wl_fixed_t w, wl_fixed_t h)
+{
+}
+
+static void
+viewport_set_destination (struct wl_client *c, struct wl_resource *r,
+			  int32_t w, int32_t h)
+{
+  struct superficie *s = wl_resource_get_user_data (r);
+  if (s != NULL)
+    {
+      s->dst_w = w;
+      s->dst_h = h;
+    }
+}
+
+static const struct wp_viewport_interface viewport_impl = {
+  .destroy = destruir_recurso,
+  .set_source = viewport_set_source,
+  .set_destination = viewport_set_destination,
+};
+
+static void
+viewport_destruido (struct wl_resource *r)
+{
+  struct superficie *s = wl_resource_get_user_data (r);
+  if (s != NULL)
+    {
+      s->viewport = NULL;
+      s->dst_w = 0;
+      s->dst_h = 0;
+    }
+}
+
+static void
+viewporter_get_viewport (struct wl_client *c, struct wl_resource *r, uint32_t id,
+			 struct wl_resource *surface)
+{
+  struct superficie *s = wl_resource_get_user_data (surface);
+  struct wl_resource *vp = wl_resource_create (c, &wp_viewport_interface,
+					       wl_resource_get_version (r), id);
+  if (vp == NULL)
+    {
+      wl_client_post_no_memory (c);
+      return;
+    }
+  wl_resource_set_implementation (vp, &viewport_impl, s, viewport_destruido);
+  if (s != NULL)
+    s->viewport = vp;
+}
+
+static const struct wp_viewporter_interface viewporter_impl = {
+  .destroy = destruir_recurso,
+  .get_viewport = viewporter_get_viewport,
+};
+
+static void
+viewporter_bind (struct wl_client *c, void *data, uint32_t version, uint32_t id)
+{
+  struct wl_resource *r = wl_resource_create (c, &wp_viewporter_interface, version, id);
+  if (r == NULL)
+    wl_client_post_no_memory (c);
+  else
+    wl_resource_set_implementation (r, &viewporter_impl, NULL, NULL);
+}
+
+/* ---------- wp_presentation ---------- */
+
+static void
+presentation_feedback (struct wl_client *c, struct wl_resource *r,
+		       struct wl_resource *surface, uint32_t callback)
+{
+  struct superficie *s = wl_resource_get_user_data (surface);
+  struct wl_resource *fb = wl_resource_create (c, &wp_presentation_feedback_interface,
+					       wl_resource_get_version (r), callback);
+  if (fb == NULL)
+    {
+      wl_client_post_no_memory (c);
+      return;
+    }
+  wl_resource_set_implementation (fb, NULL, NULL, quitar_de_lista);
+  if (s != NULL)
+    wl_list_insert (s->feedbacks.prev, wl_resource_get_link (fb));
+  else
+    {
+      wl_list_init (wl_resource_get_link (fb));
+      wp_presentation_feedback_send_discarded (fb);
+      wl_resource_destroy (fb);
+    }
+}
+
+static const struct wp_presentation_interface presentation_impl = {
+  .destroy = destruir_recurso,
+  .feedback = presentation_feedback,
+};
+
+static void
+presentation_bind (struct wl_client *c, void *data, uint32_t version, uint32_t id)
+{
+  struct wl_resource *r = wl_resource_create (c, &wp_presentation_interface, version, id);
+  if (r == NULL)
+    {
+      wl_client_post_no_memory (c);
+      return;
+    }
+  wl_resource_set_implementation (r, &presentation_impl, NULL, NULL);
+  wp_presentation_send_clock_id (r, CLOCK_MONOTONIC);
+}
+
 /* ---------- xdg_shell ---------- */
 
 static void pos_set_size (struct wl_client *c, struct wl_resource *r, int32_t w, int32_t h) { }
@@ -1153,10 +1567,16 @@ static const struct xdg_positioner_interface positioner_impl = {
 };
 
 static void popup_grab (struct wl_client *c, struct wl_resource *r, struct wl_resource *seat, uint32_t serial) { }
+static void popup_reposition (struct wl_client *c, struct wl_resource *r, struct wl_resource *pos, uint32_t token)
+{
+  if (wl_resource_get_version (r) >= XDG_POPUP_REPOSITIONED_SINCE_VERSION)
+    xdg_popup_send_repositioned (r, token);
+}
 
 static const struct xdg_popup_interface popup_impl = {
   .destroy = destruir_recurso,
   .grab = popup_grab,
+  .reposition = popup_reposition,
 };
 
 static void tl_set_parent (struct wl_client *c, struct wl_resource *r, struct wl_resource *p) { }
@@ -1472,6 +1892,102 @@ gestos_bind (struct wl_client *c, void *data, uint32_t version, uint32_t id)
 {
   struct wl_resource *r = wl_resource_create (c, &zwp_pointer_gestures_v1_interface, version, id);
   wl_resource_set_implementation (r, &gestos_impl, NULL, NULL);
+}
+
+/* ---------- zwp_pointer_constraints_v1 / zwp_relative_pointer_manager_v1 ---------- */
+
+static void locked_pointer_hint (struct wl_client *c, struct wl_resource *r,
+				 wl_fixed_t x, wl_fixed_t y) { }
+static void constraint_set_region (struct wl_client *c, struct wl_resource *r,
+				   struct wl_resource *region) { }
+
+static const struct zwp_locked_pointer_v1_interface locked_pointer_impl = {
+  .destroy = destruir_recurso,
+  .set_cursor_position_hint = locked_pointer_hint,
+  .set_region = constraint_set_region,
+};
+
+static const struct zwp_confined_pointer_v1_interface confined_pointer_impl = {
+  .destroy = destruir_recurso,
+  .set_region = constraint_set_region,
+};
+
+static void
+constraints_lock_pointer (struct wl_client *c, struct wl_resource *r, uint32_t id,
+			  struct wl_resource *surface, struct wl_resource *pointer,
+			  struct wl_resource *region, uint32_t lifetime)
+{
+  struct wl_resource *lp = wl_resource_create (c, &zwp_locked_pointer_v1_interface,
+					       wl_resource_get_version (r), id);
+  if (lp == NULL)
+    wl_client_post_no_memory (c);
+  else
+    wl_resource_set_implementation (lp, &locked_pointer_impl, NULL, NULL);
+}
+
+static void
+constraints_confine_pointer (struct wl_client *c, struct wl_resource *r, uint32_t id,
+			     struct wl_resource *surface, struct wl_resource *pointer,
+			     struct wl_resource *region, uint32_t lifetime)
+{
+  struct wl_resource *cp = wl_resource_create (c, &zwp_confined_pointer_v1_interface,
+					       wl_resource_get_version (r), id);
+  if (cp == NULL)
+    wl_client_post_no_memory (c);
+  else
+    {
+      wl_resource_set_implementation (cp, &confined_pointer_impl, NULL, NULL);
+      zwp_confined_pointer_v1_send_confined (cp);
+    }
+}
+
+static const struct zwp_pointer_constraints_v1_interface pointer_constraints_impl = {
+  .destroy = destruir_recurso,
+  .lock_pointer = constraints_lock_pointer,
+  .confine_pointer = constraints_confine_pointer,
+};
+
+static void
+pointer_constraints_bind (struct wl_client *c, void *data, uint32_t version, uint32_t id)
+{
+  struct wl_resource *r = wl_resource_create (c, &zwp_pointer_constraints_v1_interface,
+					      version, id);
+  if (r == NULL)
+    wl_client_post_no_memory (c);
+  else
+    wl_resource_set_implementation (r, &pointer_constraints_impl, NULL, NULL);
+}
+
+static const struct zwp_relative_pointer_v1_interface relative_pointer_impl = {
+  .destroy = destruir_recurso,
+};
+
+static void
+relative_pointer_get (struct wl_client *c, struct wl_resource *r, uint32_t id,
+		      struct wl_resource *pointer)
+{
+  struct wl_resource *rp = wl_resource_create (c, &zwp_relative_pointer_v1_interface,
+					       wl_resource_get_version (r), id);
+  if (rp == NULL)
+    wl_client_post_no_memory (c);
+  else
+    wl_resource_set_implementation (rp, &relative_pointer_impl, NULL, NULL);
+}
+
+static const struct zwp_relative_pointer_manager_v1_interface relative_pointer_manager_impl = {
+  .destroy = destruir_recurso,
+  .get_relative_pointer = relative_pointer_get,
+};
+
+static void
+relative_pointer_manager_bind (struct wl_client *c, void *data, uint32_t version, uint32_t id)
+{
+  struct wl_resource *r = wl_resource_create (c, &zwp_relative_pointer_manager_v1_interface,
+					      version, id);
+  if (r == NULL)
+    wl_client_post_no_memory (c);
+  else
+    wl_resource_set_implementation (r, &relative_pointer_manager_impl, NULL, NULL);
 }
 
 /* ---------- wl_output ---------- */
@@ -1852,11 +2368,17 @@ Java_dev_ben4shot_glibcprueba_Wayland_iniciar (JNIEnv *env, jclass cls, jstring 
   wl_display_add_shm_format (display, WL_SHM_FORMAT_XBGR8888);
   wl_display_add_shm_format (display, WL_SHM_FORMAT_ABGR8888);
   wl_global_create (display, &wl_compositor_interface, 6, NULL, compositor_bind);
-  wl_global_create (display, &xdg_wm_base_interface, 2, NULL, wm_base_bind);
-  wl_global_create (display, &wl_seat_interface, 7, NULL, seat_bind);
+  wl_global_create (display, &wl_subcompositor_interface, 1, NULL, subcompositor_bind);
+  wl_global_create (display, &xdg_wm_base_interface, 6, NULL, wm_base_bind);
+  wl_global_create (display, &wp_single_pixel_buffer_manager_v1_interface, 1, NULL, spb_manager_bind);
+  wl_global_create (display, &wp_viewporter_interface, 1, NULL, viewporter_bind);
+  wl_global_create (display, &wp_presentation_interface, 1, NULL, presentation_bind);
+  wl_global_create (display, &wl_seat_interface, 9, NULL, seat_bind);
   wl_global_create (display, &wl_output_interface, 4, NULL, output_bind);
   wl_global_create (display, &zwp_pointer_gestures_v1_interface, 3, NULL, gestos_bind);
-  wl_global_create (display, &zwp_linux_dmabuf_v1_interface, 3, NULL, linux_dmabuf_bind);
+  wl_global_create (display, &zwp_pointer_constraints_v1_interface, 1, NULL, pointer_constraints_bind);
+  wl_global_create (display, &zwp_relative_pointer_manager_v1_interface, 1, NULL, relative_pointer_manager_bind);
+  wl_global_create (display, &zwp_linux_dmabuf_v1_interface, 4, NULL, linux_dmabuf_bind);
   if (__builtin_available (android 31, *))
     con_capa = true;
   wl_global_create (display, &android_ahb_v1_interface, 1, NULL, android_ahb_bind);

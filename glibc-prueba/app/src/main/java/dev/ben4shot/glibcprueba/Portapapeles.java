@@ -14,8 +14,8 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 
-// Portapapeles Android ↔ sway. El backend wayland de wlroots no reenvía el portapapeles al
-// anfitrión, así que el puente va por dentro de sway con wl-clipboard (data-control):
+// Portapapeles Android ↔ sesión Wayland. El backend wayland de wlroots no reenvía el portapapeles
+// al anfitrión, así que el puente va por dentro del compositor con wl-clipboard (data-control):
 //  Linux → Android: `wl-paste --watch` manda una línea base64 por cambio → setPrimaryClip.
 //  Android → Linux: al ganar el foco (Android solo deja leer a la app enfocada) → wl-copy.
 // `ultimo` evita que una copia rebote de un lado al otro.
@@ -26,7 +26,7 @@ class Portapapeles {
     private static volatile String ultimo;
     private static ClipboardManager.OnPrimaryClipChangedListener oyente;
 
-    // Lo llama el servicio al arrancar sway: vigila mientras sway viva (reintenta hasta
+    // Lo llama el servicio al arrancar el escritorio: vigila mientras viva (reintenta hasta
     // que su socket esté listo y si wl-paste se cae).
     static synchronized void iniciar(TerminalService s) {
         servicio = s;
@@ -37,6 +37,15 @@ class Portapapeles {
 
     private static void vigilar() {
         while (servicio.escritorioVivo()) {
+            String protocolo = servicio.protocoloPantalla();
+            if (protocolo == null) {
+                try { Thread.sleep(500); } catch (InterruptedException e) { return; }
+                continue;
+            }
+            if (!"wayland".equals(protocolo)) {
+                try { Thread.sleep(1000); } catch (InterruptedException e) { return; }
+                continue;
+            }
             try {
                 Process p = servicio.linux("/usr/bin/wl-paste", "--type", "text", "--watch",
                         "/usr/bin/sh", "-c", "base64 -w0; echo").start();
@@ -70,12 +79,12 @@ class Portapapeles {
     }
 
     // Lo llama WaylandActivity al ganar/perder el foco: mientras lo tiene, lo que se copie
-    // en Android (ej. el portapapeles de Gboard) también pasa a sway.
+    // en Android (ej. el portapapeles de Gboard) también pasa a la sesión Wayland.
     static void foco(Context ctx, boolean foco) {
         ClipboardManager cm = ctx.getSystemService(ClipboardManager.class);
         if (oyente != null) cm.removePrimaryClipChangedListener(oyente);
         oyente = null;
-        if (!foco) return;
+        if (!foco || servicio == null) return;
         oyente = () -> haciaLinux(ctx, cm);
         cm.addPrimaryClipChangedListener(oyente);
         haciaLinux(ctx, cm);
@@ -84,7 +93,8 @@ class Portapapeles {
     private static void haciaLinux(Context ctx, ClipboardManager cm) {
         ClipData clip = cm.getPrimaryClip();
         TerminalService s = servicio;
-        if (clip == null || clip.getItemCount() == 0 || s == null || !s.escritorioVivo()) return;
+        if (clip == null || clip.getItemCount() == 0 || s == null || !s.escritorioVivo()
+                || !"wayland".equals(s.protocoloPantalla())) return;
         CharSequence cs = clip.getItemAt(0).coerceToText(ctx);
         if (cs == null || cs.length() == 0) return;
         String texto = cs.toString();
