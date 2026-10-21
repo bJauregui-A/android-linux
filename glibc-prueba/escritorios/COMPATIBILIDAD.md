@@ -81,6 +81,10 @@ por lo que los perfiles sin Xwayland no obtienen Steam automáticamente.
   `labwc` está configurado allí. La sesión y su panel aún no se han probado.
 - **Weston:** usa su backend Wayland anidado, pero la escala se redondea al entero más cercano
   (`2.5` pasa a `3`); puede quedar sobredimensionado aunque el compositor arranque.
+- **Hyprland (objetivo explícito):** aún no se ofrece como perfil arrancable. Aquamarine necesita
+  versiones de `xdg_wm_base`, `wl_seat` y linux-dmabuf superiores a las del anfitrión, y su
+  allocator/renderizador actual depende de DRM/GBM. El camino pendiente es adaptar Aquamarine a
+  AHardwareBuffer y dar a Hyprland EGL/Zink sin DRM; ver el análisis y fuentes en `PROYECTO.md`.
 
 ## Validación pendiente
 
