@@ -68,10 +68,11 @@ struct superficie
   bool configurado, mapeado;
   int buf_w, buf_h;
   struct wl_list link;		/* en toplevels */
+  struct wl_list link_todas;	/* en todas (mapeadas o no) */
 };
 
 static struct wl_display *display;
-static struct wl_list toplevels, punteros, teclados, salidas, deslizar;
+static struct wl_list toplevels, todas, punteros, teclados, salidas, deslizar;
 static struct superficie *foco, *foco_puntero;
 static uint32_t mods;
 
@@ -1166,6 +1167,10 @@ surface_commit (struct wl_client *c, struct wl_resource *r)
       s->buffer = NULL;
       if (buffer == NULL)
 	{
+	  /* attach(NULL) + commit inicial (Aquamarine): también es un commit
+	     inicial, hay que contestar con el configure.  */
+	  if (s->toplevel != NULL && !s->configurado)
+	    enviar_configure (s);
 	  if (s->mapeado)
 	    {
 	      s->mapeado = false;
@@ -1174,6 +1179,10 @@ surface_commit (struct wl_client *c, struct wl_resource *r)
 	}
       else
 	{
+	  /* Aquamarine (Hyprland) hace su primer commit ya con buffer y espera el
+	     configure para crear el monitor: sin esto nunca llegaba.  */
+	  if (s->toplevel != NULL && !s->configurado)
+	    enviar_configure (s);
 	  struct wl_shm_buffer *shm = wl_shm_buffer_get (buffer);
 	  struct pixel_unico *spb = shm == NULL ? single_pixel_de (buffer) : NULL;
 	  if (s->toplevel != NULL && s->configurado && !s->mapeado)
@@ -1298,6 +1307,7 @@ surface_destruida (struct wl_resource *r)
     }
   wl_list_remove (&s->buffer_destruido.link);
   wl_list_remove (&s->link);
+  wl_list_remove (&s->link_todas);
   if (s->xdg_surface != NULL)
     wl_resource_set_user_data (s->xdg_surface, NULL);
   if (s->toplevel != NULL)
@@ -1343,6 +1353,7 @@ compositor_create_surface (struct wl_client *c, struct wl_resource *r, uint32_t 
   wl_list_init (&s->callbacks);
   wl_list_init (&s->feedbacks);
   wl_list_init (&s->link);
+  wl_list_insert (todas.prev, &s->link_todas);
   wl_list_init (&s->buffer_destruido.link);
   s->buffer_destruido.notify = buffer_destruido;
   wl_resource_set_implementation (s->res, &surface_impl, s, surface_destruida);
@@ -2233,7 +2244,10 @@ procesar_cola (int fd, uint32_t mask, void *data)
       case EV_VENTANA:
 	{
 	  struct superficie *s;
-	  wl_list_for_each (s, &toplevels, link)
+	  /* Todas, no solo las mapeadas: Aquamarine espera un configure con
+	     tamaño antes de su primer buffer; si este llegó sin ventana (0×0)
+	     el monitor se quedaba sin modo.  */
+	  wl_list_for_each (s, &todas, link_todas)
 	    if (s->configurado)
 	      enviar_configure (s);
 	  struct wl_resource *r;
@@ -2352,6 +2366,7 @@ Java_dev_ben4shot_glibcprueba_Wayland_iniciar (JNIEnv *env, jclass cls, jstring 
   (*env)->ReleaseStringUTFChars (env, jdir, dir);
 
   wl_list_init (&toplevels);
+  wl_list_init (&todas);
   wl_list_init (&punteros);
   wl_list_init (&teclados);
   wl_list_init (&salidas);
