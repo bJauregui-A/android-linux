@@ -1,3 +1,4 @@
-# wlroots 0.20 (el parchado). Sus efectos piden GLES: si no arranca con Vulkan, vuelve a sway
+# wlroots 0.20 (el parchado). Sus efectos piden GLES2 (Zink+Turnip con libudmabuf-shim.so)
 export XDG_CURRENT_DESKTOP=Wayfire:wlroots
+export WLR_RENDERER=gles2 WLR_RENDERER_ALLOW_SOFTWARE=1
 exec wayfire -c ~/.config/wayfire.ini

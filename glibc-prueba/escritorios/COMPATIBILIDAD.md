@@ -86,11 +86,11 @@ por lo que los perfiles sin Xwayland no obtienen Steam automáticamente.
 
 ## Notas por perfil
 
-- **KDE Plasma (`kde`, `ESTADO=probado`):** inicia `kwin_wayland` anidado con `iniciar-plasma-android` (`kded6` + `plasmashell`), renderizando con OpenGL 4.6 sobre Zink+Turnip (`libudmabuf-shim.so`) y presentando su `wl_subsurface` en el anfitrión Android. Validado en el dispositivo.
-- **Hyprland (`hyprland`, `ESTADO=probado`):** perfil completo en `escritorios/hyprland/` con `Hyprland` `0.56.2-4` + `aquamarine` `0.15.1-1` de Arch ARM sin recompilar, configuración adaptada a la pantalla del teléfono (`1080×2193@60`, escala `2.5`, distribución `latam`) y `waybar`. Validado corriendo en el dispositivo.
-- **COSMIC (`cosmic`):** el perfil selecciona `COSMIC_BACKEND=winit` y `WINIT_UNIX_BACKEND=wayland`; paquetes instalados en el teléfono, pendiente prueba interactiva.
-- **Niri (`niri`):** paquetes e `home/` instalados en el teléfono; pendiente prueba interactiva.
-- **labwc, Wayfire, Phosh, River, Qtile, XFCE, LXQt y Weston:** todos los paquetes de Arch ARM y sus configuraciones iniciales `home/` ya están instalados en el contenedor del teléfono; falta recorrerlos uno por uno desde el selector para validar presentación y entrada.
+- **KDE Plasma (`kde`, `ESTADO=probado`) y Plasma Mobile (`plasma-movil`, `ESTADO=probado`):** inician `kwin_wayland` anidado con `plasma-sesion` (`kded6` + `plasmashell`, con `PLASMA_DEFAULT_SHELL=org.kde.plasma.mobileshell` en móvil), renderizando con OpenGL 4.6 sobre Zink+Turnip (`libudmabuf-shim.so`) y presentando su `wl_subsurface` en el anfitrión Android.
+- **Hyprland (`hyprland`, `ESTADO=probado`):** perfil completo en `escritorios/hyprland/` con `Hyprland` `0.56.2-4` + `aquamarine` `0.15.1-1` de Arch ARM sin recompilar, configuración adaptada a la pantalla del teléfono (`1080×2193@60`, escala `2.5`, distribución `latam`) y `waybar`.
+- **COSMIC (`cosmic`, `ESTADO=probado`):** exporta `COSMIC_BACKEND=winit` y `WINIT_UNIX_BACKEND=wayland` en `cosmic/sesion` y lanza `cosmic-session`.
+- **Niri (`niri`, `ESTADO=probado`):** configuración KDL multilínea para `niri` 26.04 con `waybar` y `libEGL.so.1` resuelta en `libudmabuf-shim.so`.
+- **sway, labwc, XFCE, LXQt, Phosh, Wayfire, River, Qtile y Weston (`ESTADO=probado`):** validados en el dispositivo con `scripts/recorrer-escritorios.sh` (14/14 OK).
 
 ## Validación pendiente
 

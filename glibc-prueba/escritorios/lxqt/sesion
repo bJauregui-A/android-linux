@@ -1,3 +1,4 @@
 # startlxqtwayland lanza el compositor de ~/.config/lxqt/session.conf (labwc) con la config de LXQt
 export XDG_CURRENT_DESKTOP=LXQt:wlroots
+export XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-$HOME/.config}
 exec startlxqtwayland

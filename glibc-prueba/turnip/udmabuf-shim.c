@@ -216,6 +216,38 @@ int fstat64(int fd, struct stat64 *st) {
     return fstat(fd, (struct stat *)st);
 }
 
+int stat(const char *pathname, struct stat *st) {
+    static int (*real_stat)(const char *, struct stat *);
+    if (!real_stat) real_stat = dlsym(RTLD_NEXT, "stat");
+    if (es_ruta_emulada(pathname) && st != NULL) {
+        memset(st, 0, sizeof(*st));
+        st->st_mode = S_IFCHR | 0666;
+        st->st_rdev = UDMABUF_DEV;
+        return 0;
+    }
+    return real_stat(pathname, st);
+}
+
+int stat64(const char *pathname, struct stat64 *st) {
+    return stat(pathname, (struct stat *)st);
+}
+
+int fstatat(int dirfd, const char *pathname, struct stat *st, int flags) {
+    static int (*real_fstatat)(int, const char *, struct stat *, int);
+    if (!real_fstatat) real_fstatat = dlsym(RTLD_NEXT, "fstatat");
+    if (es_ruta_emulada(pathname) && st != NULL) {
+        memset(st, 0, sizeof(*st));
+        st->st_mode = S_IFCHR | 0666;
+        st->st_rdev = UDMABUF_DEV;
+        return 0;
+    }
+    return real_fstatat(dirfd, pathname, st, flags);
+}
+
+int fstatat64(int dirfd, const char *pathname, struct stat64 *st, int flags) {
+    return fstatat(dirfd, pathname, (struct stat *)st, flags);
+}
+
 static __thread int tls_mmap_fd = -1;
 static __thread void *tls_mmap_addr = NULL;
 static __thread size_t tls_mmap_len = 0;
@@ -279,6 +311,8 @@ typedef struct _drmDevice {
 
 static int crear_drm_device_falso(drmDevicePtr *device) {
     if (!device) return -EINVAL;
+    const char *no_drm = getenv("UDMABUF_SHIM_NO_DRM");
+    if (no_drm && strcmp(no_drm, "1") == 0) return -ENOENT;
     drmDevicePtr d = calloc(1, sizeof(drmDevice));
     if (!d) return -ENOMEM;
     d->nodes = calloc(DRM_NODE_MAX, sizeof(char *));
@@ -295,6 +329,13 @@ static int crear_drm_device_falso(drmDevicePtr *device) {
 
 int drmGetDeviceFromDevId(dev_t dev_id, uint32_t flags, drmDevicePtr *device) {
     (void)dev_id; (void)flags;
+    Dl_info info;
+    if (dladdr(__builtin_return_address(0), &info) && info.dli_fname &&
+        strstr(info.dli_fname, "libwlroots") != NULL) {
+        const char *wlr = getenv("WLR_RENDERER");
+        if (wlr && strcmp(wlr, "vulkan") == 0)
+            return -ENOENT;
+    }
     return crear_drm_device_falso(device);
 }
 
@@ -602,6 +643,16 @@ static void inicializar_egl_ptrs(void) {
         real_eglGetProcAddress_fn = dlsym(RTLD_NEXT, "eglGetProcAddress");
     if (!real_eglGetPlatformDisplay)
         real_eglGetPlatformDisplay = dlsym(RTLD_NEXT, "eglGetPlatformDisplay");
+    if (!real_eglGetProcAddress_fn || !real_eglGetPlatformDisplay) {
+        void *h = dlopen("libEGL.so.1", RTLD_LAZY | RTLD_NOLOAD);
+        if (!h) h = dlopen("libEGL.so.1", RTLD_LAZY);
+        if (h) {
+            if (!real_eglGetProcAddress_fn)
+                real_eglGetProcAddress_fn = dlsym(h, "eglGetProcAddress");
+            if (!real_eglGetPlatformDisplay)
+                real_eglGetPlatformDisplay = dlsym(h, "eglGetPlatformDisplay");
+        }
+    }
     if (real_eglGetProcAddress_fn) {
         if (!real_eglQueryDevicesEXT)
             real_eglQueryDevicesEXT = real_eglGetProcAddress_fn("eglQueryDevicesEXT");
@@ -677,33 +728,10 @@ void *eglGetProcAddress(const char *procname) {
     return res;
 }
 
-/* Recorta versiones de wl_seat (v9->v7) y xdg_wm_base (v6->v5) si el cliente
-   hace wl_registry_bind con una versión mayor a la publicada por el anfitrión. */
-struct wl_interface_head {
-    const char *name;
-    int version;
-};
-
-void *wl_proxy_marshal_flags(void *proxy, uint32_t opcode,
-                             const struct wl_interface_head *interface,
-                             uint32_t version, uint32_t flags,
-                             uintptr_t a0, uintptr_t a1, uintptr_t a2,
-                             uintptr_t a3, uintptr_t a4, uintptr_t a5,
-                             uintptr_t a6, uintptr_t a7) {
-    static void *(*real_fn)(void *, uint32_t, const void *, uint32_t, uint32_t,
-                            uintptr_t, uintptr_t, uintptr_t, uintptr_t,
-                            uintptr_t, uintptr_t, uintptr_t, uintptr_t);
-    if (!real_fn) real_fn = dlsym(RTLD_NEXT, "wl_proxy_marshal_flags");
-    if (opcode == 0 && interface && interface->name && a1 != 0 &&
-        a2 == version && strcmp((const char *)a1, interface->name) == 0) {
-        if (strcmp(interface->name, "wl_seat") == 0 && version > 7) {
-            version = 7;
-            a2 = 7;
-        } else if (strcmp(interface->name, "xdg_wm_base") == 0 && version > 5) {
-            version = 5;
-            a2 = 5;
-        }
-    }
-    return real_fn(proxy, opcode, interface, version, flags,
-                   a0, a1, a2, a3, a4, a5, a6, a7);
+/* Phosh envía set_size(0, 0) con anchor=14 en el primer commit de "phosh home"
+   antes de recibir el configure; evitar que wlroots aborte el cliente. */
+void wlr_surface_reject_pending(void *surface, void *resource, uint32_t code, const char *fmt, ...) {
+    (void)surface; (void)resource; (void)code;
+    if (fmt && strstr(fmt, "height 0 requested") != NULL)
+        return;
 }

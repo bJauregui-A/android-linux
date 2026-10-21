@@ -61,6 +61,7 @@ ARCHIVOS = [
     # escritorio elegido al instalar (escritorios/: uno por carpeta) y lo que arranca con todos
     ("escritorios/sesion-android", "usr/local/bin/sesion-android", 0o755),
     ("escritorios/autostart-android", "usr/local/bin/autostart-android", 0o755),
+    ("escritorios/recorrer-escritorios", "usr/local/bin/recorrer-escritorios", 0o755),
     ("apk/sshd-android.conf", "etc/ssh/sshd_config.d/10-android.conf", 0o644),
     # instalador (primer arranque) y lo que instala después
     ("apk/primer-arranque.sh", f"{D}/primer-arranque.sh", 0o755),

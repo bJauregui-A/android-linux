@@ -1,8 +1,14 @@
 // niri en el teléfono (anidado en la app: Mod = Alt)
 input {
-    keyboard { xkb { layout "latam"; } }
+    keyboard {
+        xkb {
+            layout "latam"
+        }
+    }
 }
-output "winit" { scale @ESCALA@; }
+output "winit" {
+    scale @ESCALA@
+}
 prefer-no-csd
 spawn-at-startup "waybar" "-c" "/usr/local/share/arch-android/escritorios/comun/waybar.jsonc"
 binds {

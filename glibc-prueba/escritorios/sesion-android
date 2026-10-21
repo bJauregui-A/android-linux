@@ -33,6 +33,18 @@ case "$id" in ''|*[!a-z0-9-]*) id=$rescate ;; esac
 proveedor=${PROVEEDOR_PANTALLA:-}
 rechazar_perfil() {
     echo "perfil $id rechazado: $*" >&2
+    if [ -f "$XDG_RUNTIME_DIR/linux-session.recorriendo" ]; then
+        trap cambiar_escritorio USR1
+        printf '%s\n' "$$" > "$XDG_RUNTIME_DIR/linux-session.pid"
+        printf 'FALLO:%s:rechazado\n' "$id" > "$XDG_RUNTIME_DIR/linux-session.estado"
+        while [ -f "$XDG_RUNTIME_DIR/linux-session.recorriendo" ]; do
+            if [ -f "$XDG_RUNTIME_DIR/linux-session.cambiar" ]; then
+                rm -f "$XDG_RUNTIME_DIR/linux-session.cambiar"
+                cambiar_escritorio
+            fi
+            sleep 0.25
+        done
+    fi
     if [ "$id" != "$rescate" ] && [ -f "$D/$rescate/sesion" ]; then
         export ARCH_ESCRITORIO=$rescate
         exec "$0"
@@ -153,10 +165,26 @@ cd ~
 bus_file="$XDG_RUNTIME_DIR/linux-session-bus"
 bus_tmp="$bus_file.$$"
 printf '%s\n' "$DBUS_SESSION_BUS_ADDRESS" > "$bus_tmp" && mv -f "$bus_tmp" "$bus_file"
+pid_file="$XDG_RUNTIME_DIR/linux-session.pid"
+estado_file="$XDG_RUNTIME_DIR/linux-session.estado"
+printf '%s\n' "$$" > "$pid_file"
+printf 'INICIANDO:%s\n' "$id" > "$estado_file"
+
+# Asegurar que la configuración inicial home/ del perfil elegido exista sin pisar archivos del usuario.
+if [ -d "$D/$id/home" ]; then
+    while IFS= read -r -d '' archivo; do
+        rel=${archivo#"$D/$id/home/"}
+        destino="$HOME/$rel"
+        [ -e "$destino" ] && continue
+        mkdir -p "$(dirname "$destino")" 2>/dev/null || true
+        sed "s/@ESCALA@/${ANDROID_ESCALA:-2.5}/g" "$archivo" > "$destino" 2>/dev/null || true
+        [ -x "$archivo" ] && chmod +x "$destino" 2>/dev/null || true
+    done < <(find "$D/$id/home" -type f -print0)
+fi
 
 # Quitar el socket del padre: el nuevo compositor debe conectarse al anfitrión por wayland-0,
-# pero publicará su propio socket en XDG_RUNTIME_DIR.
-rm -f "$XDG_RUNTIME_DIR/$MARCADOR_PANTALLA"
+# pero publicará su propio socket en XDG_RUNTIME_DIR. Limpiar restos de compositores anteriores.
+rm -f "$XDG_RUNTIME_DIR/$MARCADOR_PANTALLA" "$XDG_RUNTIME_DIR"/wayland-[1-9]* "$XDG_RUNTIME_DIR"/sway-ipc.*.sock
 export "$VARIABLE_CONEXION_HOST=$VALOR_CONEXION_HOST"
 # El proveedor reserva el socket de salida para cualquier receta que no lo
 # elija sola. Se evitan también los locks heredados de sesiones anteriores.
@@ -213,6 +241,25 @@ limpiar_bus() {
     rm -f "$bus_tmp"
     rm -f "$screen_file"
     [ "$(cat "$perfil_file" 2>/dev/null)" = "$id" ] && rm -f "$perfil_file"
+    [ "$(cat "$pid_file" 2>/dev/null)" = "$$" ] && rm -f "$pid_file"
+}
+
+cambiar_escritorio() {
+    cerrando=1
+    detener_servicios
+    detener_target_grafico
+    if [ -n "${hijo:-}" ]; then
+        kill -TERM -- "-$hijo" 2>/dev/null || true
+        for _ in $(seq 12); do
+            kill -0 "$hijo" 2>/dev/null || break
+            sleep 0.25
+        done
+        kill -KILL -- "-$hijo" 2>/dev/null || true
+        wait "$hijo" 2>/dev/null || true
+    fi
+    rm -f "$XDG_RUNTIME_DIR/$MARCADOR_PANTALLA" "$screen_file"
+    unset ARCH_ESCRITORIO XDG_CURRENT_DESKTOP
+    exec "$0"
 }
 
 cerrar_sesion() {
@@ -223,6 +270,7 @@ cerrar_sesion() {
 }
 
 trap cerrar_sesion TERM HUP INT
+trap cambiar_escritorio USR1
 # Esperar a que aparezca un socket distinto al del anfitrión (normalmente wayland-1) y
 # publicarlo para Java, clipboard y audio. No fijamos su nombre: respetamos WAYLAND_DISPLAY.
 for i in $(seq $((TIEMPO_READY * 4))); do
@@ -271,23 +319,30 @@ if [ -s "$XDG_RUNTIME_DIR/$MARCADOR_PANTALLA" ]; then
         fi
     fi
     # Los servicios comparten este bus y el ciclo de vida del supervisor, no el del WM.
+    printf 'LISTO:%s:%s\n' "$id" "$endpoint" > "$estado_file"
     autostart-android --esperar > /tmp/autostart-android.log 2>&1 &
     auto=$!
 else
     sin_socket=1
+    printf 'FALLO:%s:sin-socket\n' "$id" > "$estado_file"
     echo "el proveedor $proveedor no alcanzó readiness ($COMPROBACION_READY) en ${TIEMPO_READY}s para $id" >> "/tmp/$id.log"
     kill -TERM -- "-$hijo" 2>/dev/null
 fi
-while :; do
-    wait $hijo
-    r=$?
-    kill -0 $hijo 2> /dev/null || break  # wait cortado por la señal: esperar de nuevo
+while kill -0 "$hijo" 2>/dev/null; do
+    if [ -f "$XDG_RUNTIME_DIR/linux-session.cambiar" ]; then
+        rm -f "$XDG_RUNTIME_DIR/linux-session.cambiar"
+        cambiar_escritorio
+    fi
+    sleep 0.25
 done
+wait "$hijo" 2>/dev/null
+r=$?
 detener_servicios
 detener_target_grafico
 dura=$((SECONDS - inicio))
 if { [ $dura -lt 20 ] || [ -n "$sin_socket" ]; } && [ -z "$cerrando" ]; then
     . "$D/$id/escritorio.conf"
+    printf 'FALLO:%s:%s\n' "$id" "$r" > "$estado_file"
     echo "$NOMBRE terminó a los $dura s (código $r); log en /tmp/$id.log" >&2
     notify-send -u critical "$NOMBRE no arrancó" "Se conserva la elección. Log: /tmp/$id.log" 2> /dev/null
     rm -f "$XDG_RUNTIME_DIR/$MARCADOR_PANTALLA"
@@ -296,6 +351,16 @@ if { [ $dura -lt 20 ] || [ -n "$sin_socket" ]; } && [ -z "$cerrando" ]; then
         export ARCH_ESCRITORIO=$rescate
         exec "$0"
     fi
+fi
+if [ -f "$XDG_RUNTIME_DIR/linux-session.recorriendo" ] && [ -z "$cerrando" ]; then
+    printf 'FALLO:%s:%s\n' "$id" "${r:-1}" > "$estado_file"
+    while [ -f "$XDG_RUNTIME_DIR/linux-session.recorriendo" ]; do
+        if [ -f "$XDG_RUNTIME_DIR/linux-session.cambiar" ]; then
+            rm -f "$XDG_RUNTIME_DIR/linux-session.cambiar"
+            cambiar_escritorio
+        fi
+        sleep 0.25
+    done
 fi
 detener_systemd_usuario
 rm -f "$XDG_RUNTIME_DIR/$MARCADOR_PANTALLA"

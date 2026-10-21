@@ -1,0 +1,137 @@
+#!/usr/bin/bash
+# Recorre los entornos gráficos instalados uno por uno en la pantalla de Android:
+# abre cada uno, espera unos segundos tras estar listo para verlo en pantalla,
+# guarda el resumen en /tmp/recorrido-escritorios.log y pasa al siguiente.
+# Uso: recorrer-escritorios [segundos=10] [entorno1 entorno2 ...]
+set -u
+
+D=${LINUX_SESSION_PROFILES_DIR:-/usr/local/share/arch-android/escritorios}
+E=${LINUX_SESSION_STATE_DIR:-/var/lib/arch-android}
+if [ -z "${XDG_RUNTIME_DIR:-}" ] || [ ! -d "$XDG_RUNTIME_DIR" ]; then
+    for d in /run/user/*; do
+        [ -d "$d" ] && XDG_RUNTIME_DIR=$d && break
+    done
+fi
+export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+R=/tmp/recorrido-escritorios.log
+
+SEGUNDOS=10
+if [ "${1:-}" != "" ] && [[ "${1:-}" =~ ^[0-9]+$ ]]; then
+    SEGUNDOS=$1
+    shift
+fi
+
+if [ "$#" -gt 0 ]; then
+    IDS=("$@")
+else
+    mapfile -t IDS < <(sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d' "$D/orden")
+fi
+
+anterior=$(cat "$E/escritorio" 2>/dev/null || echo sway)
+case "$anterior" in ''|*[!a-z0-9-]*) anterior=sway ;; esac
+
+pid_file="$XDG_RUNTIME_DIR/linux-session.pid"
+estado_file="$XDG_RUNTIME_DIR/linux-session.estado"
+recorriendo_file="$XDG_RUNTIME_DIR/linux-session.recorriendo"
+cambiar_file="$XDG_RUNTIME_DIR/linux-session.cambiar"
+
+restaurar() {
+    trap - EXIT INT TERM HUP
+    rm -f "$recorriendo_file"
+    printf '%s\n' "$anterior" > "$E/escritorio"
+    local spid
+    spid=$(cat "$pid_file" 2>/dev/null || true)
+    if [ -n "$spid" ] && [ -d "/proc/$spid" ]; then
+        printf '\n==> Restaurando escritorio: %s\n' "$anterior" | tee -a "$R"
+        touch "$cambiar_file"
+        kill -USR1 "$spid" 2>/dev/null || true
+    fi
+}
+trap restaurar EXIT INT TERM HUP
+
+touch "$recorriendo_file"
+printf 'Recorrido de escritorios: %s (espera=%ss)\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$SEGUNDOS" > "$R"
+printf '============================================================\n' >> "$R"
+
+total=${#IDS[@]}
+actual=0
+ok_count=0
+fallo_count=0
+
+for id in "${IDS[@]}"; do
+    actual=$((actual + 1))
+    if [ ! -f "$D/$id/escritorio.conf" ] || [ ! -f "$D/$id/sesion" ]; then
+        printf '[%2d/%2d] %-14s SIN PERFIL\n' "$actual" "$total" "$id" | tee -a "$R"
+        fallo_count=$((fallo_count + 1))
+        continue
+    fi
+    NOMBRE=$id
+    DESCRIPCION=
+    . "$D/$id/escritorio.conf"
+
+    printf '[%2d/%2d] %-14s (%s): iniciando...\n' "$actual" "$total" "$id" "$NOMBRE" | tee -a "$R"
+    printf 'PENDIENTE:%s\n' "$id" > "$estado_file"
+    printf '%s\n' "$id" > "$E/escritorio"
+
+    spid=$(cat "$pid_file" 2>/dev/null || true)
+    if [ -z "$spid" ] || [ ! -d "/proc/$spid" ]; then
+        printf '  ERROR: sesion-android no está corriendo (abrir la ventana Wayland primero)\n' | tee -a "$R"
+        exit 1
+    fi
+    touch "$cambiar_file"
+    kill -USR1 "$spid" 2>/dev/null || true
+
+    listo=
+    fallo=
+    endpoint=
+    for _ in $(seq 1 80); do
+        est=$(cat "$estado_file" 2>/dev/null || true)
+        case "$est" in
+            "LISTO:$id:"*)
+                endpoint=${est#"LISTO:$id:"}
+                listo=1
+                break
+                ;;
+            "FALLO:$id:"*)
+                fallo=${est#"FALLO:$id:"}
+                break
+                ;;
+        esac
+        sleep 0.25
+    done
+
+    if [ -n "$listo" ]; then
+        bus=$(cat "$XDG_RUNTIME_DIR/linux-session-bus" 2>/dev/null || true)
+        [ -n "$bus" ] && export DBUS_SESSION_BUS_ADDRESS="$bus"
+        export WAYLAND_DISPLAY="$endpoint"
+        notify-send "[$actual/$total] $NOMBRE ($id)" "$DESCRIPCION — mostrando ${SEGUNDOS}s" 2>/dev/null || true
+
+        cayo=
+        for _ in $(seq 1 "$SEGUNDOS"); do
+            sleep 1
+            est=$(cat "$estado_file" 2>/dev/null || true)
+            case "$est" in
+                "FALLO:$id:"*)
+                    cayo=${est#"FALLO:$id:"}
+                    break
+                    ;;
+            esac
+        done
+
+        if [ -z "$cayo" ]; then
+            printf '[%2d/%2d] %-14s OK (socket=%s, %ss activo)\n' "$actual" "$total" "$id" "$endpoint" "$SEGUNDOS" | tee -a "$R"
+            ok_count=$((ok_count + 1))
+        else
+            printf '[%2d/%2d] %-14s CAYÓ durante la espera (%s) — ver /tmp/%s.log\n' "$actual" "$total" "$id" "$cayo" "$id" | tee -a "$R"
+            tail -n 5 "/tmp/$id.log" 2>/dev/null | sed 's/^/    /' >> "$R"
+            fallo_count=$((fallo_count + 1))
+        fi
+    else
+        printf '[%2d/%2d] %-14s FALLÓ (%s) — ver /tmp/%s.log\n' "$actual" "$total" "$id" "${fallo:-timeout}" "$id" | tee -a "$R"
+        tail -n 5 "/tmp/$id.log" 2>/dev/null | sed 's/^/    /' >> "$R"
+        fallo_count=$((fallo_count + 1))
+    fi
+done
+
+printf '============================================================\n' | tee -a "$R"
+printf 'Resumen: %d OK, %d con fallo (de %d). Log completo: %s\n' "$ok_count" "$fallo_count" "$total" "$R" | tee -a "$R"

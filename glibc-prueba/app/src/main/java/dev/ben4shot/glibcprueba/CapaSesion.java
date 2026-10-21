@@ -97,6 +97,8 @@ final class CapaSesion {
             relativo = "usr/local/bin/sesion-android";
         } else if (nombre.equals("escritorios/autostart-android")) {
             relativo = "usr/local/bin/autostart-android";
+        } else if (nombre.equals("escritorios/recorrer-escritorios")) {
+            relativo = "usr/local/bin/recorrer-escritorios";
         } else if (nombre.equals("escritorios") || nombre.startsWith("escritorios/")) {
             String cola = nombre.equals("escritorios") ? "" : nombre.substring("escritorios/".length());
             relativo = perfiles.substring(1) + (cola.isEmpty() ? "" : "/" + cola);

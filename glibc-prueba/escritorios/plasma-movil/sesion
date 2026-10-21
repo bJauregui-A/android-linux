@@ -1,2 +1,21 @@
-export XDG_CURRENT_DESKTOP=KDE KDE_SESSION_VERSION=6
-exec startplasmamobile
+export XDG_CURRENT_DESKTOP=KDE KDE_SESSION_VERSION=6 KDE_FULL_SESSION=true
+export KDE_SESSION_UID="$(id -u)" XDG_MENU_PREFIX=plasma-
+export KDE_APPLICATIONS_AS_SCOPE=1
+export PLASMA_DEFAULT_SHELL=org.kde.plasma.mobileshell
+export QT_QUICK_CONTROLS_MOBILE=1
+
+kwin=$(command -v kwin_wayland) || {
+    echo 'Plasma Mobile: no se encontró kwin_wayland en PATH' >&2
+    exit 127
+}
+plasma_sesion=${LINUX_SESSION_PROFILES_DIR:-/usr/local/share/arch-android/escritorios}/kde/plasma-sesion
+[ -x "$plasma_sesion" ] || {
+    echo "Plasma Mobile: falta el lanzador de sesión Plasma: $plasma_sesion" >&2
+    exit 127
+}
+
+socket=${ARCH_ANDROID_WAYLAND_SOCKET:?falta el socket de salida del proveedor}
+printf 'Plasma Mobile: entrada=%s salida=%s perfil=%s\n' "$WAYLAND_DISPLAY" "$socket" "$ARCH_ANDROID_DESKTOP"
+"$kwin" --wayland-display "$WAYLAND_DISPLAY" --socket "$socket" \
+    --no-global-shortcuts --no-lockscreen --exit-with-session "$plasma_sesion"
+exit $?

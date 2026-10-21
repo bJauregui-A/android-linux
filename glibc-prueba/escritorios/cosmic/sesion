@@ -1,3 +1,4 @@
 # cosmic-comp anidado (backend winit)
 export XDG_CURRENT_DESKTOP=COSMIC
+export COSMIC_BACKEND=winit WINIT_UNIX_BACKEND=wayland
 exec cosmic-session
