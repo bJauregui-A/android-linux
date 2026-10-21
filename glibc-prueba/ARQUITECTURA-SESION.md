@@ -47,9 +47,9 @@ El flujo objetivo, equivalente en sus contratos visibles a una sesión de escrit
 
 El host (`TerminalService`) lanza `sesion-android` con una marca para que el perfil de login no
 cree un bus persistente. El supervisor envuelve la sesión con `dbus-run-session`, guarda su
-dirección mientras vive y, al detectar el socket anidado, actualiza el entorno de activación D-Bus
-con `WAYLAND_DISPLAY` y el escritorio. TerminalService consulta ese archivo para conectar los
-procesos Linux posteriores al mismo bus. Después inicia `autostart-android`, que mantiene los PID
+dirección mientras vive y, al detectar el endpoint definido por el proveedor, actualiza el entorno
+de activación D-Bus con las variables de pantalla y el escritorio. TerminalService consulta el
+marcador del endpoint para conectar procesos Linux posteriores. Después inicia `autostart-android`, que mantiene los PID
 de los servicios que creó; al cerrar, pide a sway que cierre Steam ordenadamente y termina los
 servicios antes de señalizar al compositor. `dbus-run-session` destruye el bus al salir.
 
@@ -102,11 +102,18 @@ debe desactivarse o sustituirse por una implementación que use las capacidades 
 
 ### Sesión de escritorio
 
-Cada perfil declara metadatos, no una receta opaca: ID/nombre, paquetes, ejecutable de sesión,
-protocolo requerido, variables, servicios y comprobaciones de readiness. Los perfiles pueden pedir
-Wayland, X11 o ambos. El supervisor común resuelve dependencias, inicia el proveedor adecuado,
-inyecta el entorno estándar (`XDG_RUNTIME_DIR`, `XDG_SESSION_TYPE`, `WAYLAND_DISPLAY` o
-`DISPLAY`, D-Bus y rutas) y luego ejecuta la sesión.
+El contrato separa el perfil (`escritorio.conf`) del proveedor (`proveedores/<id>/proveedor.conf`).
+El perfil declara el proveedor requerido, requisitos de sesión, capacidades necesarias, nivel de
+readiness esperado, paquetes y ejecutable. El proveedor declara protocolo, entorno de conexión,
+capacidades ofrecidas y el identificador/plazo de su comprobación de readiness. El supervisor
+valida los requisitos y solo ejecuta comprobaciones que reconoce; una combinación no implementada
+falla explícitamente.
+
+El proveedor activo es `wayland-anidado`; todos los perfiles actuales lo declaran. Su comprobación
+detecta un socket Wayland nuevo y publica el endpoint para TerminalService y los servicios.
+`READY_LEVEL=proveedor-y-proceso` no implica que el escritorio haya presentado un cuadro o que la
+entrada, escala y portales funcionen. Añadir X11 requiere una comprobación propia y adaptar los
+clientes que necesiten `DISPLAY`; el contrato no lo habilita por sí solo.
 
 La disponibilidad debe distinguirse por capas: instalado, dependencias satisfechas, bus listo,
 proveedor de pantalla listo, compositor/WM listo, portal listo y sesión interactiva. Un socket
@@ -155,9 +162,9 @@ el ID elegido y solo habilita Arch, si existe o el APK trae su instalador.
 2. **Orquestador común (en curso):** todos los perfiles pasan por `sesion-android`; ya centraliza
    bus D-Bus de sesión, entorno de activación, readiness/logs básicos y cierre de los servicios que
    inicia. `AdaptadorInstalacion` ya separa rootfs, cargador, usuario/shell, instalación y entorno
-   gráfico específico de Arch del ciclo de vida Android. Siguiente: describir requisitos y estados
-   de readiness de cada proveedor/perfil, y quitar las suposiciones restantes antes de registrar
-   otra distribución.
+   gráfico específico de Arch del ciclo de vida Android. Los perfiles y el proveedor Wayland
+   declaran ahora requisitos, capacidades y readiness. Pendiente: agregar proveedores reales y
+   adaptar clientes/servicios según el tipo de pantalla antes de registrar otra distribución.
 3. **Sesión estándar:** evaluar `systemd --user` bajo Android; resolver D-Bus de sistema/sesión y
    portales a través de servicios reales o adaptadores explícitos. No declarar Plasma compatible
    hasta cumplir sus readiness checks.

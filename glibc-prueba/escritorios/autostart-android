@@ -4,17 +4,24 @@
 if [ "$1" = --esperar ]; then
     listo=
     for i in $(seq 120); do
-        if [ -s "$XDG_RUNTIME_DIR/arch-android-display" ]; then
-            display=$(cat "$XDG_RUNTIME_DIR/arch-android-display")
-            if [ -S "$XDG_RUNTIME_DIR/$display" ]; then
-                export WAYLAND_DISPLAY=$display
-                listo=1
-                break
-            fi
-        fi
+        case "${ARCH_ANDROID_READY_CHECK:-}" in
+            socket-wayland)
+                marker=${ARCH_ANDROID_SCREEN_MARKER:-arch-android-display}
+                variable=${ARCH_ANDROID_SCREEN_ENV:-WAYLAND_DISPLAY}
+                if [ -s "$XDG_RUNTIME_DIR/$marker" ]; then
+                    display=$(cat "$XDG_RUNTIME_DIR/$marker")
+                    if [ -S "$XDG_RUNTIME_DIR/$display" ]; then
+                        export "$variable=$display"
+                        listo=1
+                        break
+                    fi
+                fi
+                ;;
+            *) echo "comprobación de readiness no soportada: ${ARCH_ANDROID_READY_CHECK:-vacía}"; exit 78 ;;
+        esac
         sleep 0.5
     done
-    [ -n "$listo" ] || { echo "no apareció el socket Wayland"; exit 1; }
+    [ -n "$listo" ] || { echo "el proveedor no alcanzó readiness (${ARCH_ANDROID_READY_CHECK:-sin declarar})"; exit 1; }
 fi
 
 pids=()
@@ -121,12 +128,14 @@ cerrar() {
 trap cerrar EXIT
 trap 'exit 0' TERM HUP INT
 
-# Escala para compositores wlroots; los demás la configuran en su propio perfil.
+# Aplicar escala solo si el proveedor declara la capacidad wlroots correspondiente.
+case " ${ARCH_ANDROID_PROVIDER_CAPABILITIES:-} " in *" output-scale-wlr "*)
 if command -v wlr-randr >/dev/null 2>&1; then
     wlr-randr 2>/dev/null | awk '/^[^ ]/ { print $1 }' | while read -r salida; do
         wlr-randr --output "$salida" --scale "${ANDROID_ESCALA:-2.5}"
     done
 fi
+;; esac
 
 # Portapapeles Linux → historial de SUPER+V.
 command -v wl-paste >/dev/null 2>&1 && command -v cliphist >/dev/null 2>&1 && {

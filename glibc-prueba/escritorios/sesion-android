@@ -12,16 +12,48 @@ if [ -z "${ARCH_ANDROID_DBUS_WRAPPED:-}" ]; then
 fi
 
 D=/usr/local/share/arch-android/escritorios
+P=$D/proveedores
 E=/var/lib/arch-android
 # HyperOS ata algunos hilos de la app (el que lanza procesos) a los núcleos grandes (6-7) y el
 # escritorio lo heredaba: juego, Wine, Xwayland y Steam en 2 núcleos. Abrir la afinidad no pide root.
 taskset -p ff $$ > /dev/null 2>&1
 # Escala del teléfono (~400 dpi); otro dispositivo la cambia en ~/.config/entorno-android
 export ANDROID_ESCALA=${ANDROID_ESCALA:-2.5}
-export XKB_DEFAULT_LAYOUT=${XKB_DEFAULT_LAYOUT:-latam}  # compositores wlroots, niri...
-export XDG_SESSION_TYPE=wayland
 id=${ARCH_ESCRITORIO:-$(cat "$E/escritorio" 2>/dev/null)}
 [ -f "$D/$id/sesion" ] || id=sway
+. "$D/$id/escritorio.conf"
+proveedor=${PROVEEDOR_PANTALLA:-}
+[ -n "$proveedor" ] && [ -f "$P/$proveedor/proveedor.conf" ] || {
+    echo "perfil $id no declara un proveedor de pantalla válido" >&2
+    exit 78
+}
+. "$P/$proveedor/proveedor.conf"
+for requisito in $REQUISITOS_SESION; do
+    case "$requisito" in
+        dbus-session) [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ] || {
+            echo "falta el requisito de sesión: dbus-session" >&2; exit 78; } ;;
+        wayland|x11)
+            [ "$PROTOCOLO_PANTALLA" = "$requisito" ] || {
+                echo "el perfil requiere $requisito, pero $proveedor ofrece $PROTOCOLO_PANTALLA" >&2; exit 78; } ;;
+        *) echo "requisito de sesión no implementado: $requisito" >&2; exit 78 ;;
+    esac
+done
+for capacidad in $CAPACIDADES_REQUERIDAS; do
+    case " ${CAPACIDADES_PROVEEDOR:-} " in *" $capacidad "*) ;;
+        *) echo "el proveedor $proveedor no ofrece la capacidad requerida: $capacidad" >&2; exit 78;;
+    esac
+done
+case "$COMPROBACION_READY" in
+    socket-wayland) [ "$PROTOCOLO_PANTALLA" = wayland ] || exit 78 ;;
+    *) echo "comprobación de readiness no implementada: $COMPROBACION_READY" >&2; exit 78;;
+esac
+case "$READY_LEVEL" in proveedor-y-proceso) ;; *)
+    echo "nivel de readiness de perfil no implementado: ${READY_LEVEL:-vacío}" >&2; exit 78;; esac
+export XDG_SESSION_TYPE=$TIPO_SESION
+export ARCH_ANDROID_READY_CHECK=$COMPROBACION_READY
+export ARCH_ANDROID_SCREEN_MARKER=$MARCADOR_PANTALLA
+export ARCH_ANDROID_SCREEN_ENV=$VARIABLE_CONEXION_CLIENTE
+export ARCH_ANDROID_PROVIDER_CAPABILITIES=$CAPACIDADES_PROVEEDOR
 cd ~
 
 # Publicar el bus efímero para terminales Android y procesos que TerminalService lance después.
@@ -44,8 +76,8 @@ config() {
 config "$id"
 # Quitar el socket del padre: el nuevo compositor debe conectarse al anfitrión por wayland-0,
 # pero publicará su propio socket en XDG_RUNTIME_DIR.
-rm -f "$XDG_RUNTIME_DIR/arch-android-display"
-export WAYLAND_DISPLAY=wayland-0
+rm -f "$XDG_RUNTIME_DIR/$MARCADOR_PANTALLA"
+export "$VARIABLE_CONEXION_HOST=$VALOR_CONEXION_HOST"
 # Guardar sockets que ya existían para no confundir restos de una sesión anterior con la nueva.
 anteriores=" $(for s in "$XDG_RUNTIME_DIR"/wayland-*; do
     [ -S "$s" ] || continue
@@ -81,20 +113,33 @@ cerrar_sesion() {
 trap cerrar_sesion TERM HUP INT
 # Esperar a que aparezca un socket distinto al del anfitrión (normalmente wayland-1) y
 # publicarlo para Java, clipboard y audio. No fijamos su nombre: respetamos WAYLAND_DISPLAY.
-for i in $(seq 80); do
-    [ -s "$XDG_RUNTIME_DIR/arch-android-display" ] && break
-    for s in "$XDG_RUNTIME_DIR"/wayland-*; do
-        [ -S "$s" ] || continue
-        socket="${s##*/}:$(stat -c %i "$s" 2>/dev/null)"
-        case "$anteriores" in *" $socket "*) continue;; esac
-        printf '%s\n' "${s##*/}" > "$XDG_RUNTIME_DIR/arch-android-display"
-        break 2
-    done
+for i in $(seq $((TIEMPO_READY * 4))); do
+    case "$COMPROBACION_READY" in
+        socket-wayland)
+            encontrado=
+            for s in "$XDG_RUNTIME_DIR"/wayland-*; do
+                [ -S "$s" ] || continue
+                socket="${s##*/}:$(stat -c %i "$s" 2>/dev/null)"
+                case "$anteriores" in *" $socket "*) continue;; esac
+                printf '%s\n' "${s##*/}" > "$XDG_RUNTIME_DIR/$MARCADOR_PANTALLA"
+                encontrado=1
+                break
+            done
+            [ -n "$encontrado" ] && break
+            ;;
+    esac
     kill -0 "$hijo" 2>/dev/null || break
     sleep 0.25
 done
-if [ -s "$XDG_RUNTIME_DIR/arch-android-display" ]; then
-    export WAYLAND_DISPLAY=$(cat "$XDG_RUNTIME_DIR/arch-android-display")
+if [ -s "$XDG_RUNTIME_DIR/$MARCADOR_PANTALLA" ]; then
+    if ! kill -0 "$hijo" 2>/dev/null; then
+        sin_socket=1
+        echo "el proceso del perfil $id terminó antes de completar readiness" >> "/tmp/$id.log"
+        rm -f "$XDG_RUNTIME_DIR/$MARCADOR_PANTALLA"
+    fi
+fi
+if [ -s "$XDG_RUNTIME_DIR/$MARCADOR_PANTALLA" ]; then
+    export "$VARIABLE_CONEXION_CLIENTE=$(cat "$XDG_RUNTIME_DIR/$MARCADOR_PANTALLA")"
     export XDG_CURRENT_DESKTOP=${XDG_CURRENT_DESKTOP:-$id}
     # Los servicios activados por D-Bus deben heredar la pantalla del compositor anidado.
     dbus-update-activation-environment --all > /tmp/dbus-activation.log 2>&1 || true
@@ -103,7 +148,7 @@ if [ -s "$XDG_RUNTIME_DIR/arch-android-display" ]; then
     auto=$!
 else
     sin_socket=1
-    echo "el compositor $id no publicó un socket Wayland en 20 s" >> "/tmp/$id.log"
+    echo "el proveedor $proveedor no alcanzó readiness ($COMPROBACION_READY) en ${TIEMPO_READY}s para $id" >> "/tmp/$id.log"
     kill -TERM -- "-$hijo" 2>/dev/null
 fi
 while :; do
@@ -117,13 +162,13 @@ if { [ $dura -lt 20 ] || [ -n "$sin_socket" ]; } && [ -z "$cerrando" ]; then
     . "$D/$id/escritorio.conf"
     echo "$NOMBRE terminó a los $dura s (código $r): abro sway; log en /tmp/$id.log" >> /tmp/sway.log
     notify-send -u critical "$NOMBRE no arrancó" "Se abrió sway. Log: /tmp/$id.log" 2> /dev/null
-    rm -f "$XDG_RUNTIME_DIR/arch-android-display"
+    rm -f "$XDG_RUNTIME_DIR/$MARCADOR_PANTALLA"
     if [ "$id" != sway ]; then
         # El rescate también pasa por el mismo supervisor: socket, entorno y servicios comunes.
         export ARCH_ESCRITORIO=sway
         exec "$0"
     fi
 fi
-rm -f "$XDG_RUNTIME_DIR/arch-android-display"
+rm -f "$XDG_RUNTIME_DIR/$MARCADOR_PANTALLA"
 limpiar_bus
 exit $r

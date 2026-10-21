@@ -1,30 +1,57 @@
-# Compatibilidad de escritorios Wayland
+# Contrato de escritorios y proveedores de pantalla
 
-Los perfiles de `escritorios/` son recetas para ejecutar compositores anidados en el socket
-Wayland que publica Android. Que un paquete exista o que su comando esté en `sesion` no significa
-que ya esté probado. `escritorio.conf` conserva `ESTADO=sin-probar` hasta validar el entorno real.
+Los perfiles de `escritorios/` describen sesiones y los proveedores de
+`escritorios/proveedores/` describen cómo conectarlas a una pantalla. Son capas independientes:
+que un paquete exista o que su comando esté en `sesion` no significa que ya esté probado.
+`escritorio.conf` conserva `ESTADO=sin-probar` hasta validar el entorno real.
 
-## Contrato de un perfil
+## Contrato del perfil (`escritorio.conf`)
 
-- `sesion`: debe permanecer en primer plano y ejecutar el compositor con `exec`.
-- El compositor debe conectarse al anfitrión usando el `WAYLAND_DISPLAY` de entrada y publicar un
-  socket propio en `XDG_RUNTIME_DIR`.
-- `sesion-android` registra el socket nuevo y los servicios/app lo usan en vez de asumir
-  `wayland-1`. Si no aparece en 20 segundos, termina el intento y abre sway como rescate.
+- `PROVEEDOR_PANTALLA`: ID del proveedor requerido.
+- `REQUISITOS_SESION`: requisitos separados por espacios, por ejemplo `dbus-session wayland`.
+- `CAPACIDADES_REQUERIDAS`: capacidades que debe ofrecer el proveedor.
+- `READY_LEVEL`: etapa que declara el perfil. `proveedor-y-proceso` solo significa que el proveedor
+  pasó su comprobación y que el proceso del perfil sigue vivo; no acredita presentación, entrada ni
+  interactividad.
+- `sesion`: inicia los procesos del perfil en primer plano; normalmente termina con `exec`.
+- `paquetes.txt`, `home/` y `ESTADO`: dependencias, configuración inicial y nivel de validación.
+
+## Contrato del proveedor (`proveedor.conf`)
+
+- `PROTOCOLO_PANTALLA`, `TIPO_SESION` y las variables de conexión describen el entorno inyectado
+  al perfil.
+- `CAPACIDADES_PROVEEDOR` enumera capacidades ofrecidas; no se infieren del nombre del compositor.
+- `COMPROBACION_READY` y `TIEMPO_READY` identifican la comprobación del supervisor. Una
+  comprobación desconocida es un error explícito.
+- El marcador publicado en `$XDG_RUNTIME_DIR` expone el endpoint listo a TerminalService y los
+  servicios.
+
+El proveedor activo `wayland-anidado` conecta el compositor al `WAYLAND_DISPLAY` anfitrión y espera
+un socket Wayland nuevo. Todos los perfiles actuales lo solicitan explícitamente. Esto comprueba
+disponibilidad del endpoint, no que el compositor haya presentado un cuadro. Otros proveedores
+(por ejemplo, X11 anidado) necesitan su contrato y su comprobación de readiness antes de usarse.
+
+## Ciclo común
+
+- `sesion-android` carga los contratos del perfil y proveedor, valida los requisitos y arranca el
+  perfil con las variables declaradas por el proveedor.
+- Al superar readiness, publica el endpoint y lanza los servicios comunes. Si falla, termina el
+  intento y abre sway como rescate (hasta que el rescate también sea configurable).
 - `sesion-android` también inicia `autostart-android` tras detectar el socket, incluidos los
   servicios comunes que antes iniciaba sway desde su configuración.
 - `sesion-android` crea un único bus D-Bus de sesión, publica su dirección y actualiza el entorno
   de activación cuando ya conoce `WAYLAND_DISPLAY`. KDE/Plasma Mobile usan este mismo bus.
 - `autostart-android` supervisa los procesos de servicio que inicia. Al cerrar solicita primero
   el cierre ordenado de Steam por sway IPC cuando está disponible y luego detiene esos procesos.
-- Las dependencias del escritorio van en `paquetes.txt`; las variables y la configuración
-  específicas del compositor van en su perfil, no en `TerminalService`.
+- Las dependencias van en `paquetes.txt`; las variables del perfil están en su receta y las de
+  conexión/readiness en el proveedor, no en `TerminalService`.
 
 ## Límites conocidos
 
-El anfitrión Android es una superficie Wayland anidada. No ofrece DRM/KMS, sesión logind, udev
-completo ni systemd de usuario. Por ello, los perfiles deben usar backend Wayland/winit anidado;
-los modos DRM, TTY o sesiones que exijan logind/systemd no son compatibles sin adaptaciones.
+El anfitrión Android actual ofrece una superficie Wayland anidada. No ofrece DRM/KMS, sesión
+logind, udev completo ni systemd de usuario. Los perfiles activos declaran Wayland; modos DRM, TTY
+o sesiones que exijan logind/systemd no son compatibles sin adaptaciones. La arquitectura acepta
+otros proveedores, pero eso no significa que estén implementados.
 
 La ruta Vulkan/Android AHardwareBuffer está implementada en el wlroots parcheado. Solo los
 compositores que realmente carguen esa biblioteca aprovechan ese camino; otros pueden necesitar
