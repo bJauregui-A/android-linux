@@ -8,14 +8,23 @@ import java.io.FileWriter;
 import java.util.List;
 
 // Datos del rootfs Arch ARM64 actual. Mantiene su ABI/glibc, rutas de usuario y renderer.
+// Permite prefijo relativo personalizado para soportar múltiples instancias de Arch.
 final class AdaptadorArchArm64 implements AdaptadorInstalacion {
-    private static final String PREFIJO = "archlinux";
+    private final String prefijo;
     private static final String TAG = "TERMINAL";
+
+    public AdaptadorArchArm64() {
+        this("archlinux");
+    }
+
+    public AdaptadorArchArm64(String prefijo) {
+        this.prefijo = prefijo != null && !prefijo.isEmpty() ? prefijo : "archlinux";
+    }
 
     @Override public String id() { return SistemaLinux.ARCH; }
 
     @Override public File raiz(Context contexto) {
-        return new File(contexto.getFilesDir(), PREFIJO);
+        return new File(contexto.getFilesDir(), prefijo);
     }
 
     @Override public String cargador(Context contexto) {
@@ -49,13 +58,17 @@ final class AdaptadorArchArm64 implements AdaptadorInstalacion {
         return new String[]{"libldp.so", "/usr/bin/bash", "-l"};
     }
 
-    @Override public boolean instalada(Context contexto) { return Instalador.instalada(contexto); }
+    @Override public boolean instalada(Context contexto) {
+        return Instalador.instalada(raiz(contexto));
+    }
 
-    @Override public boolean instaladorDisponible(Context contexto) { return Instalador.disponible(contexto); }
+    @Override public boolean instaladorDisponible(Context contexto) {
+        return Instalador.disponible(contexto);
+    }
 
     @Override public String[] comandoInstalacion(Context contexto, List<String> entorno)
             throws java.io.IOException {
-        return Instalador.comando(contexto, entorno);
+        return Instalador.comando(contexto, raiz(contexto), entorno);
     }
 
     @Override public void preparar(Context contexto, File raiz) {
