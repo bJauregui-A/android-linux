@@ -18,15 +18,57 @@ if [ "$1" = --esperar ]; then
 fi
 
 pids=()
+names=()
 steam_iniciado=
 cerrando=
+log_dir=/tmp/arch-android-servicios
+mkdir -p "$log_dir"
+registro() { printf '%s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$*" >> /tmp/autostart-android.log; }
 
 iniciar() {
-    log=$1
-    shift
+    local nombre=$1 espera=$2 log pid intento listo=
+    shift 2
+    log="$log_dir/$nombre.log"
+    registro "$nombre STARTING ($*) log=$log"
     "$@" > "$log" 2>&1 &
-    pids+=("$!")
+    pid=$!
+    pids+=("$pid")
+    names+=("$nombre")
+    for intento in $(seq 20); do
+        kill -0 "$pid" 2>/dev/null || break
+        case "$espera" in
+            proceso) listo=1 ;;
+            ssh) (echo >/dev/tcp/127.0.0.1/8022) >/dev/null 2>&1 && listo=1 ;;
+            pipewire) pw-cli info 0 >/dev/null 2>&1 && listo=1 ;;
+            pulse) pactl info >/dev/null 2>&1 && listo=1 ;;
+        esac
+        [ -n "$listo" ] && break
+        sleep 0.5
+    done
+    if [ -n "$listo" ]; then
+        registro "$nombre READY check=$espera pid=$pid"
+        unset listo
+        return 0
+    fi
+    registro "$nombre FAILED check=$espera pid=$pid log=$log"
+    kill -TERM "$pid" 2>/dev/null
+    wait "$pid" 2>/dev/null
+    unset 'pids[-1]' 'names[-1]' listo
+    return 1
 }
+
+dbus_listo=
+for intento in $(seq 20); do
+    dbus-send --session --type=method_call --print-reply \
+        --dest=org.freedesktop.DBus /org/freedesktop/DBus \
+        org.freedesktop.DBus.Peer.Ping >/dev/null 2>&1 && dbus_listo=1 && break
+    sleep 0.5
+done
+if [ -z "$dbus_listo" ]; then
+    registro "D-Bus FAILED check=ping; servicios no iniciados"
+    exit 1
+fi
+registro "D-Bus READY check=ping"
 
 pedir_cierre_steam() {
     [ -n "$steam_iniciado" ] || return 0
@@ -48,19 +90,20 @@ pedir_cierre_steam() {
         pgrep -x steam >/dev/null 2>&1 || return 0
         sleep 0.5
     done
-    echo "Steam no cerró en 20 s; envío shutdown directo" >> /tmp/autostart-android.log
+    registro "Steam no cerró en 20 s; envío shutdown directo"
     /usr/local/bin/steam -shutdown >/dev/null 2>&1
     for i in $(seq 20); do
         pgrep -x steam >/dev/null 2>&1 || return 0
         sleep 0.5
     done
-    echo "Steam sigue activo tras solicitar el cierre ordenado" >> /tmp/autostart-android.log
+    registro "Steam sigue activo tras solicitar el cierre ordenado"
 }
 
 cerrar() {
     [ -n "$cerrando" ] && return
     cerrando=1
     trap - EXIT TERM HUP INT
+    registro "SHUTDOWN begin"
     pedir_cierre_steam
     for pid in "${pids[@]}"; do kill -TERM "$pid" 2>/dev/null; done
     for i in $(seq 20); do
@@ -73,6 +116,7 @@ cerrar() {
     done
     for pid in "${pids[@]}"; do kill -KILL "$pid" 2>/dev/null; done
     for pid in "${pids[@]}"; do wait "$pid" 2>/dev/null; done
+    registro "SHUTDOWN complete"
 }
 trap cerrar EXIT
 trap 'exit 0' TERM HUP INT
@@ -86,27 +130,30 @@ fi
 
 # Portapapeles Linux → historial de SUPER+V.
 command -v wl-paste >/dev/null 2>&1 && command -v cliphist >/dev/null 2>&1 && {
-    iniciar /tmp/cliphist-texto.log wl-paste --type text --watch cliphist store
-    iniciar /tmp/cliphist-imagen.log wl-paste --type image --watch cliphist store
+    iniciar cliphist-texto proceso wl-paste --type text --watch cliphist store
+    iniciar cliphist-imagen proceso wl-paste --type image --watch cliphist store
 }
 
 # sshd en foreground para que el supervisor pueda detener exactamente su proceso.
 if [ -x /usr/bin/sshd ] && ! pgrep -x sshd >/dev/null 2>&1; then
-    iniciar /tmp/sshd-android.log /usr/bin/sshd -D
+    iniciar sshd ssh /usr/bin/sshd -D || true
 fi
 
 # PipeWire → FIFO → AudioTrack de Android y compatibilidad PulseAudio para Linux/Wine.
 if [ -x /usr/bin/pipewire ] && ! pgrep -x pipewire >/dev/null 2>&1; then
-    iniciar /tmp/pipewire.log /usr/bin/pipewire
-    sleep 1
-    [ -x /usr/bin/wireplumber ] && iniciar /tmp/wireplumber.log /usr/bin/wireplumber
-    [ -x /usr/bin/pipewire-pulse ] && iniciar /tmp/pipewire-pulse.log /usr/bin/pipewire-pulse
+    if iniciar pipewire pipewire /usr/bin/pipewire; then
+        [ -x /usr/bin/wireplumber ] && iniciar wireplumber proceso /usr/bin/wireplumber
+        if [ -x /usr/bin/pipewire-pulse ] && command -v pactl >/dev/null 2>&1; then
+            iniciar pipewire-pulse pulse /usr/bin/pipewire-pulse
+        elif [ -x /usr/bin/pipewire-pulse ]; then
+            iniciar pipewire-pulse proceso /usr/bin/pipewire-pulse
+        fi
+    fi
 fi
 
 # Steam se lanza desde el entorno de sway cuando Xwayland publica DISPLAY.
 if [ -n "$DISPLAY" ] && [ -x /usr/local/bin/steam ] && ! pgrep -x steam >/dev/null 2>&1; then
-    iniciar /tmp/steam.log /usr/local/bin/steam
-    steam_iniciado=1
+    if iniciar steam proceso /usr/local/bin/steam; then steam_iniciado=1; fi
 fi
 
 # Seguir vivo aunque esta instalación no tenga servicios opcionales instalados.

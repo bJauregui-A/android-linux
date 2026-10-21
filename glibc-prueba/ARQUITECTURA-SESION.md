@@ -54,10 +54,13 @@ de los servicios que creó; al cerrar, pide a sway que cierre Steam ordenadament
 servicios antes de señalizar al compositor. `dbus-run-session` destruye el bus al salir.
 
 Esto implementa un bus **de sesión**. No se inicia un bus D-Bus **de sistema**: todavía no hay un
-servicio de esta sesión que lo requiera y el sandbox no ofrece systemd/logind. El supervisor cubre
-el orden básico y el cierre de procesos propios; aún falta readiness por servicio y comprobarlo en
-el dispositivo. El perfil D-Bus de login conserva un bus de rescate para la terminal cuando no hay
-sesión gráfica.
+servicio de esta sesión que lo requiera y el sandbox no ofrece systemd/logind. `autostart-android`
+espera el ping del bus y hace comprobaciones de readiness para SSH (puerto), PipeWire (`pw-cli`) y
+PulseAudio (`pactl`); otros procesos quedan marcados como comprobados por vida del PID. Mantiene un
+log por servicio en `/tmp/arch-android-servicios/` y un resumen con tiempos y estados en
+`/tmp/autostart-android.log`. Una falla de readiness termina solo ese servicio. Falta validar este
+comportamiento en el dispositivo. El perfil D-Bus de login conserva un bus de rescate para la
+terminal cuando no hay sesión gráfica.
 
 ## Capas y contratos
 
@@ -150,9 +153,9 @@ el ID elegido y solo habilita Arch, si existe o el APK trae su instalador.
 1. **Contrato y modelo (actual):** registrar capas, ciclo de vida, capacidades y límites; mantener
    Arch + sway como ruta funcional.
 2. **Orquestador común (en curso):** todos los perfiles pasan por `sesion-android`; ya centraliza
-   bus D-Bus de sesión, entorno de activación y cierre de los servicios que inicia. Siguiente:
-   comprobar este ciclo en el Redmi, añadir readiness/logs por servicio y luego quitar rutas
-   Arch/sway de `TerminalService` mediante adaptadores de instalación.
+   bus D-Bus de sesión, entorno de activación, readiness/logs básicos y cierre de los servicios que
+   inicia. Siguiente: quitar rutas Arch/sway de `TerminalService` mediante adaptadores de
+   instalación. La validación en teléfono queda para cuando el usuario la solicite.
 3. **Sesión estándar:** evaluar `systemd --user` bajo Android; resolver D-Bus de sistema/sesión y
    portales a través de servicios reales o adaptadores explícitos. No declarar Plasma compatible
    hasta cumplir sus readiness checks.
