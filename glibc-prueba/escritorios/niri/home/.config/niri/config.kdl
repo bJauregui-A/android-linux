@@ -1,0 +1,22 @@
+// niri en el teléfono (anidado en la app: Mod = Alt)
+input {
+    keyboard { xkb { layout "latam"; } }
+}
+output "winit" { scale @ESCALA@; }
+prefer-no-csd
+spawn-at-startup "waybar" "-c" "/usr/local/share/arch-android/escritorios/comun/waybar.jsonc"
+binds {
+    Mod+Return { spawn "kitty"; }
+    Mod+T { spawn "kitty"; }
+    Mod+A { spawn "fuzzel"; }
+    Mod+Q { close-window; }
+    Mod+Left { focus-column-left; }
+    Mod+Right { focus-column-right; }
+    Mod+Up { focus-workspace-up; }
+    Mod+Down { focus-workspace-down; }
+    Mod+Shift+Left { move-column-left; }
+    Mod+Shift+Right { move-column-right; }
+    Mod+F { maximize-column; }
+    Mod+O { toggle-overview; }
+    Mod+Shift+E { quit; }
+}

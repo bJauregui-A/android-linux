@@ -1,0 +1,4 @@
+# Lo que hace "startxfce4 --wayland labwc --startup", a mano. labwc con su propia config
+# (~/.config/labwc-xfce) para no abrir la waybar del labwc solo.
+export XDG_CURRENT_DESKTOP=XFCE XDG_MENU_PREFIX=xfce-
+exec labwc -C ~/.config/labwc-xfce -s xfce4-session

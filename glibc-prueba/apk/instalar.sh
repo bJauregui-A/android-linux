@@ -7,10 +7,34 @@ ARCH_PATH=$PATH
 PATH=/system/bin
 P=$GLIBC_PREFIX
 E=$P/var/lib/arch-android
+LOG=$P/tmp/instalacion-extraccion.log
+mkdir -p "$P/tmp"
+echo "Instalador de Arch Linux para Android"
+echo "Los archivos del sistema se guardarán en el almacenamiento privado de la app."
+echo "No cierres la app durante la instalación. Puedes volver a intentarlo si algo falla."
+
+# Comprobar espacio antes de escribir cientos de MB y descargar paquetes. Menos de 3 GiB puede
+# alcanzar para el escritorio mínimo, pero no para todos los grupos opcionales.
+LIBRES=$(df -Pk "$P" | awk 'END {print $4}')
+case "$LIBRES" in ''|*[!0-9]*) LIBRES=0;; esac
+echo "Espacio libre: $((LIBRES / 1024)) MiB. Recomendado: 3072 MiB o más."
+if [ "$LIBRES" -lt 3145728 ]; then
+    printf "Hay menos de 3 GiB libres. ¿Continuar de todos modos? [s/N] "
+    read -r seguir
+    case "$seguir" in s|S|si|SI|Si|sí|SÍ) ;; *) echo "Instalación cancelada; libera espacio y vuelve a abrir la app."; exit 1;; esac
+fi
+
 extraer() { # extraer <offset> <largo> <qué>
     echo "==> Extrayendo $3"
-    tail -c +$(($1 + 1)) "$APK" | head -c "$2" | tar -xzvf - -C "$P" |
-        awk 'NR % 400 == 0 { printf "."; fflush() } END { printf " %d archivos\n", NR }'
+    : > "$LOG"
+    # tar es la última orden del pipeline: su estado de salida detecta un gzip/tar incompleto.
+    if tail -c +$(($1 + 1)) "$APK" | head -c "$2" | tar -xzf - -C "$P" 2> "$LOG"; then
+        echo "   listo"
+    else
+        echo "   falló la extracción. Últimos detalles:"
+        tail -n 20 "$LOG"
+        return 1
+    fi
 }
 mkdir -p "$E"
 touch "$E/instalando"

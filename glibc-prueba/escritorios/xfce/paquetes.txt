@@ -1,0 +1,4 @@
+# Sin xfwm4 (solo X11; labwc maneja las ventanas) ni xfce4-notifyd (las notificaciones van a Android)
+labwc wlr-randr
+xfce4-session xfce4-panel xfce4-settings xfdesktop xfconf garcon exo tumbler thunar
+xfce4-terminal xfce4-appfinder xfce4-whiskermenu-plugin

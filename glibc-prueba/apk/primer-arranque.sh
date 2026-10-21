@@ -13,13 +13,16 @@ falla() {
 }
 lista() { for g; do sed 's/#.*//' "$D/paquetes-$g.txt"; done | tr -s ' \n' '  '; }
 
-printf '\e[1mInstalando Arch Linux\e[0m (lo mínimo baja ~500 MB, más lo que elijas; no cierres la app)\n'
+printf '\e[1mConfiguración inicial de Arch Linux\e[0m\n'
+printf 'Te guiaré por usuario, escritorio y paquetes. Enter acepta cada opción recomendada.\n'
+printf 'El escritorio mínimo descarga alrededor de 500 MB; los juegos pueden sumar más de 1 GB.\n'
 
 # Usuario y nombre del dispositivo (una vez; quedan en $E/usuario y /etc/hostname, que la app
 # y la glibc leen: TerminalService.usuario(), uname/gethostname desde la 0019)
 if [ ! -s $E/usuario ]; then
     while :; do
-        read -rp $'\nNombre de usuario (minúsculas, números, - y _): ' N
+        read -rp $'\nNombre de usuario (minúsculas, números, - y _) [user]: ' N
+        N=${N:-user}
         [[ $N =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] && [ "$N" != root ] && break
         echo "no vale: empieza con letra minúscula o _, sin espacios ni mayúsculas"
     done
@@ -61,9 +64,33 @@ if [ ! -e $E/base-lista ]; then
     touch $E/base-lista
 fi
 
-# Opcionales: menú una vez (lo elegido queda en $E/opcionales). Para elegir de nuevo e instalar
-# más después: bash /usr/local/share/arch-android/primer-arranque.sh --elegir
-[ "$1" = --elegir ] && rm -f $E/opcionales
+# Escritorio: uno, elegido una vez ($E/escritorio; lo arranca /usr/local/bin/sesion-android, que
+# vuelve a sway si el elegido no arranca). Cambiarlo después (toma efecto al reabrir la app):
+#   bash /usr/local/share/arch-android/primer-arranque.sh --escritorio
+# Opcionales: menú una vez (lo elegido queda en $E/opcionales). Para elegir de nuevo los dos e
+# instalar más después: bash /usr/local/share/arch-android/primer-arranque.sh --elegir
+[ "$1" = --elegir ] && rm -f $E/opcionales $E/escritorio
+[ "$1" = --escritorio ] && rm -f $E/escritorio
+ED=$D/escritorios
+if [ ! -s $E/escritorio ]; then
+    mapfile -t IDS < <(grep -v '^#' $ED/orden)
+    printf '\n\e[1mEscritorio\e[0m (sway es el probado; los marcados "sin probar" se instalan igual,'
+    printf ' y si uno no arranca se abre sway):\n'
+    for i in "${!IDS[@]}"; do
+        (. $ED/${IDS[$i]}/escritorio.conf
+         [ "$ESTADO" = probado ] && e= || e=$' \e[33m[sin probar]\e[0m'
+         printf '  %2d  \e[1m%s\e[0m: %s (%s)%s\n' $((i + 1)) "$NOMBRE" "$DESCRIPCION" "$TAMANO" "$e")
+    done
+    while :; do
+        read -rp "Número [1 = sway, recomendado]: " r
+        r=${r//[$'\r ']/}
+        r=${r:-1}
+        [[ $r =~ ^[0-9]+$ ]] && [ "$r" -ge 1 ] && [ "$r" -le ${#IDS[@]} ] && break
+        echo "no vale: un número del 1 al ${#IDS[@]}"
+    done
+    echo "${IDS[r - 1]}" > $E/escritorio
+fi
+ESC=$(cat $E/escritorio)
 GRUPOS=(ssh audio firefox juegos desarrollo adb utilidades)
 TEXTOS=("SSH: servidor en el puerto 8022 (~5 MB)"
         "audio: PipeWire → altavoz de Android (~25 MB)"
@@ -75,27 +102,43 @@ TEXTOS=("SSH: servidor en el puerto 8022 (~5 MB)"
 MARCA=(1 1 0 0 0 0 0)
 if [ ! -e $E/opcionales ]; then
     while :; do
-        printf '\n\e[1mQué instalar\e[0m (el escritorio, kitty, zsh y los gráficos van siempre):\n'
+        printf '\n\e[1mPaquetes opcionales\e[0m (el escritorio, kitty, zsh y los gráficos van siempre):\n'
         for i in "${!GRUPOS[@]}"; do
             [ "${MARCA[$i]}" = 1 ] && x=x || x=' '
             printf '  [%s] %d  %s\n' "$x" $((i + 1)) "${TEXTOS[$i]}"
         done
-        read -rp "Números para marcar/desmarcar (ej: 3 4), Enter para seguir: " r
-        [ -z "$r" ] && break
-        for n in $r; do
-            [[ $n =~ ^[0-9]+$ ]] && [ "$n" -ge 1 ] && [ "$n" -le ${#GRUPOS[@]} ] &&
-                MARCA[$((n - 1))]=$((1 - MARCA[n - 1]))
+        read -rp "Números para marcar/desmarcar (ej: 3 4, 3,7 o 3-5); Enter continúa: " r
+        r=${r//[$'\r']/}
+        [ -z "${r// /}" ] && break
+        malos=
+        # Separados por espacios o comas; a-b es un rango
+        for n in ${r//[,;]/ }; do
+            if [[ $n =~ ^([0-9]+)-([0-9]+)$ ]]; then
+                a=${BASH_REMATCH[1]} b=${BASH_REMATCH[2]}
+            elif [[ $n =~ ^[0-9]+$ ]]; then
+                a=$n b=$n
+            else
+                malos+=" $n"; continue
+            fi
+            for ((k = a; k <= b; k++)); do
+                if [ $k -ge 1 ] && [ $k -le ${#GRUPOS[@]} ]; then
+                    MARCA[k - 1]=$((1 - MARCA[k - 1]))
+                else
+                    malos+=" $k"
+                fi
+            done
         done
+        [ -n "$malos" ] && printf '\e[33mno entendí:%s\e[0m\n' "$malos"
     done
     for i in "${!GRUPOS[@]}"; do [ "${MARCA[$i]}" = 1 ] && echo "${GRUPOS[$i]}"; done > $E/opcionales
 fi
 elegido() { grep -qx "$1" $E/opcionales; }
 grupos="escritorio $(tr '\n' ' ' < $E/opcionales)"
 
-paso "Paquetes: $grupos"
+paso "Instalando paquetes: $grupos; escritorio $ESC"
 # El mirror corta descargas de vez en cuando: reintentar solo (lo bajado queda en la caché)
 for i in 1 2 3; do
-    sudo pacman -Syu --needed --noconfirm $(lista $grupos) && break
+    sudo pacman -Syu --needed --noconfirm $(lista $grupos) $(sed 's/#.*//' $ED/$ESC/paquetes.txt) && break
     [ $i = 3 ] && falla "falló pacman 3 veces (¿sin internet?)"
     printf '\n\e[33mfalló la descarga, reintento %d de 2...\e[0m\n' $i
     sleep 3
@@ -118,6 +161,11 @@ if elegido juegos && [ ! -e $E/juegos-listos ]; then
     touch $E/juegos-listos
 fi
 
+if [ -e $E/instalado ]; then
+    # Corrido a mano desde una terminal (--elegir, --escritorio): la sesión ya está abierta
+    paso "Listo: el escritorio nuevo se abre al cerrar y reabrir la app"
+    exit 0
+fi
 touch $E/instalado
 rm -f $E/instalando
 paso "Listo: abriendo el escritorio"

@@ -1,0 +1,1 @@
+wayfire wf-shell wlr-randr

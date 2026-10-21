@@ -1,0 +1,1 @@
+plasma-mobile plasma-workspace kwin plasma-keyboard plasma-integration breeze breeze-icons konsole

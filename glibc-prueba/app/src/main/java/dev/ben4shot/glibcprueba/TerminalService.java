@@ -26,21 +26,21 @@ import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.List;
 
-// Servicio en primer plano dueño de los procesos Linux (sway y la sesión de bash):
+// Servicio en primer plano dueño de los procesos Linux (el escritorio y la sesión de bash):
 // las activities se pueden cerrar (o girar) sin que Android mate los procesos glibc.
 public class TerminalService extends Service implements TerminalSessionClient {
     private static final String TAG = "TERMINAL";
     private static final String CANAL = "terminal";
     static final String PREFIJO = "archlinux";
-    // WaylandActivity lo manda al abrirse: arrancar sway si no está corriendo
-    static final String SWAY = "dev.ben4shot.glibcprueba.SWAY";
+    // WaylandActivity lo manda al abrirse: arrancar la sesión gráfica si no está corriendo.
+    static final String INICIAR_ESCRITORIO = "dev.ben4shot.glibcprueba.INICIAR_ESCRITORIO";
 
     private final IBinder binder = new Local();
     private TerminalSession sesion;
     private boolean instalando; // la sesión es el instalador (Instalador.java)
     private TerminalView vista; // la de la activity visible, o null
-    private Process sway;
-    private List<String> entornoSway; // el de sway, para los programas que se le conectan
+    private Process escritorio;
+    private List<String> entornoEscritorio; // entorno común de la sesión Wayland
 
     class Local extends Binder {
         TerminalService servicio() { return TerminalService.this; }
@@ -64,14 +64,14 @@ public class TerminalService extends Service implements TerminalSessionClient {
                 .build();
         if (Build.VERSION.SDK_INT >= 34) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
         else startForeground(1, n);
-        if (intent != null && SWAY.equals(intent.getAction())) iniciarSway();
+        if (intent != null && INICIAR_ESCRITORIO.equals(intent.getAction())) iniciarEscritorio();
         return START_NOT_STICKY;
     }
 
     @Override
     public void onDestroy() {
         if (sesion != null) sesion.finishIfRunning();
-        if (sway != null) sway.destroy();
+        if (escritorio != null) escritorio.destroy();
         super.onDestroy();
     }
 
@@ -91,11 +91,11 @@ public class TerminalService extends Service implements TerminalSessionClient {
         terminarSiNoQuedaNada();
     }
 
-    // Sin sway ni bash no queda nada que cuidar.
+    // Sin escritorio ni bash no queda nada que cuidar.
     private void terminarSiNoQuedaNada() {
         boolean bash = sesion != null && sesion.isRunning();
-        boolean escritorio = sway != null && sway.isAlive();
-        if (!bash && !escritorio) terminar();
+        boolean vivo = escritorio != null && escritorio.isAlive();
+        if (!bash && !vivo) terminar();
     }
 
     void terminar() {
@@ -132,65 +132,86 @@ public class TerminalService extends Service implements TerminalSessionClient {
                 env.toArray(new String[0]), 5000, this);
     }
 
-    // sway en segundo plano (bash -l para tomar /etc/profile), log en /tmp/sway.log.
-    synchronized void iniciarSway() {
-        if (sway != null && sway.isAlive()) return;
+    // Sesión Wayland en segundo plano (bash -l para tomar /etc/profile).
+    synchronized void iniciarEscritorio() {
+        if (escritorio != null && escritorio.isAlive()) return;
         if (Instalador.falta(this) && Instalador.disponible(this)) return; // primero el instalador
         File prefijo = new File(getFilesDir(), PREFIJO);
-        if (!new File(prefijo, "usr/bin/sway").exists()) {
-            Log.e(TAG, "falta sway en " + prefijo);
-            return;
-        }
-        entornoSway = entorno(prefijo, cargador());
-        // sway parchado (sway/compilar-sway.sh: achica las ventanas que no caben), si está
-        String propio = propio(prefijo, "sway") + "/bin/sway";
-        String bin = new File(prefijo, propio).exists() ? propio : "sway";
+        entornoEscritorio = entorno(prefijo, cargador());
         // HyperOS ata algunos hilos de la app (el que lanza procesos) a los núcleos grandes
         // (6-7) y todo lo de sway lo heredaba: juego, Wine, Xwayland y Steam en 2 núcleos.
         // El cpuset top-app permite 0-7; abrir la afinidad no necesita root.
-        ProcessBuilder pb = new ProcessBuilder(cargador(), "/usr/bin/bash", "-lc",
-                "taskset -p ff $$ > /dev/null 2>&1; exec " + bin + " > /tmp/sway.log 2>&1");
+        String cmd = "taskset -p ff $$ > /dev/null 2>&1; exec sway > /tmp/sway.log 2>&1";
+        if (BuildConfig.DIAGNOSTICO) {
+            try {
+                File script = new File(prefijo, "tmp/probar-escritorios.sh");
+                script.getParentFile().mkdirs();
+                try (java.io.InputStream in = getAssets().open("probar-escritorios.sh");
+                     java.io.FileOutputStream out = new java.io.FileOutputStream(script)) {
+                    byte[] buffer = new byte[8192];
+                    for (int n; (n = in.read(buffer)) != -1; ) out.write(buffer, 0, n);
+                }
+                script.setExecutable(true, false);
+                cmd = "exec /usr/bin/bash /tmp/probar-escritorios.sh";
+            } catch (java.io.IOException e) {
+                Log.e(TAG, "script de diagnóstico", e);
+            }
+        }
+        // El selector administra el compositor elegido y usa sway como rescate.
+        String sesion = "/usr/local/bin/sesion-android";
+        if (!BuildConfig.DIAGNOSTICO && new File(prefijo, sesion).exists()) cmd = "exec " + sesion;
+        ProcessBuilder pb = new ProcessBuilder(cargador(), "/usr/bin/bash", "-lc", cmd);
         entornoLinux(pb);
         try {
             Process p = pb.start();
-            sway = p;
-            Log.i(TAG, "sway iniciado");
+            escritorio = p;
+            Log.i(TAG, "sesión Wayland iniciada");
             Portapapeles.iniciar(this);
             Audio.iniciar(this);
             Mandos.iniciar(this);
             new Thread(() -> {
                 try {
-                    Log.i(TAG, "sway terminó: " + p.waitFor());
+                    Log.i(TAG, "sesión Wayland terminó: " + p.waitFor());
                 } catch (InterruptedException ignorada) {
                     return;
                 }
                 new android.os.Handler(getMainLooper()).post(this::terminarSiNoQuedaNada);
-            }, "sway").start();
+            }, "escritorio").start();
         } catch (java.io.IOException e) {
-            Log.e(TAG, "sway", e);
+            Log.e(TAG, "sesión Wayland", e);
         }
     }
 
-    boolean swayVivo() {
-        Process p = sway;
+    boolean escritorioVivo() {
+        Process p = escritorio;
         return p != null && p.isAlive();
     }
 
-    // Un programa Linux conectado a sway (wayland-1: el socket que abre sway anidado).
+    // El supervisor publica el socket real del compositor anidado tras detectarlo.
+    private String waylandDisplay() {
+        File f = new File(new File(getFilesDir(), PREFIJO), Wayland.runtimeDir().substring(1) + "/arch-android-display");
+        try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(f))) {
+            String s = r.readLine();
+            if (s != null && s.matches("[A-Za-z0-9_.-]+")) return s;
+        } catch (java.io.IOException ignored) { }
+        return "wayland-1";
+    }
+
+    // Un programa Linux conectado al compositor elegido.
     ProcessBuilder linux(String... args) {
         String[] todo = new String[args.length + 1];
         todo[0] = cargador();
         System.arraycopy(args, 0, todo, 1, args.length);
         ProcessBuilder pb = new ProcessBuilder(todo);
         entornoLinux(pb);
-        pb.environment().put("WAYLAND_DISPLAY", "wayland-1");
+        pb.environment().put("WAYLAND_DISPLAY", waylandDisplay());
         return pb;
     }
 
     private void entornoLinux(ProcessBuilder pb) {
         pb.directory(new File(new File(getFilesDir(), PREFIJO), home()));
         pb.environment().clear();
-        for (String v : entornoSway) {
+        for (String v : entornoEscritorio) {
             int i = v.indexOf('=');
             pb.environment().put(v.substring(0, i), v.substring(i + 1));
         }
@@ -246,6 +267,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
                 "TERM=xterm-256color",
                 "COLORTERM=truecolor",
                 "LANG=C.UTF-8",
+                "ANDROID_MODELO=" + Build.MODEL,
                 "TMPDIR=/tmp",
                 "TZ=" + java.util.TimeZone.getDefault().getID(),
                 "XDG_RUNTIME_DIR=" + Wayland.runtimeDir(),

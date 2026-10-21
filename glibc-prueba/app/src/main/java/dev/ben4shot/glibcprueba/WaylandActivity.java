@@ -118,8 +118,8 @@ public class WaylandActivity extends Activity {
             return;
         }
         Wayland.iniciar(this);
-        // El escritorio arranca solo: el servicio lanza sway si no está corriendo
-        startForegroundService(new Intent(this, TerminalService.class).setAction(TerminalService.SWAY));
+        // El escritorio elegido arranca solo si aún no está corriendo.
+        startForegroundService(new Intent(this, TerminalService.class).setAction(TerminalService.INICIAR_ESCRITORIO));
         atajoTerminal();
         Notificar.clic(getIntent());
 

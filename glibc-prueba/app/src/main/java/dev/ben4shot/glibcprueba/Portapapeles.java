@@ -36,7 +36,7 @@ class Portapapeles {
     }
 
     private static void vigilar() {
-        while (servicio.swayVivo()) {
+        while (servicio.escritorioVivo()) {
             try {
                 Process p = servicio.linux("/usr/bin/wl-paste", "--type", "text", "--watch",
                         "/usr/bin/sh", "-c", "base64 -w0; echo").start();
@@ -84,7 +84,7 @@ class Portapapeles {
     private static void haciaLinux(Context ctx, ClipboardManager cm) {
         ClipData clip = cm.getPrimaryClip();
         TerminalService s = servicio;
-        if (clip == null || clip.getItemCount() == 0 || s == null || !s.swayVivo()) return;
+        if (clip == null || clip.getItemCount() == 0 || s == null || !s.escritorioVivo()) return;
         CharSequence cs = clip.getItemAt(0).coerceToText(ctx);
         if (cs == null || cs.length() == 0) return;
         String texto = cs.toString();

@@ -8,7 +8,7 @@
     prefijo de origen pasan al de destino
   - configs y scripts del repo en su lugar; lo del usuario en /etc/skel (primer-arranque.sh
     lo copia al home elegido)
-  - el instalador (apk/) en /usr/local/share/arch-android
+  - el instalador (apk/) y los escritorios para elegir (escritorios/) en /usr/local/share/arch-android
 
 Uso: capa.py --prefix /data/user/0/<paquete>/files/archlinux --compilados trabajo/compilados.tar --out capa.tar
 """
@@ -58,6 +58,9 @@ ARCHIVOS = [
     ("mesa-gl/con-gpu", "usr/local/bin/con-gpu", 0o755),
     ("mesa-gl/firefox", "usr/local/bin/firefox", 0o755),
     ("scripts/adb-conectar", "usr/local/bin/adb-conectar", 0o755),
+    # escritorio elegido al instalar (escritorios/: uno por carpeta) y lo que arranca con todos
+    ("escritorios/sesion-android", "usr/local/bin/sesion-android", 0o755),
+    ("escritorios/autostart-android", "usr/local/bin/autostart-android", 0o755),
     ("apk/sshd-android.conf", "etc/ssh/sshd_config.d/10-android.conf", 0o644),
     # instalador (primer arranque) y lo que instala después
     ("apk/primer-arranque.sh", f"{D}/primer-arranque.sh", 0o755),
@@ -149,7 +152,15 @@ def main():
 
     listas = [(f"apk/{f}", f"{D}/{f}", 0o644)
               for f in sorted(os.listdir(os.path.join(RAIZ, "apk"))) if f.startswith("paquetes-")]
-    for src, dst, modo in ARCHIVOS + listas:
+    escritorios = []
+    for d, _, fs in os.walk(os.path.join(RAIZ, "escritorios")):
+        for f in sorted(fs):
+            rel = os.path.relpath(os.path.join(d, f), RAIZ)
+            if os.path.dirname(rel) == "escritorios" and f != "orden":
+                continue  # sesion-android y autostart-android van a /usr/local/bin
+            modo = 0o755 if os.access(os.path.join(RAIZ, rel), os.X_OK) else 0o644
+            escritorios.append((rel, f"{D}/{rel}", modo))
+    for src, dst, modo in ARCHIVOS + listas + escritorios:
         out.archivo(dst, open(os.path.join(RAIZ, src), "rb").read(), modo)
     for src, dst in PLANTILLAS:
         texto = open(os.path.join(RAIZ, src)).read().replace("@P@", f"{paquete}/files/archlinux")

@@ -1,0 +1,18 @@
+# Orden del menú de escritorios (primer-arranque.sh). Cada uno es una carpeta con:
+#   escritorio.conf  NOMBRE, DESCRIPCION, ESTADO (probado | sin-probar), TAMANO
+#   paquetes.txt     lo que instala pacman encima del mínimo (apk/paquetes-escritorio.txt)
+#   sesion           lo corre sesion-android (bash; exec del compositor)
+#   home/            config que va al home la primera vez (@ESCALA@ = $ANDROID_ESCALA)
+sway
+labwc
+xfce
+lxqt
+kde
+plasma-movil
+phosh
+niri
+cosmic
+wayfire
+river
+qtile
+weston

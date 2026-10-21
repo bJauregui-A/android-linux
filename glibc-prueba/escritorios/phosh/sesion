@@ -1,0 +1,3 @@
+# phoc es wlroots 0.20 (usa el parchado); -E lanza phosh dentro
+export XDG_CURRENT_DESKTOP=Phosh:GNOME
+exec phoc -C ~/.config/phosh/phoc.ini -E phosh

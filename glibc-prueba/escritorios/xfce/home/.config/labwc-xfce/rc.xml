@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<!-- labwc en el teléfono: los atajos de siempre más los de sway (SUPER+T/Enter kitty, SUPER+A
+     menú, SUPER+Q cerrar, SUPER+V portapapeles). El teclado (latam) viene de XKB_DEFAULT_LAYOUT. -->
+<labwc_config>
+  <theme>
+    <cornerRadius>8</cornerRadius>
+    <font name="JetBrainsMono Nerd Font" size="10" />
+  </theme>
+  <keyboard>
+    <default />
+    <keybind key="W-Return"><action name="Execute" command="kitty" /></keybind>
+    <keybind key="W-t"><action name="Execute" command="kitty" /></keybind>
+    <keybind key="W-a"><action name="Execute" command="xfce4-appfinder" /></keybind>
+    <keybind key="W-q"><action name="Close" /></keybind>
+    <keybind key="W-f"><action name="ToggleMaximize" /></keybind>
+    <keybind key="W-v"><action name="Execute" command="sh -c 'cliphist list | fuzzel --dmenu | cliphist decode | wl-copy'" /></keybind>
+  </keyboard>
+</labwc_config>

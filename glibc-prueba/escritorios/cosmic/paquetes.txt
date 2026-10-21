@@ -1,0 +1,4 @@
+# Sin cosmic-notifications (van a Android), greeter, store ni initial-setup
+cosmic-session cosmic-comp cosmic-panel cosmic-applets cosmic-launcher cosmic-app-library
+cosmic-bg cosmic-settings cosmic-settings-daemon cosmic-files cosmic-terminal cosmic-workspaces
+cosmic-osd cosmic-randr

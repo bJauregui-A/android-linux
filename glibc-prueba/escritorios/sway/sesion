@@ -1,0 +1,6 @@
+# sway parchado (sway/compilar-sway.sh: achica las ventanas que no caben) si está; si no, el de Arch.
+# Config: sway/config del repo (~/.config/sway). El supervisor común lanza autostart-android.
+for s in /usr/local/sway/bin/sway ~/sway/bin/sway; do
+    [ -x "$s" ] && exec "$s"
+done
+exec sway

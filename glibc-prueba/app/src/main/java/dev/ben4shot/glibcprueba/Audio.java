@@ -50,7 +50,7 @@ class Audio {
                 .setBufferSizeInBytes(min * 2)
                 .build();
         byte[] buf = new byte[4096];
-        while (servicio.swayVivo()) {
+        while (servicio.escritorioVivo()) {
             FileDescriptor fd = null;
             try {
                 // PipeWire lo crea al cargar el módulo; esperar a que exista
@@ -63,7 +63,7 @@ class Audio {
                 StructPollfd p = new StructPollfd();
                 p.fd = fd;
                 p.events = (short) OsConstants.POLLIN;
-                while (servicio.swayVivo()) {
+                while (servicio.escritorioVivo()) {
                     if (Os.poll(new StructPollfd[]{p}, 1000) == 0) {
                         if (pista.getPlayState() == AudioTrack.PLAYSTATE_PLAYING
                                 && System.currentTimeMillis() - ultimoSonido > 2000) {

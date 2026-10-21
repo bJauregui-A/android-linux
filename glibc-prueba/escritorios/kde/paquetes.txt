@@ -1,0 +1,2 @@
+plasma-desktop plasma-workspace kwin kscreen systemsettings plasma-integration breeze
+breeze-icons xdg-desktop-portal-kde konsole dolphin

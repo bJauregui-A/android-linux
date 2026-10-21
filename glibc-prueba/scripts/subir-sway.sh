@@ -21,5 +21,9 @@ copiar sway/zsh/.zshrc files/archlinux/home/user/
 copiar sway/zsh/starship.toml $C/starship/
 copiar sway/pipewire/10-android.conf $C/pipewire/pipewire.conf.d/
 copiar sway/dbus-sesion.sh files/archlinux/etc/profile.d/
+# sway/config lo lanza al arrancar (portapapeles, sshd, PipeWire, Steam)
+adb shell "run-as $PKG mkdir -p files/archlinux/usr/local/bin"
+copiar escritorios/autostart-android files/archlinux/usr/local/bin/
+adb shell "run-as $PKG chmod 755 files/archlinux/usr/local/bin/autostart-android"
 adb shell "run-as $PKG chmod 755 $C/sway/ventanas.sh $C/sway/escritorio-vacio.sh $C/sway/atajos.sh"
 echo "config de sway copiada"

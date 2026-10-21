@@ -1,0 +1,15 @@
+// waybar para los escritorios sin barra propia (labwc, niri, river): botón de menú (fuzzel),
+// ventanas abiertas (wlr/taskbar) y el estilo de sway (~/.config/waybar/style.css)
+{
+    "layer": "top",
+    "position": "top",
+    "height": 28,
+    "modules-left": ["custom/menu", "wlr/taskbar"],
+    "modules-right": ["cpu", "memory", "clock"],
+    "custom/menu": { "format": "  ", "on-click": "fuzzel", "tooltip": false },
+    "wlr/taskbar": { "format": "{icon} {title:.18}", "icon-size": 16,
+                     "on-click": "activate", "on-click-middle": "close" },
+    "cpu": { "format": " {usage}%" },
+    "memory": { "format": " {}%" },
+    "clock": { "format": "{:%H:%M}" }
+}

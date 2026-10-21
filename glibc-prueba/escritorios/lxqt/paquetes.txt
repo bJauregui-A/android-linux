@@ -1,0 +1,4 @@
+# Sin lxqt-notificationd (las notificaciones van a Android) ni powermanagement
+labwc wlr-randr
+lxqt-wayland-session lxqt-session lxqt-panel lxqt-config lxqt-qtplugin lxqt-runner
+lxqt-globalkeys lxqt-themes lxqt-menu-data pcmanfm-qt qterminal breeze-icons

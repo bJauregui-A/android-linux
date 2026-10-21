@@ -12,6 +12,7 @@ android {
         minSdk = 30
         versionCode = 1
         versionName = "0.1"
+        buildConfigField("boolean", "DIAGNOSTICO", "false")
         ndk { abiFilters += "arm64-v8a" }
         manifestPlaceholders["etiqueta"] = "Arch Linux"
     }
@@ -45,6 +46,22 @@ android {
             manifestPlaceholders["etiqueta"] = "Arch (prueba)"
         }
     }
+
+    // Mismo applicationId y firma que sdk36Debug: instala como actualización para poder
+    // reutilizar el Arch existente, pero al abrirlo barre los perfiles Wayland disponibles.
+    buildTypes {
+        getByName("debug") {
+            buildConfigField("boolean", "DIAGNOSTICO", "false")
+        }
+        create("diagnostico") {
+            initWith(getByName("debug"))
+            manifestPlaceholders["etiqueta"] = "Arch Linux diagnóstico"
+            buildConfigField("boolean", "DIAGNOSTICO", "true")
+            matchingFallbacks += listOf("debug")
+        }
+    }
+
+    buildFeatures { buildConfig = true }
 
     // APK autoinstalable: assets de apk/armar.sh <variante> (base.tgz, capa.tgz, instalar.sh).
     // Sin comprimir: instalar.sh los lee directo del APK por offset (Instalador.java).

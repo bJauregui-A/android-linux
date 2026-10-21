@@ -47,17 +47,6 @@ exec autotiling
 exec python $s/opacidad.py
 # núcleos según el foco: la ventana enfocada usa los rápidos (6-7), las demás 0-5
 exec python $s/nucleos.py
-# historial del portapapeles (SUPER+V)
-exec wl-paste --type text --watch cliphist store
-exec wl-paste --type image --watch cliphist store
-# servidor SSH en el puerto 8022 (/etc/ssh/sshd_config.d/10-android.conf); sin sudo: como no-root no hace privsep
-exec /usr/bin/sshd
-# audio: PipeWire con un sink "Android" que escribe a un FIFO; la app lo toca (Audio.java)
-# pipewire-pulse da PulseAudio (Wine, SDL, navegadores); wireplumber conecta las apps al sink
-exec sh -c 'pipewire > /tmp/pipewire.log 2>&1 & sleep 1; wireplumber > /tmp/wireplumber.log 2>&1 & pipewire-pulse > /tmp/pipewire-pulse.log 2>&1 & wait'
-# Steam al abrir (steam/steam.sh = /usr/local/bin/steam)
-exec sh -c '/usr/local/bin/steam > /tmp/steam.log 2>&1'
-
 ### Programas
 bindsym $mod+t exec $term
 bindsym $mod+Return exec $term
