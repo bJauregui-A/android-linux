@@ -30,22 +30,29 @@
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density"
             android:launchMode="singleTask" />
 
-        <!-- Único ícono: el escritorio (arranca sway solo). La terminal va en el
-             atajo de mantener pulsado el ícono, y dentro de sway con foot. -->
+        <!-- El ícono abre el selector de instalaciones Linux. La terminal queda en el
+             atajo de mantener pulsado el ícono y dentro del escritorio con foot. -->
 
         <activity
-            android:name=".WaylandActivity"
+            android:name=".SistemaActivity"
             android:exported="true"
             android:label="${etiqueta}"
             android:theme="@android:style/Theme.Material.NoActionBar"
-            android:windowSoftInputMode="adjustResize"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density"
             android:launchMode="singleTask">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".WaylandActivity"
+            android:exported="true"
+            android:label="Arch Linux ARM"
+            android:theme="@android:style/Theme.Material.NoActionBar"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density"
+            android:launchMode="singleTask" />
 
         <!-- xdg-open de archivos del prefijo (Abrir.java): solo con permiso concedido por URI -->
         <provider

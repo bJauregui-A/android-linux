@@ -14,7 +14,7 @@ android {
         versionName = "0.1"
         buildConfigField("boolean", "DIAGNOSTICO", "false")
         ndk { abiFilters += "arm64-v8a" }
-        manifestPlaceholders["etiqueta"] = "Arch Linux"
+        manifestPlaceholders["etiqueta"] = "Linux"
     }
 
     // Anfitrión Wayland (necesita wayland/compilar.sh antes)
@@ -43,7 +43,7 @@ android {
             dimension = "target"
             applicationIdSuffix = ".prueba"
             targetSdk = 36
-            manifestPlaceholders["etiqueta"] = "Arch (prueba)"
+            manifestPlaceholders["etiqueta"] = "Linux (prueba)"
         }
     }
 
@@ -55,7 +55,7 @@ android {
         }
         create("diagnostico") {
             initWith(getByName("debug"))
-            manifestPlaceholders["etiqueta"] = "Arch Linux diagnóstico"
+            manifestPlaceholders["etiqueta"] = "Linux diagnóstico"
             buildConfigField("boolean", "DIAGNOSTICO", "true")
             matchingFallbacks += listOf("debug")
         }

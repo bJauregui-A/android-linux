@@ -16,9 +16,13 @@ instalación Linux (Arch / Debian / Ubuntu)
                 └── superficie y entrada de Android
 ```
 
-La selección inicial futura elige una **instalación Linux**. Dentro de ella, el usuario podrá
+La selección inicial elige una **instalación Linux**. Dentro de ella, el usuario podrá
 elegir un escritorio y el modo gráfico que ese escritorio soporte. No se debe guardar la
 distribución elegida dentro del perfil del escritorio ni asumir que todo escritorio usa Wayland.
+
+El selector de sistema ya es la entrada del ícono de la app. El registro inicial mantiene el
+prefijo histórico de Arch y muestra Debian/Ubuntu como no disponibles; todavía no permite crear
+instalaciones nuevas ni cambia la sesión de Arch existente.
 
 ## Flujo de una sesión
 
@@ -124,13 +128,14 @@ La app mantendrá un registro de instalaciones, inicialmente:
 
 | ID | Distribución | Estado |
 |---|---|---|
-| `arch-arm64` | Arch Linux ARM | Instalación existente; migración del selector sin reinstalar |
-| `debian-arm64` | Debian arm64 | Futuro; rootfs separado |
-| `ubuntu-arm64` | Ubuntu arm64 | Futuro; rootfs separado |
+| `arch-arm64` | Arch Linux ARM | Disponible; usa el prefijo existente `files/archlinux` y el instalador actual |
+| `debian-arm64` | Debian arm64 | No disponible; requiere rootfs separado y adaptador |
+| `ubuntu-arm64` | Ubuntu arm64 | No disponible; requiere rootfs separado y adaptador |
 
 El inicio futuro tendrá dos decisiones independientes: **Sistema Linux** y **Escritorio/sesión**.
 La segunda lista solo perfiles instalados y compatibles con las capacidades actuales. La terminal
-de rescate y los registros estarán asociados a una instalación concreta.
+de rescate y los registros estarán asociados a una instalación concreta. El selector actual guarda
+el ID elegido y solo habilita Arch, si existe o el APK trae su instalador.
 
 ## Fases de implementación
 
@@ -145,10 +150,17 @@ de rescate y los registros estarán asociados a una instalación concreta.
    hasta cumplir sus readiness checks.
 4. **Proveedor X11:** prototipo de Xwayland rootful anidado; comparar con Xvnc si no integra un WM
    X11 independiente. Mantener el modo Wayland y Xwayland rootless actual para apps X11.
-5. **Registro multi-OS y selector:** encapsular el Arch actual como primera instalación; añadir
-   Debian y Ubuntu solo después de que cada una tenga bootstrap, ABI, paquetes y sesión probados.
+5. **Registro multi-OS y selector (iniciado):** encapsular el Arch actual como primera instalación;
+   el selector de Android ya muestra Arch disponible y Debian/Ubuntu inhabilitados. Añadir esas
+   distribuciones solo después de que cada una tenga bootstrap, ABI, paquetes y sesión probados.
 6. **Conformidad por perfil:** pruebas de servicios, imagen, input, resize/rotación, portales, X11,
    audio y cierre. Los errores se asignan a una capa, no se corrigen en el selector por excepción.
+
+**37ª sesión (repo):** el selector de instalación Linux quedó como entrada del ícono. El registro
+usa el ID `arch-arm64` y resuelve sus rutas al prefijo histórico; Debian y Ubuntu aparecen
+deshabilitados hasta contar con rootfs y adaptador. La selección se conserva en preferencias y los
+servicios consultan la raíz asociada. `sdk36Debug` compila; falta instalar y probar el flujo
+conservando el Arch existente. La instalación reemplaza la APK y cierra la sesión Linux activa.
 
 No se instalarán entornos en el teléfono como parte de estas fases sin revisar su tamaño y el
 estado de la sesión; los prototipos de proveedor y gestor se validan primero aislados cuando sea

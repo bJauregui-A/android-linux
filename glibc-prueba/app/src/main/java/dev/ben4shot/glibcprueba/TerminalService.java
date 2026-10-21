@@ -106,7 +106,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
     // bash -l de Arch a través del cargador de la glibc propia; el cwd es la ruta real
     // (el pty lo abre libtermux.so, que es bionic), el resto ya va dentro del prefijo.
     private TerminalSession crearSesion() {
-        File prefijo = new File(getFilesDir(), PREFIJO);
+        File prefijo = SistemaLinux.raizSeleccionada(this);
         if (Instalador.falta(this) && Instalador.disponible(this)) {
             new File(prefijo, "etc").mkdirs();
             List<String> env = entorno(prefijo, cargador());
@@ -136,7 +136,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
     synchronized void iniciarEscritorio() {
         if (escritorio != null && escritorio.isAlive()) return;
         if (Instalador.falta(this) && Instalador.disponible(this)) return; // primero el instalador
-        File prefijo = new File(getFilesDir(), PREFIJO);
+        File prefijo = SistemaLinux.raizSeleccionada(this);
         entornoEscritorio = entorno(prefijo, cargador());
         // HyperOS ata algunos hilos de la app (el que lanza procesos) a los núcleos grandes
         // (6-7) y todo lo de sway lo heredaba: juego, Wine, Xwayland y Steam en 2 núcleos.
@@ -189,7 +189,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
 
     // El supervisor publica el socket real del compositor anidado tras detectarlo.
     private String waylandDisplay() {
-        File f = new File(new File(getFilesDir(), PREFIJO), Wayland.runtimeDir().substring(1) + "/arch-android-display");
+        File f = new File(SistemaLinux.raizSeleccionada(this), Wayland.runtimeDir().substring(1) + "/arch-android-display");
         try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(f))) {
             String s = r.readLine();
             if (s != null && s.matches("[A-Za-z0-9_.-]+")) return s;
@@ -209,7 +209,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
     }
 
     private void entornoLinux(ProcessBuilder pb) {
-        pb.directory(new File(new File(getFilesDir(), PREFIJO), home()));
+        pb.directory(new File(SistemaLinux.raizSeleccionada(this), home()));
         pb.environment().clear();
         for (String v : entornoEscritorio) {
             int i = v.indexOf('=');
@@ -219,7 +219,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
 
     // Usuario de Linux: lo elige el instalador (primer-arranque.sh); "user" en los Arch de antes.
     String usuario() {
-        File f = new File(getFilesDir(), PREFIJO + "/var/lib/arch-android/usuario");
+        File f = new File(SistemaLinux.raizSeleccionada(this), "var/lib/arch-android/usuario");
         try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(f))) {
             String u = r.readLine();
             if (u != null && u.trim().matches("[a-z_][a-z0-9_-]*")) return u.trim();

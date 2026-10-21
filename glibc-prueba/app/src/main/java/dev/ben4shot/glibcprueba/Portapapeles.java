@@ -99,7 +99,7 @@ class Portapapeles {
                 ProcessBuilder pb = corto ? s.linux("/usr/bin/wl-copy", "--", texto)
                         : s.linux("/usr/bin/wl-copy");
                 pb.redirectErrorStream(true).redirectOutput(
-                        new File(s.getFilesDir(), TerminalService.PREFIJO + "/tmp/wl-copy.log"));
+                        new File(SistemaLinux.raizSeleccionada(s), "tmp/wl-copy.log"));
                 Process p = pb.start();
                 try (OutputStream o = p.getOutputStream()) {
                     if (!corto) o.write(datos);

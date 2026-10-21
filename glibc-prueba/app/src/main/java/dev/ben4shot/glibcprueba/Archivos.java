@@ -28,7 +28,7 @@ public class Archivos extends ContentProvider {
     static File real(Context c, String ruta) {
         if (ruta == null || !ruta.startsWith("/") || ("/" + ruta + "/").contains("/../")) return null;
         if (ruta.startsWith("/storage/") || ruta.startsWith("/sdcard/")) return new File(ruta);
-        return new File(new File(c.getFilesDir(), TerminalService.PREFIJO), ruta);
+        return new File(SistemaLinux.raizSeleccionada(c), ruta);
     }
 
     static String tipo(String nombre) {

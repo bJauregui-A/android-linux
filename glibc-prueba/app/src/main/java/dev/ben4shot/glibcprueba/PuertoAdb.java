@@ -30,7 +30,7 @@ final class PuertoAdb {
         iniciado = true;
         Context app = c.getApplicationContext();
         NsdManager nsd = app.getSystemService(NsdManager.class);
-        File tmp = new File(app.getFilesDir(), TerminalService.PREFIJO + "/tmp");
+        File tmp = new File(SistemaLinux.raizSeleccionada(app), "tmp");
         Resolutor r = new Resolutor(app, nsd);
         buscar(nsd, CONECTAR, new File(tmp, "adb-puerto"), r);
         buscar(nsd, EMPAREJAR, new File(tmp, "adb-emparejar"), r);

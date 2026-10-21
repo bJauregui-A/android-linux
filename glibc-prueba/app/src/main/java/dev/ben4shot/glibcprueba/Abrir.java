@@ -31,7 +31,7 @@ class Abrir {
     static synchronized void iniciar(Context c) {
         if (servidor != null) return;
         ctx = c.getApplicationContext();
-        File socket = new File(c.getFilesDir(), TerminalService.PREFIJO + "/run/android-abrir.sock");
+        File socket = new File(SistemaLinux.raizSeleccionada(c), "run/android-abrir.sock");
         try {
             socket.getParentFile().mkdirs();
             socket.delete();

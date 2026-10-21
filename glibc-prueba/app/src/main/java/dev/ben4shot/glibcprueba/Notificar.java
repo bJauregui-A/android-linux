@@ -65,7 +65,7 @@ class Notificar {
                 enviar("cerrada", i.getIntExtra(EXTRA_ID, 0), null);
             }
         }, new IntentFilter(DESCARTE), Build.VERSION.SDK_INT >= 33 ? Context.RECEIVER_NOT_EXPORTED : 0);
-        File socket = new File(c.getFilesDir(), TerminalService.PREFIJO + "/run/android-notificar.sock");
+        File socket = new File(SistemaLinux.raizSeleccionada(c), "run/android-notificar.sock");
         try {
             socket.getParentFile().mkdirs();
             socket.delete();

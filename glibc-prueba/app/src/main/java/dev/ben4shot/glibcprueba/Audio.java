@@ -36,7 +36,7 @@ class Audio {
     }
 
     private static void tocar() {
-        File fifo = new File(servicio.getFilesDir(), TerminalService.PREFIJO + "/" + FIFO);
+        File fifo = new File(SistemaLinux.raizSeleccionada(servicio), FIFO);
         int min = AudioTrack.getMinBufferSize(TASA, AudioFormat.CHANNEL_OUT_STEREO,
                 AudioFormat.ENCODING_PCM_16BIT);
         AudioTrack pista = new AudioTrack.Builder()

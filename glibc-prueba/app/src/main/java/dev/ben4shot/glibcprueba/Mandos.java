@@ -68,7 +68,7 @@ class Mandos {
 
     static synchronized void iniciar(Context c) {
         if (envio != null) return;
-        socket = new File(c.getFilesDir(), TerminalService.PREFIJO + "/dev/input/event0");
+        socket = new File(SistemaLinux.raizSeleccionada(c), "dev/input/event0");
         HandlerThread h = new HandlerThread("mandos");
         h.start();
         envio = new Handler(h.getLooper());

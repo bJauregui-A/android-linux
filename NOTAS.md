@@ -85,14 +85,16 @@ Script de reconexión rápida creado en `~/.local/bin/adb-conectar` (escaneo de 
 
 **Sesión de continuidad (2026-10-21, app de escritorios):** instalada `sdk36Debug` con `adb install -r`, conservando los datos. Se corrigió `sesion-android`: `arch-android-display` es un archivo de texto, pero sus dos comprobaciones usaban `-S` (socket), por lo que el supervisor mataba el compositor tras detectarlo. Ambas ahora usan `-s`. Verificado en el Redmi: el marcador contiene `wayland-1`, existe ese socket y se creó `/tmp/autostart-android.log`; sway inició y Waybar configuró su barra. KDE sigue cerrándose y haciendo fallback a sway; sus fallos de activación de `org.freedesktop.systemd1` siguen sin causa única confirmada. El supervisor lanzó el autostart común, aunque falta verificar SSH, audio y clipboard. Preferencia KDE y datos preservados. No probar más escritorios hasta cerrar esa comprobación.
 
-**Siguiente sesión (37ª), en el Redmi — continuar tras la comprobación de servicios:**
-(1) **Reiniciar sway/Steam/kitty** cuando el usuario quiera, para que tomen la libc 0018 (lo que ya corría sigue con la 0017; Steam: `swaymsg exec "steam -shutdown"`). Ver que todo arranca igual (sshd, waybar, SUPER+V, Steam, Firefox). Revertir si algo falla: `cd /usr/lib && cp libc.so.6.0017 libc.so.6.x && mv libc.so.6.x libc.so.6` (por SSH, `adb shell run-as` o el nuevo `adb shell`).
-(2) **glibc 0020: `ip a`/`ip r`**. El repositorio ya asignó 0019 a `uname`/`gethostname` leyendo `/etc/hostname` (commit `5e1d1f5`); diseñar la emulación netlink para `RTM_GETLINK` antes de implementar. Probar libc aislada antes de instalar (`instalar-glibc.sh`).
-(3) **Morrowind**: confirmar si es el mouse (¿se mueve el cursor del juego?, `xinput`/`xev` dentro de sway mientras se toca; ¿Wine DirectInput recibe movimiento relativo?).
-(4) Si Morrowind queda bien con `~/mesa-gl`: pasar el `LD_LIBRARY_PATH` de `~/mesa-gl` a `proton-directo` para todos los juegos (GL/WineD3D) y borrar `~/.config/proton-directo/22320`.
-(5) Modificaciones o debloat del teléfono usando el nuevo puente `adb` local.
-(6) Confirmar qué versión de libc está instalada en el Redmi. El repositorio trae glibc 0019 (hostname), pero la sesión del teléfono no se reinició ni se verificó esa versión aquí.
-(7) Pendientes de la 24ª: limpiar `/dev/shm/.sysv` y llevar `/dev/shm` a memoria; sockets viejos de sway al arrancar; memoria (PSS de Steam/Firefox, ¿`-cef-single-process`?, lmkd); copia del cuadro de Firefox (cero copias).
+**Siguiente sesión (38ª), en el Redmi — selección de sistema Linux:**
+(1) Cuando la sesión activa pueda cerrarse, instalar el APK de `sdk36Debug` desde `glibc-prueba/app/build/outputs/apk/sdk36/debug/app-sdk36-debug.apk` (`adb install -r` cierra la sesión Linux). Abrir el ícono: debe aparecer el selector; elegir Arch y confirmar que conserva `files/archlinux`, instala/abre como antes y Debian/Ubuntu siguen inhabilitados.
+(2) Si el flujo funciona, implementar rootfs y adaptador Debian como primera segunda instalación; no habilitarla antes de validar bootstrap, glibc/ABI y una sesión compatible.
+(3) **Reiniciar sway/Steam/kitty** cuando el usuario quiera, para que tomen la libc 0018 (lo que ya corría sigue con la 0017; Steam: `swaymsg exec "steam -shutdown"`). Ver que todo arranca igual (sshd, waybar, SUPER+V, Steam, Firefox). Revertir si algo falla: `cd /usr/lib && cp libc.so.6.0017 libc.so.6.x && mv libc.so.6.x libc.so.6` (por SSH, `adb shell run-as` o el nuevo `adb shell`).
+(4) **glibc 0020: `ip a`/`ip r`**. El repositorio ya asignó 0019 a `uname`/`gethostname` leyendo `/etc/hostname` (commit `5e1d1f5`); diseñar la emulación netlink para `RTM_GETLINK` antes de implementar. Probar libc aislada antes de instalar (`instalar-glibc.sh`).
+(5) **Morrowind**: confirmar si es el mouse (¿se mueve el cursor del juego?, `xinput`/`xev` dentro de sway mientras se toca; ¿Wine DirectInput recibe movimiento relativo?).
+(6) Si Morrowind queda bien con `~/mesa-gl`: pasar el `LD_LIBRARY_PATH` de `~/mesa-gl` a `proton-directo` para todos los juegos (GL/WineD3D) y borrar `~/.config/proton-directo/22320`.
+(7) Modificaciones o debloat del teléfono usando el nuevo puente `adb` local.
+(8) Confirmar qué versión de libc está instalada en el Redmi. El repositorio trae glibc 0019 (hostname), pero la sesión del teléfono no se reinició ni se verificó esa versión aquí.
+(9) Pendientes de la 24ª: limpiar `/dev/shm/.sysv` y llevar `/dev/shm` a memoria; sockets viejos de sway al arrancar; memoria (PSS de Steam/Firefox, ¿`-cef-single-process`?, lmkd); copia del cuadro de Firefox (cero copias).
 Notas de trabajo de la 25ª: probar sin ningún filtro seccomp con `adb shell run-as dev.ben4shot.glibcprueba.sdk36 sh -c '...'` (Seccomp 0): `cd files/archlinux; export GLIBC_SECCOMP=0 GLIBC_PREFIX=$PWD GLIBC_LOADER=<lib>/libldp.so HOME=/home/user PATH=/usr/bin; <lib>/libldp.so $PWD/<ruta del binario>` (ruta del programa con el prefijo; `<lib>` = `legacyNativeLibraryDir`/arm64 de `pm dump`, cambia al reinstalar). Sin `GLIBC_SECCOMP=0` instala solo la capa propia (sirve para separar culpas). Tamaño de pila de una función: `llvm-objdump -d glibc/build/libc.so.6` y mirar el `sub sp` del prólogo.
 **Antes (26ª), hecho:** agy interactivo real ✅, android-tools instalado ✅, emparejamiento y conexión local ✅, permisos de shell obtenidos ✅, script adb-conectar ✅.
 **Antes (25ª), hecho solo lo de `agy` — en orden:**
@@ -187,7 +189,7 @@ Siguiente:
 - [x] Morrowind se ve (escritorio virtual 1024×768 + `~/mesa-gl` por juego); input del menú sin resolver (24ª sesión)
 - [x] `agy` (Go) ya no se cae: glibc 0018, manejador de SIGSYS en pila propia (25ª sesión)
 - [x] Puente shell local autónomo (26ª sesión): android-tools instalado en Arch, vinculado por depuración inalámbrica (uid 2000), script adb-conectar
-- [ ] **← siguiente (28ª):** reiniciar lo que corre para tomar la 0018; luego glibc 0019 (`ip a`), mouse de Morrowind, `~/mesa-gl` en proton-directo para todos; ver "Siguiente sesión (27ª)" arriba. El supervisor de escritorios queda con seguimiento en la 35ª sesión al final de este archivo.
+- [ ] **← siguiente (38ª):** probar en el teléfono el selector OS del APK ya compilado (instalar cierra la sesión Linux); luego seguir el plan detallado en "Siguiente sesión (38ª)" arriba. Netlink será glibc 0020 porque 0019 ya implementa hostname. El supervisor de escritorios queda documentado en la 35ª sesión.
 - [ ] Viejos (24ª): limpiar `/dev/shm/.sysv`, `/dev/shm` en memoria, memoria de Steam/Firefox, sockets viejos de sway
 - [ ] Viejos (21ª): video en Firefox, estáticos, `msg*`, `/dev/shm` en memfd; ver PROYECTO.md "Empezar la próxima sesión por" punto 6
 - [ ] Viejos (18ª): audio confirmado, mandos en juegos de Wine, vibración (el usuario los dejó para después)

@@ -20,11 +20,15 @@ final class Instalador {
 
     // Instalado = lo marcó primer-arranque.sh, o un Arch de antes del instalador (con sway y
     // sin una instalación a medias).
-    static boolean falta(Context c) {
-        File p = new File(c.getFilesDir(), TerminalService.PREFIJO);
+    static boolean instalada(Context c) {
+        File p = SistemaLinux.raiz(c, SistemaLinux.ARCH);
         File e = new File(p, "var/lib/arch-android");
-        if (new File(e, "instalado").exists()) return false;
-        return new File(e, "instalando").exists() || !new File(p, "usr/bin/sway").exists();
+        if (new File(e, "instalado").exists()) return true;
+        return !new File(e, "instalando").exists() && new File(p, "usr/bin/sway").exists();
+    }
+
+    static boolean falta(Context c) {
+        return !instalada(c);
     }
 
     // Este APK trae el instalador (los assets los arma apk/armar.sh; sin ellos, solo el cargador).
@@ -48,7 +52,7 @@ final class Instalador {
             i.transferTo(b);
             script = b.toString("UTF-8");
         }
-        Log.i(TAG, "instalando en " + new File(c.getFilesDir(), TerminalService.PREFIJO));
+        Log.i(TAG, "instalando en " + SistemaLinux.raiz(c, SistemaLinux.ARCH));
         return new String[]{"sh", "-c", script, "instalar.sh"};
     }
 
