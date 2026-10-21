@@ -57,6 +57,7 @@ ARCHIVOS = [
     ("android/mimeapps.list", f"{H}/.config/mimeapps.list", 0o644),
     ("mesa-gl/con-gpu", "usr/local/bin/con-gpu", 0o755),
     ("mesa-gl/firefox", "usr/local/bin/firefox", 0o755),
+    ("trabajo/libudmabuf-shim.so", "usr/local/lib/libudmabuf-shim.so", 0o755),
     ("scripts/adb-conectar", "usr/local/bin/adb-conectar", 0o755),
     # escritorio elegido al instalar (escritorios/: uno por carpeta) y lo que arranca con todos
     ("escritorios/sesion-android", "usr/local/bin/sesion-android", 0o755),

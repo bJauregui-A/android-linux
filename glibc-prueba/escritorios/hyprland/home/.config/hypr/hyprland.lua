@@ -3,7 +3,7 @@ hl.monitor({
     output   = "",
     mode     = "preferred",
     position = "auto",
-    scale    = @ESCALA@,
+    scale    = 3,
 })
 
 hl.on("hyprland.start", function ()
@@ -14,6 +14,9 @@ hl.env("XCURSOR_SIZE", "24")
 hl.env("HYPRCURSOR_SIZE", "24")
 
 hl.config({
+    debug = {
+        disable_scale_checks = true,
+    },
     general = {
         gaps_in  = 4,
         gaps_out = 8,
