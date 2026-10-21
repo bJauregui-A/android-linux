@@ -159,8 +159,14 @@ el ID elegido y solo habilita Arch, si existe o el APK trae su instalador.
 **37ª sesión (repo):** el selector de instalación Linux quedó como entrada del ícono. El registro
 usa el ID `arch-arm64` y resuelve sus rutas al prefijo histórico; Debian y Ubuntu aparecen
 deshabilitados hasta contar con rootfs y adaptador. La selección se conserva en preferencias y los
-servicios consultan la raíz asociada. `sdk36Debug` compila; falta instalar y probar el flujo
-conservando el Arch existente. La instalación reemplaza la APK y cierra la sesión Linux activa.
+servicios consultan la raíz asociada. `sdk36Debug` compiló y esa APK se instaló después conservando
+los datos; falta confirmar en el dispositivo el flujo del selector. Reinstalar una APK cierra la
+sesión Linux activa.
+
+**38ª sesión (repo):** el selector recibió una presentación tipo consola Linux: fuente monoespaciada,
+prompt, paleta de terminal y etiquetas de estado. La compilación `sdk36Debug` se completó. La APK
+anterior se había instalado; esta compilación con el rediseño sigue pendiente de instalación y
+validación en el dispositivo.
 
 No se instalarán entornos en el teléfono como parte de estas fases sin revisar su tamaño y el
 estado de la sesión; los prototipos de proveedor y gestor se validan primero aislados cuando sea
