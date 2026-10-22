@@ -78,11 +78,11 @@ public class TerminalActivity extends Activity implements TerminalViewClient {
         raiz.setBackgroundColor(Color.BLACK);
         raiz.addView(vista, new LinearLayout.LayoutParams(-1, 0, 1));
         raiz.addView(filaTeclas(), new LinearLayout.LayoutParams(-1, -2));
-        // edge-to-edge (targetSdk 35+): dejar espacio a las barras del sistema (status/nav bar)
+        // edge-to-edge (targetSdk 35+): dejar espacio a las barras del sistema y al teclado virtual (IME)
         raiz.setOnApplyWindowInsetsListener((v, insets) -> {
-            android.graphics.Insets sb = insets.getInsets(WindowInsets.Type.systemBars());
-            v.setPadding(sb.left, sb.top, sb.right, sb.bottom);
-            return insets;
+            android.graphics.Insets i = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.ime());
+            v.setPadding(i.left, i.top, i.right, i.bottom);
+            return WindowInsets.CONSUMED;
         });
         setContentView(raiz);
 
