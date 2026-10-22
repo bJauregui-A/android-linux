@@ -398,28 +398,24 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(14), dp(10), dp(14), dp(10));
+        boolean corriendo = TerminalService.estaCorriendo(inst.id);
+        boolean tieneTerm = TerminalService.tieneTerminal(inst.id);
+        boolean tieneEsc = TerminalService.tieneEscritorio(inst.id);
+
         card.setBackground(crearFondo(
-                activa ? PANEL_ACTIVO : PANEL_CARD,
-                activa ? BORDE_ACTIVO : BORDE_NORMAL,
+                corriendo ? PANEL_ACTIVO : PANEL_CARD,
+                corriendo ? BORDE_ACTIVO : BORDE_NORMAL,
                 dp(8),
-                activa ? dp(2) : dp(1)));
+                corriendo ? dp(2) : dp(1)));
 
         LinearLayout.LayoutParams lpCard = new LinearLayout.LayoutParams(-1, -2);
         lpCard.bottomMargin = dp(8);
         card.setLayoutParams(lpCard);
 
-        // Header de la tarjeta: Badge de Estado y Título
+        // Header de la tarjeta: Badges limpios (Consola, En ejecución, Pendiente)
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
-
-        TextView tagActivo = textoBadge(activa ? "● [ ACTIVO ]" : "○ [ INACTIVO ]", activa ? ACCENTO_VERDE : TEXTO_MUTED);
-        header.addView(tagActivo);
-
-        TextView tagInst = textoBadge(instalada ? "LISTO" : "PENDIENTE", instalada ? ACCENTO_CIAN : ACCENTO_AMBAR);
-        LinearLayout.LayoutParams lpInst = new LinearLayout.LayoutParams(-2, -2);
-        lpInst.leftMargin = dp(8);
-        header.addView(tagInst, lpInst);
 
         File fEsc = new File(SistemaLinux.raiz(this, inst.id), "var/lib/arch-android/escritorio");
         String idEsc = "";
@@ -434,26 +430,30 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         boolean esSinEntorno = "sin-entorno".equals(idEsc);
 
         if (esSinEntorno) {
-            TextView tagTipo = textoBadge("SIN ENTORNO", ACCENTO_AMBAR);
-            LinearLayout.LayoutParams lpTipo = new LinearLayout.LayoutParams(-2, -2);
-            lpTipo.leftMargin = dp(8);
-            header.addView(tagTipo, lpTipo);
+            TextView tagTipo = textoBadge("CONSOLA", ACCENTO_AMBAR);
+            header.addView(tagTipo);
         }
 
-        boolean corriendo = TerminalService.estaCorriendo(inst.id);
-        boolean tieneTerm = TerminalService.tieneTerminal(inst.id);
-        boolean tieneEsc = TerminalService.tieneEscritorio(inst.id);
         if (corriendo) {
             TextView tagCorriendo = textoBadge("● EN EJECUCIÓN", ACCENTO_VERDE);
             LinearLayout.LayoutParams lpCorr = new LinearLayout.LayoutParams(-2, -2);
-            lpCorr.leftMargin = dp(8);
+            if (header.getChildCount() > 0) lpCorr.leftMargin = dp(8);
             header.addView(tagCorriendo, lpCorr);
         }
 
-        card.addView(header);
+        if (!instalada) {
+            TextView tagPend = textoBadge("PENDIENTE INSTALACIÓN", 0xffffb703);
+            LinearLayout.LayoutParams lpPend = new LinearLayout.LayoutParams(-2, -2);
+            if (header.getChildCount() > 0) lpPend.leftMargin = dp(8);
+            header.addView(tagPend, lpPend);
+        }
+
+        if (header.getChildCount() > 0) {
+            card.addView(header);
+        }
 
         // Nombre de la instancia y ruta
-        TextView nombre = texto("❯ [" + index + "] " + inst.nombre, 15, true, activa ? TEXTO_CLARO : 0xffcbd5e1);
+        TextView nombre = texto("❯ [" + index + "] " + inst.nombre, 15, true, corriendo ? TEXTO_CLARO : 0xffcbd5e1);
         LinearLayout.LayoutParams lpNombre = new LinearLayout.LayoutParams(-1, -2);
         lpNombre.topMargin = dp(4);
         card.addView(nombre, lpNombre);
@@ -568,6 +568,7 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
 
         RadioGroup rg = new RadioGroup(this);
         RadioButton rbArch = new RadioButton(this);
+        rbArch.setId(View.generateViewId());
         rbArch.setText("Arch Linux ARM (Probado y funcional)");
         rbArch.setTextColor(TEXTO_CLARO);
         rbArch.setTypeface(Typeface.MONOSPACE);
@@ -575,6 +576,7 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         rg.addView(rbArch);
 
         RadioButton rbDebian = new RadioButton(this);
+        rbDebian.setId(View.generateViewId());
         rbDebian.setText("Debian ARM64 (Próximamente)");
         rbDebian.setTextColor(TEXTO_MUTED);
         rbDebian.setTypeface(Typeface.MONOSPACE);
@@ -582,6 +584,7 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         rg.addView(rbDebian);
 
         RadioButton rbUbuntu = new RadioButton(this);
+        rbUbuntu.setId(View.generateViewId());
         rbUbuntu.setText("Ubuntu ARM64 (Próximamente)");
         rbUbuntu.setTextColor(TEXTO_MUTED);
         rbUbuntu.setTypeface(Typeface.MONOSPACE);
@@ -597,6 +600,7 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
 
         RadioGroup rgTipo = new RadioGroup(this);
         RadioButton rbGrafico = new RadioButton(this);
+        rbGrafico.setId(View.generateViewId());
         rbGrafico.setText("Con Entorno Gráfico (Wayland / GPU Turnip)");
         rbGrafico.setTextColor(TEXTO_CLARO);
         rbGrafico.setTypeface(Typeface.MONOSPACE);
@@ -604,6 +608,7 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         rgTipo.addView(rbGrafico);
 
         RadioButton rbConsola = new RadioButton(this);
+        rbConsola.setId(View.generateViewId());
         rbConsola.setText("Consola pura / Servidor (Headless, sin GPU)");
         rbConsola.setTextColor(TEXTO_CLARO);
         rbConsola.setTypeface(Typeface.MONOSPACE);

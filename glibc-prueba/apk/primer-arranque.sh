@@ -204,17 +204,27 @@ configurar_escritorio() {
 paso "Aplicando configuración de $ESC para $SISTEMA_LINUX"
 configurar_escritorio "$ESC" || falla "no se pudo aplicar la receta de $ESC"
 
-GRUPOS=(ssh audio zsh firefox desarrollo adb utilidades aur)
-TEXTOS=("SSH: Servidor seguro en el puerto 8022"
-        "Audio: PipeWire a Altavoz Android vía AudioTrack"
-        "Zsh + Kitty: Zsh con Starship y terminal Kitty como en el PC"
-        "Firefox con aceleración GPU WebRender"
-        "Desarrollo: gcc, meson, git, gdb, strace"
-        "ADB local sin PC: depuración inalámbrica"
-        "Utilidades: htop, grim, unzip, wget"
-        "AUR: yay y paru (ayudantes de paquetes)")
-MARCA=(1 1 1 0 0 0 0 1)
-[ "$ESC" = "sin-entorno" ] && MARCA=(1 0 1 0 0 0 1 1)
+if [ "$ESC" = "sin-entorno" ]; then
+    GRUPOS=(ssh zsh desarrollo adb utilidades aur)
+    TEXTOS=("SSH: Servidor seguro en el puerto 8022"
+            "Zsh: Shell interactiva con Starship, eza y utilidades CLI (sin entorno gráfico)"
+            "Desarrollo: gcc, meson, git, gdb, strace"
+            "ADB local sin PC: depuración inalámbrica"
+            "Utilidades: htop, unzip, wget, curl"
+            "AUR: yay y paru (ayudantes de paquetes)")
+    MARCA=(1 1 0 0 1 1)
+else
+    GRUPOS=(ssh audio zsh firefox desarrollo adb utilidades aur)
+    TEXTOS=("SSH: Servidor seguro en el puerto 8022"
+            "Audio: PipeWire a Altavoz Android vía AudioTrack"
+            "Zsh + Kitty: Zsh con Starship y terminal Kitty como en el PC"
+            "Firefox con aceleración GPU WebRender"
+            "Desarrollo: gcc, meson, git, gdb, strace"
+            "ADB local sin PC: depuración inalámbrica"
+            "Utilidades: htop, grim, unzip, wget"
+            "AUR: yay y paru (ayudantes de paquetes)")
+    MARCA=(1 1 1 0 0 0 0 1)
+fi
 
 paquetes_de_grupo() {
     local g=$1
@@ -223,7 +233,15 @@ paquetes_de_grupo() {
     elif [ -f "$(dirname "$0")/paquetes-$g.txt" ]; then f="$(dirname "$0")/paquetes-$g.txt";
     fi
     if [ -n "$f" ]; then
-        sed 's/#.*//' "$f" | tr -s ' \n' ' '
+        local raw=$(sed 's/#.*//' "$f" | tr -s ' \n' ' ')
+        if [ "$ESC" = "sin-entorno" ]; then
+            if [ "$g" = "zsh" ]; then
+                raw=$(echo "$raw" | sed -E 's/\b(kitty|foot|ttf-jetbrains-mono-nerd)\b//g')
+            elif [ "$g" = "utilidades" ]; then
+                raw=$(echo "$raw" | sed -E 's/\b(grim)\b//g')
+            fi
+        fi
+        echo "$raw" | tr -s ' \n' ' '
     fi
 }
 
@@ -540,8 +558,11 @@ if [ -f /etc/pam.d/phosh ]; then
     printf "%s\n" "#%PAM-1.0" "auth       include      system-auth" "account    include      system-auth" "session    include      system-auth" > /etc/pam.d/phosh
 fi
 elegido zsh && {
-    mkdir -p "/home/$N/.config/kitty" "/home/$N/.config/starship"
-    cp -rn /etc/skel/.config/kitty/. "/home/$N/.config/kitty/" 2>/dev/null || true
+    if [ "$ESC" != "sin-entorno" ]; then
+        mkdir -p "/home/$N/.config/kitty"
+        cp -rn /etc/skel/.config/kitty/. "/home/$N/.config/kitty/" 2>/dev/null || true
+    fi
+    mkdir -p "/home/$N/.config/starship"
     [ -f /etc/skel/.zshrc ] && cp -n /etc/skel/.zshrc "/home/$N/.zshrc" 2>/dev/null || true
     [ -f /etc/skel/.config/starship/starship.toml ] && cp -n /etc/skel/.config/starship/starship.toml "/home/$N/.config/starship/starship.toml" 2>/dev/null || true
     if command -v zsh >/dev/null 2>&1; then

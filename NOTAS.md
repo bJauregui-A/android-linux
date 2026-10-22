@@ -481,14 +481,33 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
 5. **Despliegue limpio en el Redmi 15 5G:**
    - A petición del usuario, se desinstaló completamente la app anterior con `adb uninstall dev.ben4shot.glibcprueba.sdk36` y se instaló desde cero el nuevo paquete `app-sdk36-debug.apk` (Success).
 
-**Siguiente sesión (64ª):**
-1. **Prueba en limpio en el teléfono:**
-   - Abrir la app limpia y crear una primera instancia gráfica o de consola.
-   - Probar el nuevo diálogo `[ ⇄ RED ]`, asignación de subred y reenvío de puertos.
-   - Probar la concurrencia entre dos instancias simultáneas.
+**64ª sesión (2026-10-22, repo + Redmi por USB):**
+1. **Cierre individual de instancias en la notificación persistente:**
+   - En [TerminalService.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/TerminalService.java): `actualizarNotificacion()` adaptado para generar botones de acción dinámicos individuales (`✕ <Nombre 1>`, `✕ <Nombre 2>`, `✕ TODO`) con `PendingIntent` únicos por instancia mediante `CERRAR_INSTANCIA` y `EXTRA_INSTANCIA_ID`.
+2. **Corrección de selección en diálogo `＋ CREAR`:**
+   - En [SistemaActivity.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/SistemaActivity.java): asignados IDs únicos con `View.generateViewId()` a cada `RadioButton` dentro de los `RadioGroup` dinámicos (`rg` y `rgTipo`), resolviendo el fallo donde ambas opciones permanecían seleccionadas a la vez.
+3. **Instalador sin entorno gráfico limpio (0 paquetes GUI):**
+   - En [primer-arranque.sh](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/primer-arranque.sh): si `$ESC == "sin-entorno"`, se ocultan por completo los grupos de `audio` y `firefox`, y en el grupo `zsh` se filtran automáticamente `kitty`, `foot` y fuentes nerd (`ttf-jetbrains-mono-nerd`), así como `grim` de utilidades.
+   - En [instalar.sh](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/instalar.sh): excluidos `etc/skel/.config/kitty*` y `usr/local/share/arch-android/juegos*` al descomprimir `capa.tgz` en modo consola.
+   - Regenerado `trabajo/assets-sdk36/capa.tgz` con `apk/capa.py`.
+4. **Corrección del redibujado de la terminal con el teclado abierto:**
+   - En [TerminalActivity.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/TerminalActivity.java): eliminado `WindowInsets.Type.ime()` del padding manual del layout raíz; al estar `android:windowSoftInputMode="adjustResize"` en el manifiesto, el cálculo doble provocaba que la altura útil de `TerminalView` colapsara a casi 0 px mientras el IME estaba visible. Se conservan únicamente los insets de `systemBars()` y se devuelven sin consumir.
+   - En [TerminalService.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/TerminalService.java): `onTextChanged` ahora despacha `vista.post(vista::onScreenUpdated)` para garantizar ejecución directa en el hilo de UI.
+5. **Navegación limpia al inicio al salir al fondo:**
+   - En [TerminalActivity.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/TerminalActivity.java) y [WaylandActivity.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/WaylandActivity.java): al presionar "Volver al inicio (en fondo)", se lanza `SistemaActivity` con `FLAG_ACTIVITY_CLEAR_TOP | FLAG_ACTIVITY_SINGLE_TOP`, regresando directamente a la pantalla principal de la app en lugar de salir al launcher de Android.
+   - En [AndroidManifest.xml](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/AndroidManifest.xml): eliminado `taskAffinity=".terminal"` y `singleTask` de la terminal, unificando toda la app bajo una misma tarea.
+6. **Limpieza visual de tarjetas de instancias:**
+   - En [SistemaActivity.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/SistemaActivity.java): eliminados los badges redundantes `● [ ACTIVO ]`, `○ [ INACTIVO ]` y `LISTO`. Ahora solo se destacan los badges informativos necesarios: `[ CONSOLA ]`, `● EN EJECUCIÓN` y `(PENDIENTE INSTALACIÓN)`.
+7. **Eliminada actividad de prueba obsoleta `MainActivity`:**
+   - Retirada de [AndroidManifest.xml](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/AndroidManifest.xml) para evitar aperturas accidentales con fondo blanco por comandos ADB.
+
+**Siguiente sesión (65ª):**
+1. **Actualización del APK en el teléfono (`adb install -r`):**
+   - Instalar la versión compilada para reflejar todos los cambios de navegación, redibujado de teclado, notificación individual y tarjetas limpias conservando las instancias activas.
 2. **Punto 3.3: Soporte para ejecución de binarios estáticos (`execve_x` en `android-path.c`).**
 3. **Distribuciones adicionales (Debian / Ubuntu arm64).**
 4. **Proxy de puerto 22 en segundo plano vía ADB local (`adb-conectar`).**
 5. **Estado y notas operativas del teléfono:**
    - Dispositivo: Redmi 15 5G (`spring`, Snapdragon 4 Gen 2, serial `dab6b001`).
+   - Instancias activas verificadas en concurrencia: dos instancias de consola funcionando independientemente en segundo plano.
    - Reconexión de depuración inalámbrica local en el teléfono si se reinicia o pierde Wi-Fi: script `adb-conectar` (`~/.local/bin/adb-conectar`).

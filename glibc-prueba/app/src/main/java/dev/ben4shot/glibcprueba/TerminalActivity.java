@@ -78,11 +78,11 @@ public class TerminalActivity extends Activity implements TerminalViewClient {
         raiz.setBackgroundColor(Color.BLACK);
         raiz.addView(vista, new LinearLayout.LayoutParams(-1, 0, 1));
         raiz.addView(filaTeclas(), new LinearLayout.LayoutParams(-1, -2));
-        // edge-to-edge (targetSdk 35+): dejar espacio a las barras del sistema y al teclado
+        // edge-to-edge (targetSdk 35+): dejar espacio a las barras del sistema (status/nav bar)
         raiz.setOnApplyWindowInsetsListener((v, insets) -> {
-            android.graphics.Insets i = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.ime());
-            v.setPadding(i.left, i.top, i.right, i.bottom);
-            return WindowInsets.CONSUMED;
+            android.graphics.Insets sb = insets.getInsets(WindowInsets.Type.systemBars());
+            v.setPadding(sb.left, sb.top, sb.right, sb.bottom);
+            return insets;
         });
         setContentView(raiz);
 
@@ -187,6 +187,13 @@ public class TerminalActivity extends Activity implements TerminalViewClient {
                 .show();
     }
 
+    private void volverAlInicio() {
+        Intent i = new Intent(this, SistemaActivity.class);
+        i.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        startActivity(i);
+        finish();
+    }
+
     private void cancelarYBorrarInstancia(SistemaLinux.Instancia inst) {
         if (inst != null) {
             if (servicio != null) {
@@ -198,7 +205,7 @@ public class TerminalActivity extends Activity implements TerminalViewClient {
             }
             SistemaLinux.eliminarInstancia(this, inst.id);
         }
-        finish();
+        volverAlInicio();
     }
 
     private void mostrarMenuSalida() {
@@ -206,15 +213,15 @@ public class TerminalActivity extends Activity implements TerminalViewClient {
         String nombre = inst != null ? inst.nombre : "Linux";
         new AlertDialog.Builder(this)
                 .setTitle("✦ Terminal (" + nombre + ")")
-                .setMessage("¿Deseas salir manteniendo la sesión en segundo plano, o cerrar la sesión por completo?")
-                .setPositiveButton("Salir (mantener en fondo)", (d, w) -> {
-                    finish();
+                .setMessage("¿Deseas volver al inicio manteniendo la sesión en segundo plano, o cerrar la sesión por completo?")
+                .setPositiveButton("Volver al inicio (en fondo)", (d, w) -> {
+                    volverAlInicio();
                 })
                 .setNegativeButton("✕ Cerrar sesión", (d, w) -> {
                     startService(new Intent(this, TerminalService.class)
                             .setAction(TerminalService.CERRAR_INSTANCIA)
                             .putExtra(TerminalService.EXTRA_INSTANCIA_ID, instanciaId));
-                    finish();
+                    volverAlInicio();
                 })
                 .setNeutralButton("Cancelar", null)
                 .show();
@@ -267,7 +274,7 @@ public class TerminalActivity extends Activity implements TerminalViewClient {
     private boolean cerrarSiTermino(TerminalSession s) {
         if (s == null || s.isRunning()) return false;
         if (servicio != null) servicio.cerrarSesionTerminal(instanciaId);
-        finish();
+        volverAlInicio();
         return true;
     }
 

@@ -720,14 +720,21 @@ public class WaylandActivity extends Activity {
         }
     }
 
+    private void volverAlInicio() {
+        Intent i = new Intent(this, SistemaActivity.class);
+        i.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        startActivity(i);
+        finish();
+    }
+
     private void mostrarMenuSalida() {
         SistemaLinux.Instancia inst = SistemaLinux.instancia(this, instanciaId);
         String nombre = inst != null ? inst.nombre : "Linux";
         new AlertDialog.Builder(this)
                 .setTitle("✦ Menú de Sesión (" + nombre + ")")
-                .setMessage("¿Deseas salir de la pantalla manteniendo la sesión abierta en segundo plano, o cerrar la sesión por completo?")
-                .setPositiveButton("Salir (mantener en fondo)", (d, w) -> {
-                    finish();
+                .setMessage("¿Deseas volver al inicio manteniendo la sesión abierta en segundo plano, o cerrar la sesión por completo?")
+                .setPositiveButton("Volver al inicio (en fondo)", (d, w) -> {
+                    volverAlInicio();
                 })
                 .setNegativeButton("✕ Cerrar sesión", (d, w) -> {
                     Wayland.ventana(null, 0, 0, 0, 0);
@@ -735,7 +742,7 @@ public class WaylandActivity extends Activity {
                             .setAction(TerminalService.CERRAR_INSTANCIA)
                             .putExtra(TerminalService.EXTRA_INSTANCIA_ID, instanciaId);
                     startService(i);
-                    finish();
+                    volverAlInicio();
                 })
                 .setNeutralButton("Cancelar", null)
                 .show();

@@ -15,20 +15,15 @@
 
     <application
         android:label="${etiqueta}">
-        <!-- Pruebas por ADB (scripts/correr.sh la abre por nombre) -->
-        <activity
-            android:name=".MainActivity"
-            android:exported="true" />
 
         <activity
             android:name=".TerminalActivity"
             android:exported="true"
             android:label="Terminal Arch"
-            android:taskAffinity=".terminal"
             android:theme="@android:style/Theme.Material.NoActionBar"
             android:windowSoftInputMode="adjustResize"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density"
-            android:launchMode="singleTask" />
+            android:launchMode="singleTop" />
 
         <!-- El ícono abre el selector de instalaciones Linux. La terminal queda en el
              atajo de mantener pulsado el ícono y dentro del escritorio con foot. -->

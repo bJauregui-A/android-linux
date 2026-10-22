@@ -67,7 +67,9 @@ if [ ! -e "$E/extraido" ]; then
             --exclude='usr/local/wlroots*' \
             --exclude='usr/local/sway*' \
             --exclude='usr/local/lib/libudmabuf-shim.so' \
-            --exclude='opt/gtk2*'
+            --exclude='opt/gtk2*' \
+            --exclude='etc/skel/.config/kitty*' \
+            --exclude='usr/local/share/arch-android/juegos*'
     else
         extraer "$CAPA_OFF" "$CAPA_LEN" "Capa GPU (Turnip, Zink, Mesa, wlroots, configs)"
     fi

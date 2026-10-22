@@ -168,11 +168,6 @@ public class TerminalService extends Service implements TerminalSessionClient {
 
         PendingIntent abrir = PendingIntent.getActivity(this, 0,
                 new Intent(this, SistemaActivity.class), PendingIntent.FLAG_IMMUTABLE);
-        PendingIntent piCerrar = PendingIntent.getService(this, 1,
-                new Intent(this, TerminalService.class).setAction(CERRAR_SESION),
-                PendingIntent.FLAG_IMMUTABLE);
-        Notification.Action accionCerrar = new Notification.Action.Builder(
-                null, vivas.size() > 1 ? "✕ CERRAR TODO" : "✕ CERRAR SESIÓN", piCerrar).build();
 
         String titulo;
         String texto;
@@ -192,14 +187,54 @@ public class TerminalService extends Service implements TerminalSessionClient {
             texto = sb.toString();
         }
 
-        Notification n = new Notification.Builder(this, CANAL)
+        Notification.Builder nb = new Notification.Builder(this, CANAL)
                 .setSmallIcon(android.R.drawable.ic_menu_manage)
                 .setContentTitle(titulo)
                 .setContentText(texto)
                 .setContentIntent(abrir)
-                .addAction(accionCerrar)
-                .setOngoing(true)
-                .build();
+                .setOngoing(true);
+
+        if (vivas.size() == 1) {
+            String idInst = vivas.get(0).id;
+            Intent it = new Intent(this, TerminalService.class)
+                    .setAction(CERRAR_INSTANCIA)
+                    .putExtra(EXTRA_INSTANCIA_ID, idInst);
+            PendingIntent pi = PendingIntent.getService(this, 1, it, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            nb.addAction(new Notification.Action.Builder(null, "✕ CERRAR", pi).build());
+        } else if (vivas.size() == 2) {
+            for (int i = 0; i < vivas.size(); i++) {
+                String idInst = vivas.get(i).id;
+                SistemaLinux.Instancia inst = SistemaLinux.instancia(this, idInst);
+                String nom = inst != null ? inst.nombre : idInst;
+                if (nom.length() > 10) nom = nom.substring(0, 10);
+                Intent it = new Intent(this, TerminalService.class)
+                        .setAction(CERRAR_INSTANCIA)
+                        .putExtra(EXTRA_INSTANCIA_ID, idInst);
+                PendingIntent pi = PendingIntent.getService(this, 10 + i, it, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+                nb.addAction(new Notification.Action.Builder(null, "✕ " + nom, pi).build());
+            }
+            PendingIntent piTodo = PendingIntent.getService(this, 99,
+                    new Intent(this, TerminalService.class).setAction(CERRAR_SESION),
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            nb.addAction(new Notification.Action.Builder(null, "✕ TODO", piTodo).build());
+        } else {
+            String idEnf = instanciaEnfocadaId != null ? instanciaEnfocadaId : vivas.get(0).id;
+            SistemaLinux.Instancia instEnf = SistemaLinux.instancia(this, idEnf);
+            String nom = instEnf != null ? instEnf.nombre : idEnf;
+            if (nom.length() > 10) nom = nom.substring(0, 10);
+            Intent itEnf = new Intent(this, TerminalService.class)
+                    .setAction(CERRAR_INSTANCIA)
+                    .putExtra(EXTRA_INSTANCIA_ID, idEnf);
+            PendingIntent piEnf = PendingIntent.getService(this, 50, itEnf, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            nb.addAction(new Notification.Action.Builder(null, "✕ " + nom, piEnf).build());
+
+            PendingIntent piTodo = PendingIntent.getService(this, 99,
+                    new Intent(this, TerminalService.class).setAction(CERRAR_SESION),
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            nb.addAction(new Notification.Action.Builder(null, "✕ CERRAR TODO", piTodo).build());
+        }
+
+        Notification n = nb.build();
         if (Build.VERSION.SDK_INT >= 34) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
         else startForeground(1, n);
     }
@@ -743,7 +778,9 @@ public class TerminalService extends Service implements TerminalSessionClient {
 
     @Override
     public void onTextChanged(TerminalSession s) {
-        if (vista != null && s == sesionVisible) vista.onScreenUpdated();
+        if (vista != null && s == sesionVisible) {
+            vista.post(vista::onScreenUpdated);
+        }
     }
 
     @Override
