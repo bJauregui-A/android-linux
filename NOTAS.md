@@ -591,6 +591,11 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
    - Recompilados `salida/usr/lib/libc.so.6`, `app/src/main/jniLibs/arm64-v8a/libldp.so`, `base.tgz` y `capa.tgz`.
    - Ajustados [apk/instalar.sh](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/instalar.sh) y [apk/primer-arranque.sh](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/primer-arranque.sh) para garantizar la creación del symlink de pacman a `/etc/services.d`.
    - APK `sdk36Debug` construida exitosamente.
+7. **Diagnóstico y corrección crítica tras primer despliegue:**
+   - **Causa 1 (Fallo en instalación / SIGSYS 159):** En [apk/instalar.sh](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/instalar.sh) y [apk/primer-arranque.sh](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/primer-arranque.sh), `$ARCH_PATH` heredaba el `PATH` del sistema Android (`/product/bin:/system/bin...`). Al ejecutar `mkdir`, `ln`, `cp` o `grep`, se invocaban los binarios de `/system/bin` (toybox de Android) bajo el UID de la aplicación, los cuales son bloqueados por seccomp de Android 16 arrojando `Bad system call` (código 159 / SIGSYS). Solucionado fijando estrictamente `export PATH="/usr/local/bin:/usr/bin"`.
+   - **Causa 2 (Fallo al entrar / Sockets UNIX bloqueados):** En [glibc-2.43/sysdeps/unix/sysv/linux/aarch64/android-path.c](file:///media/ben4shot/E/Develop/Android/glibc-prueba/glibc/glibc-2.43/sysdeps/unix/sysv/linux/aarch64/android-path.c), `case __NR_connect` hacía `return raw(...)` incondicionalmente al final del bloque, interceptando también sockets de la familia `AF_UNIX`. Esto impedía que las conexiones a sockets locales llegaran a la traducción de rutas en la línea 1994, bloqueando Wayland, D-Bus y los compositores. Corregido para que solo aplique `raw` en `AF_INET` y haga `break` para `AF_UNIX`.
+   - **Causa 3 (Enlace `systemd/system`):** Al extraerse `base.tgz`, `usr/lib/systemd/system` ya existía como directorio. `ln -sfn` no lo reemplazaba. Se añadió comprobación, migración de contenido a `/etc/services.d` y `rm -rf` previo al enlace simbólico.
+   - Todo recompilado, empaquetado en `capa.tgz`, `libldp.so` y APK instalada en el Redmi 15 5G. Verificado con `service list` mostrando 57 servicios gestionados.
 
 **Siguiente sesión (68ª):**
 1. **Instalación y validación final de la APK en el Redmi:**
