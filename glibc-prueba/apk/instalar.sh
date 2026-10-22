@@ -4,7 +4,7 @@
 # primer-arranque.sh dentro de Arch. Se puede repetir: si ya extrajo, va directo a pacman.
 set -e
 ARCH_PATH=$PATH
-PATH=/system/bin
+PATH=/system/bin:$PATH
 P=$GLIBC_PREFIX
 E=$P/var/lib/arch-android
 LOG=$P/tmp/instalacion-extraccion.log
@@ -58,6 +58,7 @@ fi
 rm -f "$P/etc/resolv.conf"
 for s in $ANDROID_DNS; do echo "nameserver $s"; done > "$P/etc/resolv.conf"
 cd "$P"
-PATH=$ARCH_PATH
-printf '\n\e[1;38;5;48m➜ Iniciando configuración del entorno Arch Linux...\e[0m\n\n'
-exec "$GLIBC_LOADER" /usr/bin/bash /usr/local/share/arch-android/primer-arranque.sh
+echo ""
+echo "➜ Iniciando configuración del entorno Arch Linux..."
+echo ""
+PATH="$ARCH_PATH" exec "$GLIBC_LOADER" /usr/bin/bash /usr/local/share/arch-android/primer-arranque.sh
