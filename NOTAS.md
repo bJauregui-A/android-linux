@@ -331,8 +331,35 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
 4. **Opción y botón para reajustar pantalla (`WaylandActivity.java`, `TerminalService.java`, `reajustar-pantalla`):** se añadió el botón `[⛶]` a la fila de teclas y la acción `REAJUSTAR_PANTALLA`, que reconfigura automáticamente el monitor en caliente para Hyprland (`hyprctl keyword monitor WAYLAND-1,preferred,auto,$escala`) y Sway (`swaymsg reload`), ejecutándose tanto al pulsar el botón como automáticamente en cada rotación de pantalla (`surfaceChanged`).
 5. **Compilación y despliegue:** se generó `capa.tgz` actualizado, se compiló `app-sdk36-debug.apk` con Gradle y se instaló exitosamente en el Redmi (`adb -s dab6b001 install -r`).
 
-**Siguiente sesión (57ª):**
-1. **Probar el overlay y el botón `[⛶]` en Hyprland en el Redmi:** abrir el escritorio, validar que el teclado no corte la pantalla a la mitad, probar el botón `[⛶]` para reajustar si se gira entre portrait y landscape.
-2. **Probar el nuevo selector interactivo en primer arranque:** verificar la navegación por flechas en la selección de escritorio y módulos sin textos entre paréntesis.
-3. **Continuar pendientes:** evaluar si se recompila Hyprland eliminando `if (!m_createdByUser) return;` para soporte 100% nativo de Wayland anidado, probar desbloqueo con PAM/contraseña, y glibc 0020 (netlink).
+**57ª sesión (2026-10-22, repo + Redmi por USB):**
+1. **Solución a alternancia de instancias y pantallas en negro**:
+   - Al cambiar de instancia o salir para entrar a otra, `anfitrion.c` solo creaba `wayland-0` en el `$XDG_RUNTIME_DIR` inicial; cualquier otra instancia fallaba con `Connection refused`. Se solucionó en `Wayland.java` enlazando simbólicamente de forma automática `wayland-0` y `wayland-0.lock` hacia el runtime dir de la instancia en curso.
+   - En `WaylandActivity.java` se añadió `reconectarVentana()` invocado desde `onResume()` y `onWindowFocusChanged()` para reasociar la `Surface` válida al anfitrión C, evitando pantallas en negro al volver al frente o en escritorios como Qtile.
+2. **Menú de salida y cierre de sesión seguro**:
+   - Implementado botón `SALIR` en la barra inferior de teclas y captura de `KEYCODE_BACK` de Android en `WaylandActivity` y `TerminalActivity`, mostrando diálogo modal interactivo:
+     - *Salir (mantener en segundo plano)*.
+     - *✕ Cerrar sesión* (destrucción forzosa del árbol de procesos del compositor, barrido de `/proc` matando procesos remanentes y limpieza de sockets huérfanos).
+     - *Cancelar*.
+   - Añadido botón de acción `[ ✕ CERRAR SESIÓN ]` en la notificación persistente de Android (`TerminalService.java`) para cerrar la sesión activa sin abrir la app.
+3. **Corrección de autenticación PAM y contraseña en Phosh**:
+   - PAM rechazaba la contraseña de inmediato (`pam_shells.so`) porque `/usr/bin/zsh` y `/bin/zsh` no estaban en `/etc/shells` en Arch Linux. Se añadieron a `primer-arranque.sh` y al prefijo activo.
+   - Se configuró `/etc/pam.d/phosh` para delegar en `system-auth` en lugar de reglas de TTY físico.
+4. **Restauración del módulo Zsh y Kitty**:
+   - Se reincorporó `zsh` como módulo opcional en el selector interactivo de `primer-arranque.sh`, activo por defecto (`[✔]`), asegurando la copia de `.zshrc`, `starship.toml` y `kitty.conf` al `$HOME` del usuario.
+5. **AUR Helper (`yay`)**:
+   - Se reescribió `apk/instalar-aur.sh` para desplegar el binario oficial precompilado de `yay v13.0.1` (aarch64) en `/usr/local/bin/yay`, evitando bloqueos de `makepkg` por `GLIBC_FAKEROOT=1`.
+6. **Compilación y despliegue**:
+   - Compilada APK `sdk36Debug` e instalada exitosamente en el Redmi 15 5G (`adb -s dab6b001 install -r`).
+
+**Siguiente sesión (58ª):**
+1. **Compatibilidad con Debian y Ubuntu arm64**:
+   - Aclarado que Debian (Buster/Bookworm/Trixie) y Ubuntu (20.04/22.04/24.04) usan **Wayland por defecto** (GNOME Wayland, Sway, Hyprland, Labwc, Wayfire, Weston disponibles oficialmente en arm64). No están atados a X11.
+   - Crear script de bootstrap (`scripts/bootstrap-debian.py` o descarga/extracción de rootfs arm64 oficial) integrando la glibc propia (`libc.so.6.00NN`) y adaptador de sistema `AdaptadorDebianArm64.java`.
+2. **Servidor / Compositor X11 Directo (sin Xwayland como intermediario)**:
+   - Diseñar e implementar el servidor X11 directo para escritorios puramente X11 (XFCE, Openbox, LXDE):
+     - Opción A: Servidor X11 nativo integrado en la app sobre `ANativeWindow` (estilo DDX de Termux-X11/Lorie o KDrive compilado con NDK), sin capa Wayland.
+     - Opción B: Xwayland rootful anfitrión (servidor X11 puro `DISPLAY=:1` a pantalla completa contra `anfitrion.c`, sin compositor de escritorio Wayland intermedio; el gestor de ventanas X11 toma el root directamente).
+3. **Verificación en el Redmi**:
+   - Probar en vivo el modal de salida/cierre y el botón de la notificación.
+   - Probar desbloqueo con contraseña en Phosh y arranque de Qtile.
 **Cómo consultar Hyprland desde el PC (sin tocar nada):** guardar un script con `cd files/archlinux; PID=$(ps -A -o PID,ARGS | grep "argv0 Hyprland" | grep -v grep | head -1 | awk '{print $1}'); L=$(awk '/libldp.so/{print $6; exit}' /proc/$PID/maps); SIG=$(ls -t run/user/10331/hypr | head -1); export GLIBC_PREFIX=$PWD GLIBC_LOADER=$L XDG_RUNTIME_DIR=/run/user/10331 HYPRLAND_INSTANCE_SIGNATURE=$SIG; $L $PWD/usr/bin/hyprctl -j monitors all` y correrlo con `adb shell 'run-as dev.ben4shot.glibcprueba.sdk36 sh -s' < script`. Con `adb` siempre `< /dev/null` (si no, `run-as` se queda esperando stdin). No usar `hyprctl output create`: crea salidas extra.
