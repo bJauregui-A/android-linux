@@ -3,6 +3,7 @@
 # Deja el Arch completo: usuario, llavero, paquetes (lo mínimo + lo que se elija en el menú: ssh,
 # audio, Firefox, juegos...) y los ajustes que antes hacían a mano los scripts subir-*.sh.
 # Se puede volver a correr (pacman --needed); --elegir vuelve a mostrar el menú.
+export PATH="/usr/local/bin:/usr/bin"
 D=/usr/local/share/arch-android
 E=/var/lib/arch-android
 
@@ -79,6 +80,10 @@ umask 022
 find /usr /etc /var /opt -maxdepth 3 -type d -exec chmod 755 {} + 2>/dev/null || true
 # Enlazar systemd unit dir a /etc/services.d para que pacman instale servicios en el supervisor
 mkdir -p /etc/services.d /usr/lib/systemd 2>/dev/null || true
+if [ -d /usr/lib/systemd/system ] && [ ! -L /usr/lib/systemd/system ]; then
+    cp -rn /usr/lib/systemd/system/. /etc/services.d/ 2>/dev/null || true
+    rm -rf /usr/lib/systemd/system
+fi
 ln -sfn ../../../etc/services.d /usr/lib/systemd/system 2>/dev/null || true
 # El home con las configs de /etc/skel (sway, waybar, kitty, zsh...)
 mkdir -p /home/$N/.config

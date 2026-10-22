@@ -4,7 +4,7 @@
 # primer-arranque.sh dentro de Arch. Se puede repetir: si ya extrajo, va directo a pacman.
 set -e
 umask 022
-ARCH_PATH=$PATH
+ARCH_PATH="/usr/local/bin:/usr/bin"
 PATH=/system/bin:$PATH
 P=$GLIBC_PREFIX
 E=$P/var/lib/arch-android
@@ -83,6 +83,10 @@ if [ ! -e "$E/extraido" ]; then
     find "$P/usr" "$P/etc" "$P/var" "$P/opt" -type d -exec chmod 755 {} + 2>/dev/null || true
     # Enlazar systemd unit dir a /etc/services.d para que pacman instale servicios en el supervisor
     mkdir -p "$P/etc/services.d" "$P/usr/lib/systemd" 2>/dev/null || true
+    if [ -d "$P/usr/lib/systemd/system" ] && [ ! -L "$P/usr/lib/systemd/system" ]; then
+        cp -rn "$P/usr/lib/systemd/system/." "$P/etc/services.d/" 2>/dev/null || true
+        rm -rf "$P/usr/lib/systemd/system"
+    fi
     ln -sfn ../../../etc/services.d "$P/usr/lib/systemd/system" 2>/dev/null || true
     printf '\e[1;38;5;111m└────────────────────────────────────────────────────────────┘\e[0m\n'
 fi
@@ -96,4 +100,5 @@ echo "➜ Iniciando configuración del entorno Arch Linux..."
 echo ""
 export GLIBC_PREFIX="$P"
 export GLIBC_LOADER="$GLIBC_LOADER"
-PATH="$ARCH_PATH" exec "$GLIBC_LOADER" /usr/bin/bash /usr/local/share/arch-android/primer-arranque.sh
+export PATH="/usr/local/bin:/usr/bin"
+exec "$GLIBC_LOADER" /usr/bin/bash /usr/local/share/arch-android/primer-arranque.sh

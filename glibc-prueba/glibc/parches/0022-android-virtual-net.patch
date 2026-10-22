@@ -1,6 +1,6 @@
 diff -uNr a/sysdeps/unix/sysv/linux/aarch64/android-path.c b/sysdeps/unix/sysv/linux/aarch64/android-path.c
---- a/sysdeps/unix/sysv/linux/aarch64/android-path.c	2026-10-22 17:18:15.316330144 -0300
-+++ b/sysdeps/unix/sysv/linux/aarch64/android-path.c	2026-10-22 17:12:18.420176169 -0300
+--- a/sysdeps/unix/sysv/linux/aarch64/android-path.c	2026-10-22 17:45:31.210140887 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/android-path.c	2026-10-22 17:44:17.151002018 -0300
 @@ -36,6 +36,7 @@
  #include <net/if_arp.h>
  #include <linux/netlink.h>
@@ -286,7 +286,7 @@ diff -uNr a/sysdeps/unix/sysv/linux/aarch64/android-path.c b/sysdeps/unix/sysv/l
    if (is_dump)
      {
        if (out_len + NLMSG_SPACE (sizeof (int)) <= maxlen)
-@@ -1373,8 +1637,37 @@
+@@ -1373,6 +1637,39 @@
  	      }
  	    return r;
  	  }
@@ -302,29 +302,31 @@ diff -uNr a/sysdeps/unix/sysv/linux/aarch64/android-path.c b/sysdeps/unix/sysv/l
 +		return raw (nr, a0, (long int) &sin_copy, a2, 0, 0, 0);
 +	      }
 +	  }
- 	break;
-       }
++	break;
++      }
 +    case __NR_connect:
 +      {
 +	const struct sockaddr *sa = (const struct sockaddr *) a1;
-+	if (sa != NULL && sa->sa_family == AF_INET && a2 >= (long int) sizeof (struct sockaddr_in))
++	if (sa != NULL && sa->sa_family == AF_INET)
 +	  {
-+	    struct sockaddr_in sin_copy;
-+	    mcopy ((char *) &sin_copy, (const char *) a1, sizeof (sin_copy));
-+	    uint32_t vip = 0;
-+	    uint8_t vlen = 0;
-+	    if (leer_virtual_ip (&vip, &vlen) && sin_copy.sin_addr.s_addr == vip)
++	    if (a2 >= (long int) sizeof (struct sockaddr_in))
 +	      {
-+		sin_copy.sin_addr.s_addr = 0x0100007f; /* 127.0.0.1 */
-+		return raw (nr, a0, (long int) &sin_copy, a2, 0, 0, 0);
++		struct sockaddr_in sin_copy;
++		mcopy ((char *) &sin_copy, (const char *) a1, sizeof (sin_copy));
++		uint32_t vip = 0;
++		uint8_t vlen = 0;
++		if (leer_virtual_ip (&vip, &vlen) && sin_copy.sin_addr.s_addr == vip)
++		  {
++		    sin_copy.sin_addr.s_addr = 0x0100007f; /* 127.0.0.1 */
++		    return raw (nr, a0, (long int) &sin_copy, a2, 0, 0, 0);
++		  }
 +	      }
++	    return raw (nr, a0, a1, a2, a3, a4, a5);
 +	  }
-+	return raw (nr, a0, a1, a2, a3, a4, a5);
-+      }
+ 	break;
+       }
      case __NR_getsockname:
-       {
- 	long int r = raw (nr, a0, a1, a2, 0, 0, 0);
-@@ -1399,6 +1692,15 @@
+@@ -1399,6 +1696,15 @@
  	      nl_lock_release ();
  	      return a2;
  	    }
@@ -340,7 +342,7 @@ diff -uNr a/sysdeps/unix/sysv/linux/aarch64/android-path.c b/sysdeps/unix/sysv/l
  	  if (nlh->nlmsg_type == RTM_GETNEIGH)
  	    {
  	      nl_lock_acquire ();
-@@ -1429,7 +1731,8 @@
+@@ -1429,7 +1735,8 @@
  	      if (ib != NULL && il >= sizeof (struct nlmsghdr))
  		{
  		  const struct nlmsghdr *nlh = (const struct nlmsghdr *) ib;
