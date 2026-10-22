@@ -396,9 +396,22 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
      - Actualizado `app/src/main/jniLibs/arm64-v8a/libldp.so` y creado el parche `glibc/parches/0020-android-netlink.patch`.
 
 **Siguiente sesión (61ª):**
-1. Punto 3.3: Ejecución de binarios estáticos (cargador de ELF static-pie en espacio de usuario desde `execve`).
-2. Probar en el Redmi la creación de una instancia limpia de Sway u otro escritorio (comprobar que pacman instala la base completa y el escritorio inicia con fluidez sin quedarse en negro).
-3. Verificar que al eliminar una instancia desde el selector de la app, su carpeta en `files/instancias/` se elimine completamente del disco.
-4. Compatibilidad con Debian y Ubuntu arm64 (Wayland / adaptador).
-5. Servidor / Compositor X11 Directo (sin Xwayland como intermediario).
+1. **Punto 3.3: Soporte para ejecución de binarios estáticos (`execve_x` en `android-path.c`):**
+   - **Problema técnico:** En Android (API 36 / SELinux no-root), el kernel niega `execve` directo sobre `/data/data/...` (`W^X` / `noexec`). `android-path.c` sortea esto lanzando todos los binarios dinámicos mediante el cargador `libldp.so` (ubicado en `nativeLibraryDir`), usando `libldp.so --library-path ... <binario> <args>`. Sin embargo, los binarios compilados estáticamente (`ldconfig`, herramientas de rescate, binarios Go compilados con `CGO_ENABLED=0`, `busybox` estático) carecen de cabecera `PT_INTERP`, por lo que el cargador dinámico no puede ejecutarlos de forma estándar.
+   - **Estrategia de solución:**
+     - En `execve_x` ([android-path.c](file:///media/ben4shot/E/Develop/Android/glibc-prueba/glibc/glibc-2.43/sysdeps/unix/sysv/linux/aarch64/android-path.c)): al examinar las cabeceras ELF del binario objetivo (`Elf64_Ehdr` y `Elf64_Phdr`), comprobar la presencia de `PT_INTERP`.
+     - Si no hay `PT_INTERP` (binario estático) pero es `ET_DYN` (static-pie, como el `ldconfig` de glibc 2.43) o `ET_EXEC`:
+       - Investigar la invocación directa a través de `libldp.so` o un cargador estático mínimo en espacio de usuario (`user-space elf loader`) residente en `nativeLibraryDir` que mapee los segmentos `PT_LOAD` con `mmap`, configure el auxv / stack inicial y salte al `e_entry`.
+       - Verificar si `libldp.so <binario_estatico>` ya soporta ejecutar `static-pie` directamente en glibc 2.43.
+2. **Prueba de ciclo de vida de instancias en el Redmi:**
+   - Crear una nueva instancia limpia desde el selector de la app (ej. `sway` o `labwc`) para verificar que `primer-arranque.sh` instale sin omisiones la totalidad de `paquetes-escritorio.txt` y el entorno inicie fluido sin quedar congelado en pantalla negra.
+   - Probar la eliminación de una instancia desde el selector de la app y verificar mediante `adb shell run-as ... ls files/instancias/` que los directorios y archivos de solo lectura se eliminen al 100% sin dejar carpetas huérfanas.
+3. **Distribuciones adicionales (Punto 4):**
+   - Compatibilidad con Debian y Ubuntu arm64: creación de adaptadores (`AdaptadorDebianArm64.java`), bootstrap de rootfs y receta de sesión Wayland.
+4. **Servidor / Compositor X11 Directo (Punto 5):**
+   - Compositor/servidor X11 directo sobre DMA-BUF / AHardwareBuffer para clientes X11 puros sin intermediación de Xwayland.
+5. **Estado y notas operativas del teléfono:**
+   - Dispositivo: Redmi 15 5G (`spring`, Snapdragon 4 Gen 2, serial `dab6b001`).
+   - Instancias activas en segundo plano: `sway-54452`, `cosmic-67805`, `niri-70360`, `phosh-4056`. **No correr `am force-stop`, desinstalar el APK ni reiniciar la app sin confirmación previa del usuario**.
+   - Reconexión de depuración inalámbrica local en el teléfono si se reinicia o pierde Wi-Fi: script `adb-conectar` (`~/.local/bin/adb-conectar`).
 **Cómo consultar Hyprland desde el PC (sin tocar nada):** guardar un script con `cd files/archlinux; PID=$(ps -A -o PID,ARGS | grep "argv0 Hyprland" | grep -v grep | head -1 | awk '{print $1}'); L=$(awk '/libldp.so/{print $6; exit}' /proc/$PID/maps); SIG=$(ls -t run/user/10331/hypr | head -1); export GLIBC_PREFIX=$PWD GLIBC_LOADER=$L XDG_RUNTIME_DIR=/run/user/10331 HYPRLAND_INSTANCE_SIGNATURE=$SIG; $L $PWD/usr/bin/hyprctl -j monitors all` y correrlo con `adb shell 'run-as dev.ben4shot.glibcprueba.sdk36 sh -s' < script`. Con `adb` siempre `< /dev/null` (si no, `run-as` se queda esperando stdin). No usar `hyprctl output create`: crea salidas extra.
