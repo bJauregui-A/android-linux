@@ -145,16 +145,19 @@ Script de reconexión rápida creado en `~/.local/bin/adb-conectar` (escaneo de 
 - **Instalador interactivo rediseñado estilo AI CLI (`apk/instalar.sh` y `apk/primer-arranque.sh`):** asistente de primer arranque renovado con marcos ANSI Unicode 256 colores, pasos claros (`[1/4] Identidad`, `[2/4] Contraseña`, `[3/4] Selector de 14 escritorios` con estado `● PROBADO` alineado, y `[4/4] Módulos opcionales` con casillas interactivas `[✔]` y `[ ]`), con verificación de disco y banners finales. Compilación `:app:assembleSdk36Debug` exitosa.
 - **Desinstalación limpia e instalación de la nueva APK en el Redmi:** cambios enviados a GitHub (`git push`), app previa desinstalada por ADB purgando todos los datos (`adb uninstall`), instalada la nueva APK limpia (`adb install`) y concedidos los permisos de almacenamiento completo (`MANAGE_EXTERNAL_STORAGE allow`) y exención de batería/segundo plano.
 
-**Siguiente sesión (54ª):**
-1. Elegir cuál de los 14 entornos dejar como predeterminado del usuario o ajustar detalles finos de interfaz/atajos en los que más le gusten (`hyprland`, `kde`, `plasma-movil`, `cosmic`, `niri`, `wayfire`, `sway`, etc.).
-(3) **Reiniciar sway/Steam/kitty** cuando el usuario quiera, para que tomen la libc 0018 (lo que ya corría sigue con la 0017; Steam: `swaymsg exec "steam -shutdown"`). Ver que todo arranca igual (sshd, waybar, SUPER+V, Steam, Firefox). Revertir si algo falla: `cd /usr/lib && cp libc.so.6.0017 libc.so.6.x && mv libc.so.6.x libc.so.6` (por SSH, `adb shell run-as` o el nuevo `adb shell`).
-(4) **glibc 0020: `ip a`/`ip r`**. El repositorio ya asignó 0019 a `uname`/`gethostname` leyendo `/etc/hostname` (commit `5e1d1f5`); diseñar la emulación netlink para `RTM_GETLINK` antes de implementar. Probar libc aislada antes de instalar (`instalar-glibc.sh`).
-(5) **Morrowind**: confirmar si es el mouse (¿se mueve el cursor del juego?, `xinput`/`xev` dentro de sway mientras se toca; ¿Wine DirectInput recibe movimiento relativo?).
-(6) Si Morrowind queda bien con `~/mesa-gl`: pasar el `LD_LIBRARY_PATH` de `~/mesa-gl` a `proton-directo` para todos los juegos (GL/WineD3D) y borrar `~/.config/proton-directo/22320`.
-(7) Modificaciones o debloat del teléfono usando el nuevo puente `adb` local.
-(8) Confirmar qué versión de libc está instalada en el Redmi. El repositorio trae glibc 0019 (hostname), pero la sesión del teléfono no se reinició ni se verificó esa versión aquí.
-(9) Pendientes de la 24ª: limpiar `/dev/shm/.sysv` y llevar `/dev/shm` a memoria; sockets viejos de sway al arrancar; memoria (PSS de Steam/Firefox, ¿`-cef-single-process`?, lmkd); copia del cuadro de Firefox (cero copias).
-Notas de trabajo de la 25ª: probar sin ningún filtro seccomp con `adb shell run-as dev.ben4shot.glibcprueba.sdk36 sh -c '...'` (Seccomp 0): `cd files/archlinux; export GLIBC_SECCOMP=0 GLIBC_PREFIX=$PWD GLIBC_LOADER=<lib>/libldp.so HOME=/home/user PATH=/usr/bin; <lib>/libldp.so $PWD/<ruta del binario>` (ruta del programa con el prefijo; `<lib>` = `legacyNativeLibraryDir`/arm64 de `pm dump`, cambia al reinstalar). Sin `GLIBC_SECCOMP=0` instala solo la capa propia (sirve para separar culpas). Tamaño de pila de una función: `llvm-objdump -d glibc/build/libc.so.6` y mirar el `sub sp` del prólogo.
+**54ª sesión (2026-10-21, repo + Redmi):**
+- **Ajuste de resize (⛶) con teclado virtual (`WaylandActivity.java`):** `reajustar()` y `surfaceChanged()` ahora registran y descuentan la altura del teclado virtual (`altoIme` via `WindowInsets.Type.ime()`) y de `barraTeclas` al calcular la geometría del anfitrión Wayland (`alto = Math.max(200, alto - altoIme - barraH)`). Al pulsar `⛶` con el teclado abierto, el escritorio Wayland se reconfigura para terminar exactamente sobre la barra y el teclado; al cerrarlo y pulsar `⛶`, vuelve a pantalla completa (2193 px).
+- **Soporte de AUR y clonación oficial (`aur.archlinux.org`):** creados `apk/instalar-aur.sh` y `scripts/subir-aur.sh` para clonar e instalar directamente desde `aur.archlinux.org` (`yay.git` o `yay-bin.git`, `paru.git` o `paru-bin.git`) usando `GLIBC_FAKEROOT=1 makepkg -si --noconfirm -A` con `base-devel` y `git`.
+- **Selector de paquetes con expansión individual vía TAB (`primer-arranque.sh`):**
+  1. Añadido el módulo `aur` (`paquetes-aur.txt`) con `yay-bin`, `yay`, `paru-bin`, `paru`, `base-devel` y `git`.
+  2. Al pulsar **TAB** sobre cualquier módulo en el paso `[4/4]`, se abre un submenú interactivo para seleccionar/deseleccionar paquetes individuales uno a uno (por defecto todos activos al marcar el módulo).
+  3. Manejo de exclusión mutua automática entre variantes precompiladas (`-bin`) y compiladas desde fuentes para evitar conflictos en pacman.
+- **Compilación de APK y sincronización:** APK `sdk36Debug` compilada exitosamente (`BUILD SUCCESSFUL in 1s`); scripts y listas copiados directamente al prefijo de la instancia activa en el teléfono (`files/instancias/arch-89213`) y a `files/archlinux`.
+
+**Siguiente sesión (55ª):**
+1. Reinstalar la APK (`adb install -r`) cuando el usuario decida para activar el nuevo comportamiento de `resize` en `WaylandActivity`.
+2. Probar la instalación de `yay` / `paru` en la terminal mediante `instalar-aur yay-bin` (o `subir-aur.sh yay-bin`).
+3. glibc 0020 (`ip a`/`ip r`) y pruebas pendientes de Morrowind.
 **Antes (26ª), hecho:** agy interactivo real ✅, android-tools instalado ✅, emparejamiento y conexión local ✅, permisos de shell obtenidos ✅, script adb-conectar ✅.
 **Antes (25ª), hecho solo lo de `agy` — en orden:**
 (1) **glibc 0019 (era 0018, la tomó la pila de SIGSYS): `ip a`/`ip r`** (bind netlink falso + `GETLINK` sintético, ver arriba). Probar libc aislada antes de instalar (`instalar-glibc.sh`).

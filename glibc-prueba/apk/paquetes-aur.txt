@@ -1,0 +1,2 @@
+# Ayudantes de AUR y herramientas para compilar PKGBUILDs
+yay paru base-devel git

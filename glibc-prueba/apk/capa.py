@@ -67,6 +67,8 @@ ARCHIVOS = [
     ("apk/sshd-android.conf", "etc/ssh/sshd_config.d/10-android.conf", 0o644),
     # instalador (primer arranque) y lo que instala después
     ("apk/primer-arranque.sh", f"{D}/primer-arranque.sh", 0o755),
+    ("apk/instalar-aur.sh", f"{D}/instalar-aur.sh", 0o755),
+    ("apk/instalar-aur.sh", "usr/local/bin/instalar-aur", 0o755),
     ("apk/juegos.sh", f"{D}/juegos.sh", 0o755),
     ("steam/steam.sh", f"{D}/juegos/steam", 0o755),
     ("steam/lsof.py", f"{D}/juegos/lsof", 0o755),

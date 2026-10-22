@@ -49,6 +49,8 @@ public class WaylandActivity extends Activity {
     private SurfaceView vista;
     private TextView botonCtrl, botonAlt, botonSuper;
     private boolean ctrl, alt, sup;
+    private LinearLayout barraTeclas;
+    private int altoIme = 0;
 
     // Gesto en curso
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -158,8 +160,13 @@ public class WaylandActivity extends Activity {
             @Override
             public void surfaceChanged(SurfaceHolder h, int formato, int ancho, int alto) {
                 DisplayMetrics dm = getResources().getDisplayMetrics();
-                Wayland.ventana(h.getSurface(), ancho, alto,
-                        Math.round(ancho / dm.xdpi * 25.4f), Math.round(alto / dm.ydpi * 25.4f));
+                int altoReal = alto;
+                if (altoIme > 0) {
+                    int barraH = barraTeclas != null ? barraTeclas.getHeight() : 0;
+                    altoReal = Math.max(200, alto - altoIme - barraH);
+                }
+                Wayland.ventana(h.getSurface(), ancho, altoReal,
+                        Math.round(ancho / dm.xdpi * 25.4f), Math.round(altoReal / dm.ydpi * 25.4f));
                 startService(new Intent(WaylandActivity.this, TerminalService.class)
                         .setAction(TerminalService.REAJUSTAR_PANTALLA));
             }
@@ -179,7 +186,7 @@ public class WaylandActivity extends Activity {
         raiz.addView(vista, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
-        LinearLayout barraTeclas = filaTeclas();
+        barraTeclas = filaTeclas();
         FrameLayout.LayoutParams paramsBarra = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT);
         paramsBarra.gravity = Gravity.BOTTOM;
@@ -187,7 +194,8 @@ public class WaylandActivity extends Activity {
 
         raiz.setOnApplyWindowInsetsListener((v, insets) -> {
             android.graphics.Insets ime = insets.getInsets(WindowInsets.Type.ime());
-            barraTeclas.setTranslationY(-ime.bottom);
+            altoIme = ime.bottom;
+            barraTeclas.setTranslationY(-altoIme);
             return WindowInsets.CONSUMED;
         });
         setContentView(raiz);
@@ -355,6 +363,14 @@ public class WaylandActivity extends Activity {
         if (vista != null && vista.getHolder().getSurface() != null) {
             int ancho = vista.getWidth();
             int alto = vista.getHeight();
+            WindowInsets insets = vista.getRootWindowInsets();
+            if (insets != null) {
+                altoIme = insets.getInsets(WindowInsets.Type.ime()).bottom;
+            }
+            if (altoIme > 0) {
+                int barraH = barraTeclas != null ? barraTeclas.getHeight() : 0;
+                alto = Math.max(200, alto - altoIme - barraH);
+            }
             if (ancho > 0 && alto > 0) {
                 DisplayMetrics dm = getResources().getDisplayMetrics();
                 Wayland.ventana(vista.getHolder().getSurface(), ancho, alto,

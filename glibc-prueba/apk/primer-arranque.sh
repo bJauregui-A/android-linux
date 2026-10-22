@@ -203,14 +203,144 @@ configurar_escritorio() {
 paso "Aplicando configuración de $ESC para $SISTEMA_LINUX"
 configurar_escritorio "$ESC" || falla "no se pudo aplicar la receta de $ESC"
 
-GRUPOS=(ssh audio firefox desarrollo adb utilidades)
+GRUPOS=(ssh audio firefox desarrollo adb utilidades aur)
 TEXTOS=("SSH: Servidor seguro en el puerto 8022"
         "Audio: PipeWire a Altavoz Android vía AudioTrack"
         "Firefox con aceleración GPU WebRender"
         "Desarrollo: gcc, meson, git, gdb, strace"
         "ADB local sin PC: depuración inalámbrica"
-        "Utilidades: htop, grim, unzip, wget")
-MARCA=(1 1 0 0 0 0)
+        "Utilidades: htop, grim, unzip, wget"
+        "AUR: yay y paru (ayudantes de paquetes)")
+MARCA=(1 1 0 0 0 0 1)
+
+paquetes_de_grupo() {
+    local g=$1
+    local f=""
+    if [ -f "$D/paquetes-$g.txt" ]; then f="$D/paquetes-$g.txt";
+    elif [ -f "$(dirname "$0")/paquetes-$g.txt" ]; then f="$(dirname "$0")/paquetes-$g.txt";
+    fi
+    if [ -n "$f" ]; then
+        sed 's/#.*//' "$f" | tr -s ' \n' ' '
+    fi
+}
+
+declare -A PKG_SEL
+for g in "${GRUPOS[@]}"; do
+    for p in $(paquetes_de_grupo "$g"); do
+        case "$p" in
+            yay) PKG_SEL["${g}:${p}"]=0 ;;      # compilación desactivada por defecto si está yay-bin
+            paru) PKG_SEL["${g}:${p}"]=0 ;;     # compilación desactivada por defecto si está paru-bin
+            paru-bin) PKG_SEL["${g}:${p}"]=0 ;; # yay-bin activado por defecto
+            *) PKG_SEL["${g}:${p}"]=1 ;;
+        esac
+    done
+done
+
+editar_paquetes_grupo() {
+    local g=$1
+    local desc=${TEXTOS[$2]}
+    local pkgs=($(paquetes_de_grupo "$g"))
+    local n_pkgs=${#pkgs[@]}
+    [ "$n_pkgs" -eq 0 ] && return
+
+    local idx_pkg=0
+    local scroll_top=0
+    local max_visible=10
+
+    while :; do
+        printf '\033[2J\033[H'
+        printf '\e[1;38;5;111m┌────────────────────────────────────────────────────────────┐\e[0m\n'
+        printf '\e[1;38;5;111m│\e[0m  \e[1;38;5;81mPersonalizar módulo: %-37s\e[0m \e[1;38;5;111m│\e[0m\n' "$g"
+        printf '\e[1;38;5;111m│\e[0m  \e[38;5;245mUsa ↑/↓, Espacio para marcar/desmarcar, TAB para volver   \e[0m\e[1;38;5;111m│\e[0m\n'
+        printf '\e[1;38;5;111m├────────────────────────────────────────────────────────────┤\e[0m\n'
+
+        if [ "$idx_pkg" -lt "$scroll_top" ]; then
+            scroll_top=$idx_pkg
+        elif [ "$idx_pkg" -ge $((scroll_top + max_visible)) ]; then
+            scroll_top=$((idx_pkg - max_visible + 1))
+        fi
+
+        local visible_end=$((scroll_top + max_visible))
+        [ "$visible_end" -gt "$n_pkgs" ] && visible_end=$n_pkgs
+
+        for ((j = scroll_top; j < visible_end; j++)); do
+            local p="${pkgs[$j]}"
+            local chk
+            if [ "${PKG_SEL["${g}:${p}"]}" = 1 ]; then
+                chk=$'\e[1;38;5;48m[✔]\e[0m'
+            else
+                chk=$'\e[38;5;245m[ ]\e[0m'
+            fi
+
+            local p_desc="$p"
+            case "$p" in
+                yay) p_desc="yay (compilar de aur.archlinux.org/yay.git)" ;;
+                yay-bin) p_desc="yay-bin (precompilado de aur.archlinux.org)" ;;
+                paru) p_desc="paru (compilar de aur.archlinux.org/paru.git)" ;;
+                paru-bin) p_desc="paru-bin (precompilado de aur.archlinux.org)" ;;
+                base-devel) p_desc="base-devel (compilación de PKGBUILDs)" ;;
+                git) p_desc="git (clonación de repositorios AUR)" ;;
+            esac
+
+            if [ "$j" -eq "$idx_pkg" ]; then
+                printf '\e[1;38;5;111m│\e[0m \e[1;38;5;51m❯\e[0m %s \e[1;38;5;15;48;5;238m %-52s\e[0m\e[1;38;5;111m│\e[0m\n' "$chk" "${p_desc:0:52}"
+            else
+                printf '\e[1;38;5;111m│\e[0m   %s \e[38;5;250m%-54s\e[0m\e[1;38;5;111m│\e[0m\n' "$chk" "${p_desc:0:54}"
+            fi
+        done
+
+        printf '\e[1;38;5;111m├────────────────────────────────────────────────────────────┤\e[0m\n'
+        if [ "$idx_pkg" -eq "$n_pkgs" ]; then
+            printf '\e[1;38;5;111m│\e[0m \e[1;38;5;51m❯\e[0m  \e[1;38;5;48m[ ✔ GUARDAR Y VOLVER ]\e[0m                                   \e[1;38;5;111m│\e[0m\n'
+        else
+            printf '\e[1;38;5;111m│\e[0m    \e[38;5;245m[   Guardar y volver (o presiona TAB)   ]\e[0m                \e[1;38;5;111m│\e[0m\n'
+        fi
+        printf '\e[1;38;5;111m└────────────────────────────────────────────────────────────┘\e[0m\n'
+
+        IFS= read -rsn1 k
+        if [ "$k" = $'\e' ]; then
+            read -rsn2 -t 0.1 resto || true
+            case "$resto" in
+                '[A'|'OA')
+                    [ $idx_pkg -gt 0 ] && ((idx_pkg--))
+                    ;;
+                '[B'|'OB')
+                    [ $idx_pkg -lt "$n_pkgs" ] && ((idx_pkg++))
+                    ;;
+            esac
+        elif [ "$k" = $'\t' ] || [ "$k" = "q" ] || [ "$k" = "Q" ]; then
+            break
+        elif [ "$k" = "" ] || [ "$k" = $'\n' ] || [ "$k" = $'\r' ] || [ "$k" = " " ]; then
+            if [ "$idx_pkg" -eq "$n_pkgs" ]; then
+                break
+            else
+                local p="${pkgs[$idx_pkg]}"
+                local act="${PKG_SEL["${g}:${p}"]:-0}"
+                local nuevo=$((1 - act))
+                PKG_SEL["${g}:${p}"]=$nuevo
+                # Si se activa yay/yay-bin o paru/paru-bin, desmarcar su contraparte conflictiva
+                if [ "$nuevo" -eq 1 ]; then
+                    case "$p" in
+                        yay) PKG_SEL["${g}:yay-bin"]=0 ;;
+                        yay-bin) PKG_SEL["${g}:yay"]=0 ;;
+                        paru) PKG_SEL["${g}:paru-bin"]=0 ;;
+                        paru-bin) PKG_SEL["${g}:paru"]=0 ;;
+                    esac
+                fi
+            fi
+        fi
+    done
+
+    local sel_cnt=0
+    for p in "${pkgs[@]}"; do
+        [ "${PKG_SEL["${g}:${p}"]}" = 1 ] && ((sel_cnt++))
+    done
+    if [ "$sel_cnt" -gt 0 ]; then
+        MARCA[$2]=1
+    else
+        MARCA[$2]=0
+    fi
+}
 
 if [ ! -e $E/opcionales ]; then
     idx_actual=0
@@ -220,18 +350,28 @@ if [ ! -e $E/opcionales ]; then
         printf '\033[2J\033[H'
         printf '\e[1;38;5;111m┌────────────────────────────────────────────────────────────┐\e[0m\n'
         printf '\e[1;38;5;111m│\e[0m  \e[1;38;5;81m[4/4] Módulos y Paquetes Opcionales\e[0m                       \e[1;38;5;111m│\e[0m\n'
-        printf '\e[1;38;5;111m│\e[0m  \e[38;5;245mUsa ↑/↓ para moverte, Enter/Espacio para marcar o enviar\e[0m  \e[1;38;5;111m│\e[0m\n'
+        printf '\e[1;38;5;111m│\e[0m  \e[38;5;245mUsa ↑/↓, Espacio marcar/desmarcar, TAB elegir paquetes     \e[0m\e[1;38;5;111m│\e[0m\n'
         printf '\e[1;38;5;111m├────────────────────────────────────────────────────────────┤\e[0m\n'
         for i in "${!GRUPOS[@]}"; do
+            local g="${GRUPOS[$i]}"
+            local total_p=0 sel_p=0
+            for p in $(paquetes_de_grupo "$g"); do
+                ((total_p++))
+                [ "${PKG_SEL["${g}:${p}"]}" = 1 ] && ((sel_p++))
+            done
+            local chk
             if [ "${MARCA[$i]}" = 1 ]; then
                 chk=$'\e[1;38;5;48m[✔]\e[0m'
             else
                 chk=$'\e[38;5;245m[ ]\e[0m'
             fi
+            local info_p="($sel_p/$total_p)"
             if [ "$i" -eq "$idx_actual" ]; then
-                printf '\e[1;38;5;111m│\e[0m \e[1;38;5;51m❯\e[0m %s \e[1;38;5;15m%-54s\e[0m\e[1;38;5;111m│\e[0m\n' "$chk" "${TEXTOS[$i]}"
+                printf '\e[1;38;5;111m│\e[0m \e[1;38;5;51m❯\e[0m %s \e[1;38;5;15m%-40s\e[0m \e[38;5;81m%-7s\e[0m \e[38;5;245m[TAB]\e[0m\e[1;38;5;111m│\e[0m\n' \
+                    "$chk" "${TEXTOS[$i]:0:40}" "$info_p"
             else
-                printf '\e[1;38;5;111m│\e[0m   %s \e[38;5;250m%-54s\e[0m\e[1;38;5;111m│\e[0m\n' "$chk" "${TEXTOS[$i]}"
+                printf '\e[1;38;5;111m│\e[0m   %s \e[38;5;250m%-40s\e[0m \e[38;5;245m%-7s\e[0m      \e[1;38;5;111m│\e[0m\n' \
+                    "$chk" "${TEXTOS[$i]:0:40}" "$info_p"
             fi
         done
         printf '\e[1;38;5;111m├────────────────────────────────────────────────────────────┤\e[0m\n'
@@ -260,23 +400,64 @@ if [ ! -e $E/opcionales ]; then
                     fi
                     ;;
             esac
+        elif [ "$tecla" = $'\t' ]; then
+            if [ "$idx_actual" -lt "$num_opciones" ]; then
+                MARCA[idx_actual]=1
+                editar_paquetes_grupo "${GRUPOS[idx_actual]}" "$idx_actual"
+            fi
         elif [ "$tecla" = "" ] || [ "$tecla" = $'\n' ] || [ "$tecla" = $'\r' ]; then
             if [ "$idx_actual" -eq "$num_opciones" ]; then
                 break
             else
-                MARCA[idx_actual]=$((1 - MARCA[idx_actual]))
+                nuevo_m=$((1 - MARCA[idx_actual]))
+                MARCA[idx_actual]=$nuevo_m
+                if [ "$nuevo_m" -eq 1 ]; then
+                    g="${GRUPOS[idx_actual]}"
+                    for p in $(paquetes_de_grupo "$g"); do
+                        case "$p" in
+                            yay) PKG_SEL["${g}:${p}"]=0 ;;
+                            paru) PKG_SEL["${g}:${p}"]=0 ;;
+                            paru-bin) PKG_SEL["${g}:${p}"]=0 ;;
+                            *) PKG_SEL["${g}:${p}"]=1 ;;
+                        esac
+                    done
+                fi
             fi
         elif [ "$tecla" = " " ]; then
             if [ "$idx_actual" -eq "$num_opciones" ]; then
                 break
             else
-                MARCA[idx_actual]=$((1 - MARCA[idx_actual]))
+                nuevo_m=$((1 - MARCA[idx_actual]))
+                MARCA[idx_actual]=$nuevo_m
+                if [ "$nuevo_m" -eq 1 ]; then
+                    g="${GRUPOS[idx_actual]}"
+                    for p in $(paquetes_de_grupo "$g"); do
+                        case "$p" in
+                            yay) PKG_SEL["${g}:${p}"]=0 ;;
+                            paru) PKG_SEL["${g}:${p}"]=0 ;;
+                            paru-bin) PKG_SEL["${g}:${p}"]=0 ;;
+                            *) PKG_SEL["${g}:${p}"]=1 ;;
+                        esac
+                    done
+                fi
             fi
         elif [ "$tecla" = "s" ] || [ "$tecla" = "S" ]; then
             break
-        elif [[ "$tecla" =~ ^[1-6]$ ]]; then
+        elif [[ "$tecla" =~ ^[1-7]$ ]]; then
             val=$((tecla - 1))
-            MARCA[val]=$((1 - MARCA[val]))
+            nuevo_m=$((1 - MARCA[val]))
+            MARCA[val]=$nuevo_m
+            if [ "$nuevo_m" -eq 1 ]; then
+                g="${GRUPOS[val]}"
+                for p in $(paquetes_de_grupo "$g"); do
+                    case "$p" in
+                        yay) PKG_SEL["${g}:${p}"]=0 ;;
+                        paru) PKG_SEL["${g}:${p}"]=0 ;;
+                        paru-bin) PKG_SEL["${g}:${p}"]=0 ;;
+                        *) PKG_SEL["${g}:${p}"]=1 ;;
+                    esac
+                done
+            fi
         fi
     done
 
@@ -285,17 +466,54 @@ fi
 elegido() { grep -qx "$1" $E/opcionales; }
 grupos="escritorio $(tr '\n' ' ' < $E/opcionales)"
 
+# Recoger paquetes específicos para pacman y para AUR
+PACMAN_A_INSTALAR=($(sed 's/#.*//' $ED/$ESC/paquetes.txt))
+AUR_A_INSTALAR=()
+
+for i in "${!GRUPOS[@]}"; do
+    if [ "${MARCA[$i]}" = 1 ]; then
+        g="${GRUPOS[$i]}"
+        for p in $(paquetes_de_grupo "$g"); do
+            if [ "${PKG_SEL["${g}:${p}"]}" = 1 ]; then
+                case "$p" in
+                    yay|yay-bin|paru|paru-bin)
+                        AUR_A_INSTALAR+=("$p")
+                        PACMAN_A_INSTALAR+=("base-devel" "git")
+                        ;;
+                    *)
+                        PACMAN_A_INSTALAR+=("$p")
+                        ;;
+                esac
+            fi
+        done
+    fi
+done
+
+# Deduplicar lista de pacman
+PACMAN_A_INSTALAR=($(printf '%s\n' "${PACMAN_A_INSTALAR[@]}" | sort -u))
+
 printf '\n\e[1;38;5;81m┌─ Descarga e instalación de paquetes pacman ────────────────┐\e[0m\n'
 printf '\e[1;38;5;81m│\e[0m  Módulos: \e[1;38;5;48m%s\e[0m | Escritorio: \e[1;38;5;48m%s\e[0m\n' "$grupos" "$ESC"
+printf '\e[1;38;5;81m│\e[0m  Paquetes seleccionados: \e[1;38;5;48m%d\e[0m\n' "${#PACMAN_A_INSTALAR[@]}"
 printf '\e[1;38;5;81m└────────────────────────────────────────────────────────────┘\e[0m\n'
 
 for i in 1 2 3; do
-    sudo pacman -Syu --needed --noconfirm $(lista $grupos) $(sed 's/#.*//' $ED/$ESC/paquetes.txt) && break
+    sudo pacman -Syu --needed --noconfirm "${PACMAN_A_INSTALAR[@]}" && break
     [ $i = 3 ] && falla "falló pacman 3 veces consecutivas (comprueba la conexión a internet)"
     printf '\n\e[38;5;214m✖ Falló la descarga, reintento %d de 2...\e[0m\n' $i
     sleep 3
 done
 printf '%s\n' "$SISTEMA_LINUX:$ESC" > "$E/receta-aplicada" || falla "no se pudo registrar la receta instalada"
+
+if [ "${#AUR_A_INSTALAR[@]}" -gt 0 ]; then
+    paso "Instalando ayudantes de AUR desde aur.archlinux.org: ${AUR_A_INSTALAR[*]}"
+    INST_AUR="$D/instalar-aur.sh"
+    [ -x "$INST_AUR" ] || INST_AUR="$(dirname "$0")/instalar-aur.sh"
+    [ -x "$INST_AUR" ] || INST_AUR="/usr/local/bin/instalar-aur"
+    if [ -x "$INST_AUR" ]; then
+        bash "$INST_AUR" "${AUR_A_INSTALAR[@]}" || printf '\e[1;38;5;214m✖ Aviso: puedes reintentar con: instalar-aur %s\e[0m\n' "${AUR_A_INSTALAR[*]}"
+    fi
+fi
 
 paso "Ajustes del sistema"
 elegido ssh && { [ -e /etc/ssh/ssh_host_ed25519_key ] || sudo ssh-keygen -A; }
