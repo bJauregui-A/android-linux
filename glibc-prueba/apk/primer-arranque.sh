@@ -54,10 +54,8 @@ U=$(id -u); G=$(id -g)
 grep -q "^$N:" /etc/passwd || echo "$N:x:$U:$G:$N:/home/$N:/usr/bin/zsh" >> /etc/passwd
 grep -q "^$N:" /etc/group || echo "$N:x:$G:" >> /etc/group
 # El home con las configs de /etc/skel (sway, waybar, kitty, zsh...)
-if [ ! -d /home/$N/.config ]; then
-    mkdir -p /home/$N
-    cp -a /etc/skel/. /home/$N/
-fi
+mkdir -p /home/$N/.config
+cp -rn /etc/skel/. /home/$N/ 2>/dev/null || true
 rmdir /home/user 2>/dev/null
 
 # Contraseña del usuario: la piden el bloqueo de pantalla de los escritorios (KDE, COSMIC, phosh...),
@@ -203,15 +201,16 @@ configurar_escritorio() {
 paso "Aplicando configuración de $ESC para $SISTEMA_LINUX"
 configurar_escritorio "$ESC" || falla "no se pudo aplicar la receta de $ESC"
 
-GRUPOS=(ssh audio firefox desarrollo adb utilidades aur)
+GRUPOS=(ssh audio zsh firefox desarrollo adb utilidades aur)
 TEXTOS=("SSH: Servidor seguro en el puerto 8022"
         "Audio: PipeWire a Altavoz Android vía AudioTrack"
+        "Zsh + Kitty: Zsh con Starship y terminal Kitty como en el PC"
         "Firefox con aceleración GPU WebRender"
         "Desarrollo: gcc, meson, git, gdb, strace"
         "ADB local sin PC: depuración inalámbrica"
         "Utilidades: htop, grim, unzip, wget"
         "AUR: yay y paru (ayudantes de paquetes)")
-MARCA=(1 1 0 0 0 0 1)
+MARCA=(1 1 1 0 0 0 0 1)
 
 paquetes_de_grupo() {
     local g=$1
@@ -443,7 +442,7 @@ if [ ! -e $E/opcionales ]; then
             fi
         elif [ "$tecla" = "s" ] || [ "$tecla" = "S" ]; then
             break
-        elif [[ "$tecla" =~ ^[1-7]$ ]]; then
+        elif [[ "$tecla" =~ ^[1-8]$ ]]; then
             val=$((tecla - 1))
             nuevo_m=$((1 - MARCA[val]))
             MARCA[val]=$nuevo_m
@@ -518,6 +517,15 @@ fi
 paso "Ajustes del sistema"
 elegido ssh && { [ -e /etc/ssh/ssh_host_ed25519_key ] || sudo ssh-keygen -A; }
 sed -i '/^tty:x:5:/d' /etc/group
+elegido zsh && {
+    mkdir -p "/home/$N/.config/kitty" "/home/$N/.config/starship"
+    cp -rn /etc/skel/.config/kitty/. "/home/$N/.config/kitty/" 2>/dev/null || true
+    [ -f /etc/skel/.zshrc ] && cp -n /etc/skel/.zshrc "/home/$N/.zshrc" 2>/dev/null || true
+    [ -f /etc/skel/.config/starship/starship.toml ] && cp -n /etc/skel/.config/starship/starship.toml "/home/$N/.config/starship/starship.toml" 2>/dev/null || true
+    if command -v zsh >/dev/null 2>&1; then
+        sed -i "s|/home/$N:.*|/home/$N:/usr/bin/zsh|" /etc/passwd 2>/dev/null || true
+    fi
+}
 FF=/usr/lib/firefox/browser/defaults/preferences
 [ -d $FF ] && sed "s|/home/user/|/home/$N/|g" $D/firefox-android.js > $FF/android.js
 [ -f /usr/share/applications/firefox.desktop ] &&

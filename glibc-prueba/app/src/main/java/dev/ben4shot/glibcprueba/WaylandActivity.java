@@ -1,6 +1,7 @@
 package dev.ben4shot.glibcprueba;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.ShortcutInfo;
 import android.content.pm.ShortcutManager;
@@ -315,12 +316,12 @@ public class WaylandActivity extends Activity {
     private LinearLayout filaTeclas() {
         LinearLayout fila = new LinearLayout(this);
         fila.setBackgroundColor(0xff1a1a1a);
-        String[] teclas = {"⌨", "⛶", "ESC", "TAB", "CTRL", "ALT", "SUPER", "←", "↓", "↑", "→"};
+        String[] teclas = {"⌨", "⛶", "ESC", "TAB", "CTRL", "ALT", "SUPER", "←", "↓", "↑", "→", "SALIR"};
         for (String t : teclas) {
             TextView b = new TextView(this);
             b.setText(t);
-            b.setTextColor(Color.WHITE);
-            b.setTypeface(Typeface.MONOSPACE);
+            b.setTextColor(t.equals("SALIR") ? 0xffff6b6b : Color.WHITE);
+            b.setTypeface(Typeface.MONOSPACE, t.equals("SALIR") ? Typeface.BOLD : Typeface.NORMAL);
             b.setGravity(Gravity.CENTER);
             b.setPadding(0, 24, 0, 24);
             b.setOnClickListener(v -> botonFila(t));
@@ -341,6 +342,9 @@ public class WaylandActivity extends Activity {
             case "⛶":
                 reajustar();
                 return;
+            case "SALIR":
+                mostrarMenuSalida();
+                return;
             case "CTRL": ctrl = !ctrl; Wayland.tecla(CTRL, ctrl); marcar(); return;
             case "ALT": alt = !alt; Wayland.tecla(ALT, alt); marcar(); return;
             case "SUPER": sup = !sup; Wayland.tecla(SUPER, sup); marcar(); return;
@@ -351,6 +355,23 @@ public class WaylandActivity extends Activity {
             case "↑": pulsar(103); return;
             case "→": pulsar(106); return;
         }
+    }
+
+    private void mostrarMenuSalida() {
+        SistemaLinux.Instancia inst = SistemaLinux.instanciaSeleccionada(this);
+        String nombre = inst != null ? inst.nombre : "Linux";
+        new AlertDialog.Builder(this)
+                .setTitle("✦ Menú de Sesión (" + nombre + ")")
+                .setMessage("¿Deseas salir de la pantalla manteniendo la sesión abierta en segundo plano, o cerrar la sesión por completo?")
+                .setPositiveButton("Salir (mantener en fondo)", (d, w) -> {
+                    finish();
+                })
+                .setNegativeButton("✕ Cerrar sesión", (d, w) -> {
+                    startService(new Intent(this, TerminalService.class).setAction(TerminalService.CERRAR_SESION));
+                    finish();
+                })
+                .setNeutralButton("Cancelar", null)
+                .show();
     }
 
     private void reajustar() {
@@ -501,6 +522,15 @@ public class WaylandActivity extends Activity {
                 pulsarTabla(vb);
             }
         }
+    }
+
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
+            mostrarMenuSalida();
+            return true;
+        }
+        return super.onKeyDown(keyCode, event);
     }
 
     @Override

@@ -1,0 +1,2 @@
+# Zsh con Starship y terminal Kitty como en el PC
+kitty foot zsh zsh-autosuggestions zsh-syntax-highlighting starship eza fastfetch ttf-jetbrains-mono-nerd

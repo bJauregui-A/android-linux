@@ -36,6 +36,17 @@ public class TerminalService extends Service implements TerminalSessionClient {
     // WaylandActivity lo manda al abrirse: arrancar la sesión gráfica si no está corriendo.
     static final String INICIAR_ESCRITORIO = "dev.ben4shot.glibcprueba.INICIAR_ESCRITORIO";
     static final String REAJUSTAR_PANTALLA = "dev.ben4shot.glibcprueba.REAJUSTAR_PANTALLA";
+    static final String CERRAR_SESION = "dev.ben4shot.glibcprueba.CERRAR_SESION";
+
+    private static String instanciaActivaId;
+
+    public static String instanciaActivaId() {
+        return instanciaActivaId;
+    }
+
+    public static boolean tieneSesionActiva() {
+        return instanciaActivaId != null;
+    }
 
     private final IBinder binder = new Local();
     private TerminalSession sesion;
@@ -53,26 +64,69 @@ public class TerminalService extends Service implements TerminalSessionClient {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        NotificationManager nm = getSystemService(NotificationManager.class);
-        nm.createNotificationChannel(new NotificationChannel(CANAL, "Terminal", NotificationManager.IMPORTANCE_LOW));
-        PendingIntent abrir = PendingIntent.getActivity(this, 0,
-                new Intent(this, WaylandActivity.class), PendingIntent.FLAG_IMMUTABLE);
-        Notification n = new Notification.Builder(this, CANAL)
-                .setSmallIcon(android.R.drawable.ic_menu_manage)
-                .setContentTitle("Linux")
-                .setContentText("procesos Linux corriendo")
-                .setContentIntent(abrir)
-                .setOngoing(true)
-                .build();
-        if (Build.VERSION.SDK_INT >= 34) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
-        else startForeground(1, n);
+        if (intent != null && CERRAR_SESION.equals(intent.getAction())) {
+            cerrarTodo();
+            return START_NOT_STICKY;
+        }
+        actualizarNotificacion();
         if (intent != null && INICIAR_ESCRITORIO.equals(intent.getAction())) iniciarEscritorio();
         if (intent != null && REAJUSTAR_PANTALLA.equals(intent.getAction())) reajustarPantalla();
         return START_NOT_STICKY;
     }
 
+    void actualizarNotificacion() {
+        NotificationManager nm = getSystemService(NotificationManager.class);
+        if (nm == null) return;
+        nm.createNotificationChannel(new NotificationChannel(CANAL, "Terminal", NotificationManager.IMPORTANCE_LOW));
+        PendingIntent abrir = PendingIntent.getActivity(this, 0,
+                new Intent(this, WaylandActivity.class), PendingIntent.FLAG_IMMUTABLE);
+        PendingIntent piCerrar = PendingIntent.getService(this, 1,
+                new Intent(this, TerminalService.class).setAction(CERRAR_SESION),
+                PendingIntent.FLAG_IMMUTABLE);
+        Notification.Action accionCerrar = new Notification.Action.Builder(
+                null, "✕ CERRAR SESIÓN", piCerrar).build();
+
+        SistemaLinux.Instancia activa = SistemaLinux.instanciaSeleccionada(this);
+        String nombre = activa != null ? activa.nombre : "Linux";
+
+        Notification n = new Notification.Builder(this, CANAL)
+                .setSmallIcon(android.R.drawable.ic_menu_manage)
+                .setContentTitle("✦ " + nombre)
+                .setContentText("Sesión activa en segundo plano")
+                .setContentIntent(abrir)
+                .addAction(accionCerrar)
+                .setOngoing(true)
+                .build();
+        if (Build.VERSION.SDK_INT >= 34) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+        else startForeground(1, n);
+    }
+
+    public void cerrarTodo() {
+        Log.i(TAG, "cerrando sesión completa");
+        cerrarEscritorio();
+        if (sesion != null) {
+            sesion.finishIfRunning();
+            sesion = null;
+        }
+        instanciaActivaId = null;
+        terminar();
+    }
+
+    synchronized void cerrarEscritorio() {
+        if (escritorio != null) {
+            try {
+                escritorio.destroy();
+            } catch (Exception e) {
+                Log.e(TAG, "error al destruir proceso de escritorio", e);
+            }
+            escritorio = null;
+        }
+        instanciaActivaId = null;
+    }
+
     @Override
     public void onDestroy() {
+        instanciaActivaId = null;
         if (sesion != null) sesion.finishIfRunning();
         if (escritorio != null) escritorio.destroy();
         super.onDestroy();
@@ -139,8 +193,18 @@ public class TerminalService extends Service implements TerminalSessionClient {
 
     // Sesión Wayland en segundo plano (bash -l para tomar /etc/profile).
     synchronized void iniciarEscritorio() {
-        if (escritorio != null && escritorio.isAlive()) return;
         AdaptadorInstalacion instalacion = SistemaLinux.adaptadorSeleccionado(this);
+        String idActual = SistemaLinux.seleccionado(this);
+        if (escritorio != null && escritorio.isAlive()) {
+            if (idActual.equals(instanciaActivaId)) {
+                actualizarNotificacion();
+                return;
+            }
+            Log.i(TAG, "Cambiando de entorno gráfico: " + instanciaActivaId + " -> " + idActual);
+            cerrarEscritorio();
+        }
+        instanciaActivaId = idActual;
+        actualizarNotificacion();
         if (!instalacion.instalada(this) && instalacion.instaladorDisponible(this)) return; // primero el instalador
         File prefijo = instalacion.raiz(this);
         if (!BuildConfig.DIAGNOSTICO && !CapaSesion.actualizar(this, instalacion, prefijo)) return;

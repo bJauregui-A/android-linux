@@ -160,10 +160,30 @@ Script de reconexión rápida creado en `~/.local/bin/adb-conectar` (escaneo de 
 - **Inclusión de terminales y utilidades en paquetes mínimos de escritorios:** añadido `kitty foot waybar fuzzel` a `escritorios/hyprland/paquetes.txt`, y `foot` a los paquetes de `labwc`, `niri`, `river`, `qtile`, `wayfire` y `weston`. Regenerada `capa.tgz` y compilada APK `sdk36Debug` (`BUILD SUCCESSFUL in 2s`).
 - **Instalación en el Redmi:** APK instalada exitosamente con `adb install -r` (Success; datos e instancias conservados).
 
-**Siguiente sesión (56ª):**
-1. Probar en pantalla el nuevo comportamiento de `resize` (⛶) con el teclado virtual abierto y cerrado dentro del entorno gráfico (verificar que no se estira).
-2. Probar la apertura de terminal con `SUPER + Return` en Hyprland.
-3. Avanzar con el bootstrap de Debian/Ubuntu para el gestor de instancias.
+**56ª sesión (2026-10-22, repo + Redmi):**
+- **Gestión limpia de instancias en segundo plano (`TerminalService.java`):**
+  1. `TerminalService` ahora registra el ID de la instancia activa (`instanciaActivaId`). Si se solicita arrancar el escritorio de la misma instancia, vuelve a ella de inmediato sin reiniciarla; si el usuario selecciona una instancia distinta, destruye limpiamente el proceso de escritorio previo e inicia el nuevo en el prefijo correcto, eliminando el fallo donde al salir y abrir otra se entraba a la anterior.
+  2. Implementada la acción `CERRAR_SESION` (`cerrarTodo()`): destruye el proceso de escritorio, finaliza la sesión de shell si existía, elimina la notificación en primer plano y detiene el servicio limpiamente.
+- **Acción directa de cierre en la notificación Android:** la notificación persistente de `TerminalService` ahora muestra el título dinámico `✦ <nombre_instancia>` con texto descriptivo y agrega un botón de acción explícito `[ ✕ CERRAR SESIÓN ]` para terminar la instancia directamente desde la barra del sistema.
+- **Botón de menú inferior y diálogo modal de salida (`WaylandActivity.java`):**
+  1. Añadido el botón destacado `[ SALIR ]` en la barra inferior de teclas virtuales.
+  2. Al pulsar `SALIR` o al presionar el botón/gesto de retroceso de Android (`KEYCODE_BACK`), se despliega un diálogo modal que permite elegir entre:
+     - *Salir (mantener en fondo)*: vuelve a Android / al selector dejando los procesos y el escritorio corriendo intactos en segundo plano.
+     - *✕ Cerrar sesión*: detiene la sesión de forma limpia llamando a `TerminalService.CERRAR_SESION`.
+     - *Cancelar*: continúa en el escritorio.
+- **Detección visual de instancias en ejecución (`SistemaActivity.java`):** cada tarjeta de instancia detecta si tiene procesos activos en segundo plano mostrando el badge `● EN EJECUCIÓN` y adaptando su botón de acción a `[ ▶ VOLVER ]`.
+- **Módulo opcional de Kitty + Zsh activo por defecto (`primer-arranque.sh` y `paquetes-zsh.txt`):**
+  1. Creado `apk/paquetes-zsh.txt` con `kitty foot zsh zsh-autosuggestions zsh-syntax-highlighting starship eza fastfetch ttf-jetbrains-mono-nerd`.
+  2. Añadido como módulo opcional `zsh` en el paso `[4/4]` del asistente de instalación, **activo por defecto** (`MARCA=1`).
+  3. Asegurada la copia no destructiva (`cp -rn`) de las configuraciones completas de kitty (`kitty.conf`, `hyde.conf`, `theme.conf`) y zsh (`.zshrc`, `starship.toml`) al `$HOME` del usuario, y asignación de `/usr/bin/zsh` en `/etc/passwd`.
+  4. Integrado `paquetes-zsh.txt` en `app/build.gradle.kts` (`packageSessionLayer`) y en `CapaSesion.java` para sincronización automática en instalaciones existentes.
+- **Compilación e instalación en el Redmi:** APK `sdk36Debug` compilada exitosamente (`BUILD SUCCESSFUL in 9s`) e instalada con `adb install -r` (Success; datos e instancias conservados).
+
+**Siguiente sesión (57ª):**
+1. Probar en el Redmi el nuevo botón `SALIR` en la barra inferior y el botón `✕ CERRAR SESIÓN` en la notificación Android.
+2. Probar la apertura y alternancia entre instancias independientes en segundo plano.
+3. Probar una instalación nueva para verificar la presencia del módulo `Zsh + Kitty` y sus configs en el home.
+4. Implementar el servidor/compositor X11 directo sin Wayland para entornos clásicos.
 **Antes (26ª), hecho:** agy interactivo real ✅, android-tools instalado ✅, emparejamiento y conexión local ✅, permisos de shell obtenidos ✅, script adb-conectar ✅.
 **Antes (25ª), hecho solo lo de `agy` — en orden:**
 (1) **glibc 0019 (era 0018, la tomó la pila de SIGSYS): `ip a`/`ip r`** (bind netlink falso + `GETLINK` sintético, ver arriba). Probar libc aislada antes de instalar (`instalar-glibc.sh`).

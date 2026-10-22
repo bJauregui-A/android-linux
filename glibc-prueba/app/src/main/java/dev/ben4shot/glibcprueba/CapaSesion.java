@@ -93,6 +93,8 @@ final class CapaSesion {
         String relativo;
         if (nombre.equals("apk/primer-arranque.sh")) {
             relativo = "usr/local/share/arch-android/primer-arranque.sh";
+        } else if (nombre.equals("apk/paquetes-zsh.txt")) {
+            relativo = "usr/local/share/arch-android/paquetes-zsh.txt";
         } else if (nombre.equals("escritorios/sesion-android")) {
             relativo = "usr/local/bin/sesion-android";
         } else if (nombre.equals("escritorios/autostart-android")) {

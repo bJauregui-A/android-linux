@@ -7,10 +7,11 @@ val packageSessionLayer = tasks.register<Exec>("packageSessionLayer") {
     val archive = sessionLayerAssets.resolve("session-layer.tgz")
     inputs.dir(file("../escritorios"))
     inputs.file(file("../apk/primer-arranque.sh"))
+    inputs.file(file("../apk/paquetes-zsh.txt"))
     outputs.file(archive)
     doFirst { archive.parentFile.mkdirs() }
     commandLine("tar", "-czf", archive.absolutePath, "-C", file("..").absolutePath,
-        "escritorios", "apk/primer-arranque.sh")
+        "escritorios", "apk/primer-arranque.sh", "apk/paquetes-zsh.txt")
 }
 
 android {

@@ -274,6 +274,14 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         lpInst.leftMargin = dp(8);
         header.addView(tagInst, lpInst);
 
+        boolean corriendo = TerminalService.tieneSesionActiva() && inst.id.equals(TerminalService.instanciaActivaId());
+        if (corriendo) {
+            TextView tagCorriendo = textoBadge("● EN EJECUCIÓN", ACCENTO_VERDE);
+            LinearLayout.LayoutParams lpCorr = new LinearLayout.LayoutParams(-2, -2);
+            lpCorr.leftMargin = dp(8);
+            header.addView(tagCorriendo, lpCorr);
+        }
+
         card.addView(header);
 
         // Nombre de la instancia y ruta
@@ -294,8 +302,9 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         lpAcc.topMargin = dp(8);
         acciones.setLayoutParams(lpAcc);
 
-        // Botón INICIAR ESCRITORIO
-        TextView btnIniciar = crearBotonChip("▶ ESCRITORIO", ACCENTO_VERDE, () -> {
+        // Botón INICIAR ESCRITORIO o VOLVER si ya está corriendo
+        String textoBoton = corriendo ? "▶ VOLVER" : "▶ ESCRITORIO";
+        TextView btnIniciar = crearBotonChip(textoBoton, ACCENTO_VERDE, () -> {
             activarYEjecutar(inst.id, true);
         });
         acciones.addView(btnIniciar);
@@ -331,7 +340,6 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
 
     private void activarYEjecutar(String id, boolean escritorio) {
         SistemaLinux.seleccionarInstancia(this, id);
-        stopService(new Intent(this, TerminalService.class));
         if (escritorio) {
             startActivity(new Intent(this, WaylandActivity.class));
         } else {
