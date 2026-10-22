@@ -26,34 +26,96 @@ import java.io.FileWriter;
 import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.ConcurrentHashMap;
 
-// Servicio en primer plano dueño de los procesos Linux (el escritorio y la sesión de bash):
-// las activities se pueden cerrar (o girar) sin que Android mate los procesos glibc.
+// Servicio en primer plano dueño de los procesos Linux (escritorios y sesiones de terminal):
+// Soporta múltiples sesiones simultáneas e independientes en segundo plano.
 public class TerminalService extends Service implements TerminalSessionClient {
     private static final String TAG = "TERMINAL";
     private static final String CANAL = "terminal";
-    // WaylandActivity lo manda al abrirse: arrancar la sesión gráfica si no está corriendo.
     static final String INICIAR_ESCRITORIO = "dev.ben4shot.glibcprueba.INICIAR_ESCRITORIO";
     static final String REAJUSTAR_PANTALLA = "dev.ben4shot.glibcprueba.REAJUSTAR_PANTALLA";
     static final String CERRAR_SESION = "dev.ben4shot.glibcprueba.CERRAR_SESION";
+    static final String CERRAR_INSTANCIA = "dev.ben4shot.glibcprueba.CERRAR_INSTANCIA";
+    static final String EXTRA_INSTANCIA_ID = "instancia_id";
 
-    private static String instanciaActivaId;
+    public static class SesionInstancia {
+        public final String id;
+        public TerminalSession sesionTerminal;
+        public Process procesoEscritorio;
+        public List<String> entornoEscritorio;
+        public boolean instalando;
+
+        public SesionInstancia(String id) {
+            this.id = id;
+        }
+
+        public boolean estaViva() {
+            boolean term = sesionTerminal != null && sesionTerminal.isRunning();
+            boolean esc = procesoEscritorio != null && procesoEscritorio.isAlive();
+            return term || esc;
+        }
+
+        public boolean tieneTerminal() {
+            return sesionTerminal != null && sesionTerminal.isRunning();
+        }
+
+        public boolean tieneEscritorio() {
+            return procesoEscritorio != null && procesoEscritorio.isAlive();
+        }
+    }
+
+    private static final Map<String, SesionInstancia> sesiones = new ConcurrentHashMap<>();
+    private static String instanciaEnfocadaId;
 
     public static String instanciaActivaId() {
-        return instanciaActivaId;
+        if (instanciaEnfocadaId != null && estaCorriendo(instanciaEnfocadaId)) {
+            return instanciaEnfocadaId;
+        }
+        for (SesionInstancia s : sesiones.values()) {
+            if (s.estaViva()) return s.id;
+        }
+        return null;
     }
 
     public static boolean tieneSesionActiva() {
-        return instanciaActivaId != null;
+        for (SesionInstancia s : sesiones.values()) {
+            if (s.estaViva()) return true;
+        }
+        return false;
+    }
+
+    public static boolean estaCorriendo(String id) {
+        if (id == null) return false;
+        SesionInstancia s = sesiones.get(id);
+        return s != null && s.estaViva();
+    }
+
+    public static boolean tieneTerminal(String id) {
+        if (id == null) return false;
+        SesionInstancia s = sesiones.get(id);
+        return s != null && s.tieneTerminal();
+    }
+
+    public static boolean tieneEscritorio(String id) {
+        if (id == null) return false;
+        SesionInstancia s = sesiones.get(id);
+        return s != null && s.tieneEscritorio();
+    }
+
+    public static int contarSesionesActivas() {
+        int c = 0;
+        for (SesionInstancia s : sesiones.values()) {
+            if (s.estaViva()) c++;
+        }
+        return c;
     }
 
     private final IBinder binder = new Local();
-    private TerminalSession sesion;
-    private boolean instalando; // la sesión es el instalador (Instalador.java)
-    private TerminalView vista; // la de la activity visible, o null
-    private Process escritorio;
-    private List<String> entornoEscritorio; // entorno común de la sesión gráfica
+    private TerminalView vista;
+    private TerminalSession sesionVisible;
 
     class Local extends Binder {
         TerminalService servicio() { return TerminalService.this; }
@@ -64,13 +126,32 @@ public class TerminalService extends Service implements TerminalSessionClient {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null && CERRAR_SESION.equals(intent.getAction())) {
-            cerrarTodo();
-            return START_NOT_STICKY;
+        if (intent != null) {
+            String accion = intent.getAction();
+            String id = intent.getStringExtra(EXTRA_INSTANCIA_ID);
+            if (CERRAR_SESION.equals(accion)) {
+                if (id != null) {
+                    cerrarInstancia(id);
+                } else {
+                    cerrarTodo();
+                }
+                return START_NOT_STICKY;
+            }
+            if (CERRAR_INSTANCIA.equals(accion)) {
+                if (id == null) id = SistemaLinux.seleccionado(this);
+                cerrarInstancia(id);
+                return START_NOT_STICKY;
+            }
+            if (INICIAR_ESCRITORIO.equals(accion)) {
+                if (id == null) id = SistemaLinux.seleccionado(this);
+                iniciarEscritorioPara(id);
+            }
+            if (REAJUSTAR_PANTALLA.equals(accion)) {
+                reajustarPantalla();
+            }
         }
         actualizarNotificacion();
-        if (intent != null && INICIAR_ESCRITORIO.equals(intent.getAction())) iniciarEscritorio();
-        if (intent != null && REAJUSTAR_PANTALLA.equals(intent.getAction())) reajustarPantalla();
+        RedManager.actualizar(this);
         return START_NOT_STICKY;
     }
 
@@ -78,21 +159,43 @@ public class TerminalService extends Service implements TerminalSessionClient {
         NotificationManager nm = getSystemService(NotificationManager.class);
         if (nm == null) return;
         nm.createNotificationChannel(new NotificationChannel(CANAL, "Terminal", NotificationManager.IMPORTANCE_LOW));
+
+        List<SesionInstancia> vivas = new ArrayList<>();
+        for (SesionInstancia s : sesiones.values()) {
+            if (s.estaViva()) vivas.add(s);
+        }
+        if (vivas.isEmpty()) return;
+
         PendingIntent abrir = PendingIntent.getActivity(this, 0,
-                new Intent(this, WaylandActivity.class), PendingIntent.FLAG_IMMUTABLE);
+                new Intent(this, SistemaActivity.class), PendingIntent.FLAG_IMMUTABLE);
         PendingIntent piCerrar = PendingIntent.getService(this, 1,
                 new Intent(this, TerminalService.class).setAction(CERRAR_SESION),
                 PendingIntent.FLAG_IMMUTABLE);
         Notification.Action accionCerrar = new Notification.Action.Builder(
-                null, "✕ CERRAR SESIÓN", piCerrar).build();
+                null, vivas.size() > 1 ? "✕ CERRAR TODO" : "✕ CERRAR SESIÓN", piCerrar).build();
 
-        SistemaLinux.Instancia activa = SistemaLinux.instanciaSeleccionada(this);
-        String nombre = activa != null ? activa.nombre : "Linux";
+        String titulo;
+        String texto;
+        if (vivas.size() == 1) {
+            SistemaLinux.Instancia inst = SistemaLinux.instancia(this, vivas.get(0).id);
+            String nombre = inst != null ? inst.nombre : vivas.get(0).id;
+            titulo = "✦ " + nombre;
+            texto = "Sesión activa en segundo plano";
+        } else {
+            titulo = "✦ " + vivas.size() + " entornos en ejecución";
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < vivas.size(); i++) {
+                if (i > 0) sb.append(", ");
+                SistemaLinux.Instancia inst = SistemaLinux.instancia(this, vivas.get(i).id);
+                sb.append(inst != null ? inst.nombre : vivas.get(i).id);
+            }
+            texto = sb.toString();
+        }
 
         Notification n = new Notification.Builder(this, CANAL)
                 .setSmallIcon(android.R.drawable.ic_menu_manage)
-                .setContentTitle("✦ " + nombre)
-                .setContentText("Sesión activa en segundo plano")
+                .setContentTitle(titulo)
+                .setContentText(texto)
                 .setContentIntent(abrir)
                 .addAction(accionCerrar)
                 .setOngoing(true)
@@ -101,41 +204,107 @@ public class TerminalService extends Service implements TerminalSessionClient {
         else startForeground(1, n);
     }
 
-    public void cerrarTodo() {
-        Log.i(TAG, "cerrando sesión completa");
-        instalando = false;
-        cerrarEscritorio();
-        if (sesion != null) {
-            try {
-                sesion.finishIfRunning();
-            } catch (Exception e) {
-                Log.w(TAG, "error al finalizar sesión de terminal", e);
-            }
-            sesion = null;
-        }
-        instanciaActivaId = null;
-        terminar();
-    }
-
-    synchronized void cerrarEscritorio() {
-        try {
-            Wayland.limpiarPantalla();
-        } catch (Throwable ignorada) { }
-        if (escritorio != null) {
-            try {
-                escritorio.destroyForcibly();
-            } catch (Exception e) {
+    public synchronized void cerrarInstancia(String id) {
+        if (id == null) return;
+        Log.i(TAG, "Cerrando instancia: " + id);
+        SesionInstancia s = sesiones.remove(id);
+        if (s != null) {
+            s.instalando = false;
+            cerrarSoloCompositor(s);
+            if (s.sesionTerminal != null) {
                 try {
-                    escritorio.destroy();
-                } catch (Exception ignorada) { }
+                    s.sesionTerminal.finishIfRunning();
+                } catch (Exception e) {
+                    Log.w(TAG, "error al finalizar terminal de " + id, e);
+                }
+                s.sesionTerminal = null;
             }
-            escritorio = null;
         }
-        AdaptadorInstalacion adp = SistemaLinux.adaptadorSeleccionado(this);
+        AdaptadorInstalacion adp = SistemaLinux.adaptador(this, id);
         if (adp != null) {
             limpiarProcesosLinux(adp.raiz(this));
         }
-        instanciaActivaId = null;
+        if (id.equals(instanciaEnfocadaId)) {
+            instanciaEnfocadaId = null;
+            for (SesionInstancia activa : sesiones.values()) {
+                if (activa.estaViva()) {
+                    instanciaEnfocadaId = activa.id;
+                    break;
+                }
+            }
+        }
+        actualizarNotificacion();
+        terminarSiNoQuedaNada();
+    }
+
+    public synchronized void cerrarSesionTerminal(String id) {
+        if (id == null) return;
+        SesionInstancia s = sesiones.get(id);
+        if (s != null) {
+            if (s.sesionTerminal != null) {
+                try {
+                    s.sesionTerminal.finishIfRunning();
+                } catch (Exception ignorada) { }
+                s.sesionTerminal = null;
+            }
+            if (!s.estaViva()) {
+                sesiones.remove(id);
+            }
+        }
+        actualizarNotificacion();
+        terminarSiNoQuedaNada();
+    }
+
+    public synchronized void cerrarTodo() {
+        Log.i(TAG, "Cerrando todas las instancias activas");
+        List<String> ids = new ArrayList<>(sesiones.keySet());
+        for (String id : ids) {
+            cerrarInstancia(id);
+        }
+        sesiones.clear();
+        instanciaEnfocadaId = null;
+        terminar();
+    }
+
+    synchronized void cerrarSoloCompositor(SesionInstancia s) {
+        if (s == null) return;
+        try {
+            Wayland.limpiarPantalla();
+        } catch (Throwable ignorada) { }
+        if (s.procesoEscritorio != null) {
+            try {
+                s.procesoEscritorio.destroyForcibly();
+            } catch (Exception e) {
+                try {
+                    s.procesoEscritorio.destroy();
+                } catch (Exception ignorada) { }
+            }
+            s.procesoEscritorio = null;
+        }
+        File raiz = SistemaLinux.raiz(this, s.id);
+        if (raiz != null) {
+            String path = raiz.getAbsolutePath();
+            try {
+                String[] cmd = new String[]{
+                    "/system/bin/sh", "-c",
+                    "rm -f " + path + "/tmp/arch-android-display " + path + "/run/user/*/wayland-[1-9]* " + path + "/run/user/*/sway-ipc.*.sock 2>/dev/null"
+                };
+                Runtime.getRuntime().exec(cmd).waitFor();
+            } catch (Exception ignorada) { }
+        }
+    }
+
+    synchronized void cerrarEscritorio() {
+        String id = instanciaEnfocadaId != null ? instanciaEnfocadaId : SistemaLinux.seleccionado(this);
+        if (id != null) {
+            SesionInstancia s = sesiones.get(id);
+            if (s != null) {
+                cerrarSoloCompositor(s);
+                if (!s.estaViva()) sesiones.remove(id);
+            }
+        }
+        actualizarNotificacion();
+        terminarSiNoQuedaNada();
     }
 
     private void limpiarProcesosLinux(File raiz) {
@@ -149,10 +318,9 @@ public class TerminalService extends Service implements TerminalSessionClient {
                 "  pid=${p#/proc/}; " +
                 "  if [ \"$pid\" != \"$$\" ] && [ \"$pid\" != \"" + miPid + "\" ]; then " +
                 "    cmd=$(cat $p/cmdline 2>/dev/null | tr '\\0' ' '); " +
-                "    case \"$cmd\" in " +
-                "      *\"" + path + "\"*|*sesion-android*|*sway*|*hyprland*|*kwin*|*waybar*|*autostart-android*|*pipewire*|*wireplumber*) " +
-                "        kill -9 $pid 2>/dev/null ;; " +
-                "    esac; " +
+                "    cwd=$(readlink $p/cwd 2>/dev/null); " +
+                "    case \"$cmd\" in *\"" + path + "\"*) kill -9 $pid 2>/dev/null; continue;; esac; " +
+                "    case \"$cwd\" in \"" + path + "\"*) kill -9 $pid 2>/dev/null; continue;; esac; " +
                 "  fi; " +
                 "done; " +
                 "rm -f " + path + "/tmp/arch-android-display " + path + "/run/user/*/wayland-[1-9]* " + path + "/run/user/*/sway-ipc.*.sock 2>/dev/null; " +
@@ -168,33 +336,57 @@ public class TerminalService extends Service implements TerminalSessionClient {
 
     @Override
     public void onDestroy() {
-        instanciaActivaId = null;
-        if (sesion != null) sesion.finishIfRunning();
-        if (escritorio != null) escritorio.destroy();
+        RedManager.detenerTodo();
+        cerrarTodo();
         super.onDestroy();
     }
 
-    TerminalSession sesion() {
-        if (sesion == null) sesion = crearSesion();
-        return sesion;
+    public synchronized TerminalSession sesionPara(String id) {
+        if (id == null || id.isEmpty()) {
+            id = SistemaLinux.seleccionado(this);
+            if (id == null) id = "arch-principal";
+        }
+        instanciaEnfocadaId = id;
+        SesionInstancia s = sesiones.get(id);
+        if (s == null) {
+            s = new SesionInstancia(id);
+            sesiones.put(id, s);
+        }
+        if (s.sesionTerminal == null || !s.sesionTerminal.isRunning()) {
+            s.sesionTerminal = crearSesion(id, s);
+        }
+        actualizarNotificacion();
+        return s.sesionTerminal;
     }
 
-    void setVista(TerminalView v) {
+    public TerminalSession sesion() {
+        return sesionPara(SistemaLinux.seleccionado(this));
+    }
+
+    public void setVista(TerminalView v, TerminalSession s) {
         vista = v;
-        if (sesion != null) sesion.updateTerminalSessionClient(this);
+        sesionVisible = s;
+        if (s != null) s.updateTerminalSessionClient(this);
     }
 
-    // La próxima vez que se abra la terminal arranca un bash nuevo.
+    public void setVista(TerminalView v) {
+        setVista(v, sesionVisible);
+    }
+
     void cerrarSesion() {
-        sesion = null;
-        terminarSiNoQuedaNada();
+        String id = instanciaEnfocadaId != null ? instanciaEnfocadaId : SistemaLinux.seleccionado(this);
+        cerrarSesionTerminal(id);
     }
 
-    // Sin escritorio ni bash no queda nada que cuidar.
     private void terminarSiNoQuedaNada() {
-        boolean bash = sesion != null && sesion.isRunning();
-        boolean vivo = escritorio != null && escritorio.isAlive();
-        if (!bash && !vivo) terminar();
+        boolean algunaViva = false;
+        for (SesionInstancia s : sesiones.values()) {
+            if (s.estaViva()) {
+                algunaViva = true;
+                break;
+            }
+        }
+        if (!algunaViva) terminar();
     }
 
     void terminar() {
@@ -202,23 +394,27 @@ public class TerminalService extends Service implements TerminalSessionClient {
         stopSelf();
     }
 
+    public boolean estaInstalando(String id) {
+        if (id == null) return false;
+        SesionInstancia s = sesiones.get(id);
+        return s != null && s.instalando;
+    }
+
     public boolean estaInstalando() {
-        return instalando;
+        return estaInstalando(SistemaLinux.seleccionado(this));
     }
 
     // Shell de la instalación seleccionada a través de su cargador; el cwd es la ruta real
     // (el pty lo abre libtermux.so, que es bionic), el resto ya va dentro del prefijo.
-    private TerminalSession crearSesion() {
-        AdaptadorInstalacion instalacion = SistemaLinux.adaptadorSeleccionado(this);
+    private TerminalSession crearSesion(String id, SesionInstancia sesionInst) {
+        AdaptadorInstalacion instalacion = SistemaLinux.adaptador(this, id);
         File prefijo = instalacion.raiz(this);
-        SistemaLinux.Instancia inst = SistemaLinux.instanciaSeleccionada(this);
-        instanciaActivaId = inst != null ? inst.id : "arch-principal";
         if (!instalacion.instalada(this) && instalacion.instaladorDisponible(this)) {
             new File(prefijo, "etc").mkdirs();
             List<String> env = entorno(instalacion, prefijo);
             try {
                 String[] args = instalacion.comandoInstalacion(this, env);
-                instalando = true;
+                sesionInst.instalando = true;
                 return new TerminalSession("/system/bin/sh", getFilesDir().getAbsolutePath(), args,
                         env.toArray(new String[0]), 5000, this);
             } catch (java.io.IOException e) {
@@ -234,38 +430,52 @@ public class TerminalService extends Service implements TerminalSessionClient {
         List<String> env = entorno(instalacion, prefijo);
         agregarBusSesion(env, prefijo);
         String[] args = instalacion.comandoTerminal(this);
-        Log.i(TAG, "sesión Linux: " + instalacion.id() + ", cargador " + cargador + ", prefijo " + prefijo);
+        Log.i(TAG, "sesión Linux [" + id + "]: " + instalacion.id() + ", cargador " + cargador + ", prefijo " + prefijo);
         return new TerminalSession(cargador, new File(prefijo, instalacion.home(prefijo)).getAbsolutePath(), args,
                 env.toArray(new String[0]), 5000, this);
     }
 
     // Sesión Wayland en segundo plano (bash -l para tomar /etc/profile).
-    synchronized void iniciarEscritorio() {
-        AdaptadorInstalacion instalacion = SistemaLinux.adaptadorSeleccionado(this);
-        String idActual = SistemaLinux.seleccionado(this);
-        if (escritorio != null && escritorio.isAlive()) {
-            if (idActual.equals(instanciaActivaId)) {
-                actualizarNotificacion();
-                return;
-            }
-            Log.i(TAG, "Cambiando de entorno gráfico: " + instanciaActivaId + " -> " + idActual);
-            cerrarEscritorio();
+    synchronized void iniciarEscritorioPara(String idParam) {
+        final String idActual = (idParam == null || idParam.isEmpty())
+                ? (SistemaLinux.seleccionado(this) != null ? SistemaLinux.seleccionado(this) : "arch-principal")
+                : idParam;
+        instanciaEnfocadaId = idActual;
+
+        SesionInstancia sesionInstTemp = sesiones.get(idActual);
+        if (sesionInstTemp == null) {
+            sesionInstTemp = new SesionInstancia(idActual);
+            sesiones.put(idActual, sesionInstTemp);
         }
-        instanciaActivaId = idActual;
+        final SesionInstancia sesionInst = sesionInstTemp;
+
+        if (sesionInst.tieneEscritorio()) {
+            actualizarNotificacion();
+            return;
+        }
+
+        // Si otra instancia tiene un escritorio gráfico corriendo, cerrar solo su compositor
+        // para dar paso al nuevo en la pantalla física, preservando su terminal y archivos intactos.
+        for (SesionInstancia otra : sesiones.values()) {
+            if (!otra.id.equals(idActual) && otra.tieneEscritorio()) {
+                Log.i(TAG, "Cerrando compositor gráfico previo de " + otra.id + " para iniciar " + idActual);
+                cerrarSoloCompositor(otra);
+            }
+        }
+
         actualizarNotificacion();
-        if (!instalacion.instalada(this) && instalacion.instaladorDisponible(this)) return; // primero el instalador
+        AdaptadorInstalacion instalacion = SistemaLinux.adaptador(this, idActual);
+        if (!instalacion.instalada(this) && instalacion.instaladorDisponible(this)) return;
         File prefijo = instalacion.raiz(this);
         if (!BuildConfig.DIAGNOSTICO && !CapaSesion.actualizar(this, instalacion, prefijo)) return;
         String cargador = instalacion.cargador(this);
-        entornoEscritorio = entorno(instalacion, prefijo);
+        sesionInst.entornoEscritorio = entorno(instalacion, prefijo);
         String sesion = instalacion.supervisorSesion();
         boolean supervisor = !BuildConfig.DIAGNOSTICO && new File(prefijo, sesion).isFile();
         if (!BuildConfig.DIAGNOSTICO && !supervisor) {
             Log.e(TAG, "no inicio el escritorio: falta el supervisor común " + sesion);
             return;
         }
-        // HyperOS ata algunos hilos de la app (el que lanza procesos) a los núcleos grandes
-        // (6-7); el supervisor recibe la afinidad abierta para todo perfil y sus hijos.
         String cmd = "taskset -p ff $$ > /dev/null 2>&1; exec sway > /tmp/rescate-grafico.log 2>&1";
         if (BuildConfig.DIAGNOSTICO) {
             try {
@@ -288,36 +498,53 @@ public class TerminalService extends Service implements TerminalSessionClient {
         } else {
             pb = new ProcessBuilder(cargador, "/usr/bin/bash", "-lc", cmd);
         }
-        entornoLinux(pb);
+        entornoLinuxPara(pb, idActual);
         if (supervisor) pb.environment().put("ARCH_ANDROID_SESSION_START", "1");
         try {
             Process p = pb.start();
-            escritorio = p;
-            Log.i(TAG, "sesión Wayland iniciada");
+            sesionInst.procesoEscritorio = p;
+            Log.i(TAG, "sesión Wayland iniciada para [" + idActual + "]");
             Portapapeles.iniciar(this);
             Audio.iniciar(this);
             Mandos.iniciar(this);
             new Thread(() -> {
                 try {
-                    Log.i(TAG, "sesión Wayland terminó: " + p.waitFor());
+                    Log.i(TAG, "sesión Wayland [" + idActual + "] terminó: " + p.waitFor());
                 } catch (InterruptedException ignorada) {
                     return;
                 }
-                new android.os.Handler(getMainLooper()).post(this::terminarSiNoQuedaNada);
-            }, "escritorio").start();
+                new android.os.Handler(getMainLooper()).post(() -> {
+                    if (sesionInst.procesoEscritorio == p) {
+                        sesionInst.procesoEscritorio = null;
+                        if (!sesionInst.estaViva()) {
+                            sesiones.remove(idActual);
+                        }
+                    }
+                    actualizarNotificacion();
+                    terminarSiNoQuedaNada();
+                });
+            }, "escritorio-" + idActual).start();
         } catch (java.io.IOException e) {
-            Log.e(TAG, "sesión Wayland", e);
+            Log.e(TAG, "sesión Wayland [" + idActual + "]", e);
         }
     }
 
+    synchronized void iniciarEscritorio() {
+        iniciarEscritorioPara(SistemaLinux.seleccionado(this));
+    }
+
+    boolean escritorioVivo(String id) {
+        if (id == null) return false;
+        SesionInstancia s = sesiones.get(id);
+        return s != null && s.tieneEscritorio();
+    }
+
     boolean escritorioVivo() {
-        Process p = escritorio;
-        return p != null && p.isAlive();
+        return escritorioVivo(instanciaEnfocadaId != null ? instanciaEnfocadaId : SistemaLinux.seleccionado(this));
     }
 
     // El supervisor publica el socket real del compositor anidado tras detectarlo.
-    private String waylandDisplay() {
-        File raiz = SistemaLinux.adaptadorSeleccionado(this).raiz(this);
+    private String waylandDisplayPara(File raiz) {
         File f = new File(raiz, Wayland.runtimeDir().substring(1) + "/linux-session-display");
         if (!f.isFile()) f = new File(raiz, Wayland.runtimeDir().substring(1) + "/arch-android-display");
         try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(f))) {
@@ -327,16 +554,26 @@ public class TerminalService extends Service implements TerminalSessionClient {
         return "wayland-1";
     }
 
+    private String waylandDisplay() {
+        File raiz = SistemaLinux.adaptadorSeleccionado(this).raiz(this);
+        return waylandDisplayPara(raiz);
+    }
+
     // Un programa Linux conectado al compositor elegido.
-    ProcessBuilder linux(String... args) {
-        AdaptadorInstalacion instalacion = SistemaLinux.adaptadorSeleccionado(this);
+    ProcessBuilder linuxPara(String id, String... args) {
+        AdaptadorInstalacion instalacion = SistemaLinux.adaptador(this, id);
         String[] todo = new String[args.length + 1];
         todo[0] = instalacion.cargador(this);
         System.arraycopy(args, 0, todo, 1, args.length);
         ProcessBuilder pb = new ProcessBuilder(todo);
-        entornoLinux(pb);
-        aplicarEndpointPantalla(pb);
+        entornoLinuxPara(pb, id);
+        aplicarEndpointPantallaPara(pb, id);
         return pb;
+    }
+
+    ProcessBuilder linux(String... args) {
+        String id = instanciaEnfocadaId != null ? instanciaEnfocadaId : SistemaLinux.seleccionado(this);
+        return linuxPara(id, args);
     }
 
     private File archivoSesionGrafica(File prefijo) {
@@ -344,16 +581,14 @@ public class TerminalService extends Service implements TerminalSessionClient {
                 + "/linux-session.properties");
     }
 
-    private Properties sesionGrafica() {
-        AdaptadorInstalacion instalacion = SistemaLinux.adaptadorSeleccionado(this);
+    private Properties sesionGraficaPara(File prefijo) {
         Properties p = new Properties();
-        File archivo = archivoSesionGrafica(instalacion.raiz(this));
+        File archivo = archivoSesionGrafica(prefijo);
         try (FileInputStream in = new FileInputStream(archivo)) {
             p.load(in);
             return p;
         } catch (java.io.IOException ignorada) {
-            // Compatibilidad con una sesión levantada por versiones anteriores del supervisor.
-            File anterior = new File(instalacion.raiz(this), Wayland.runtimeDir().substring(1)
+            File anterior = new File(prefijo, Wayland.runtimeDir().substring(1)
                     + "/arch-android-session.properties");
             try (FileInputStream in = new FileInputStream(anterior)) {
                 p.load(in);
@@ -364,20 +599,32 @@ public class TerminalService extends Service implements TerminalSessionClient {
         }
     }
 
-    String protocoloPantalla() {
-        Properties p = sesionGrafica();
-        if (p != null) return p.getProperty("protocol");
-        // Compatibilidad con prefijos donde aún corre el supervisor anterior.
+    private Properties sesionGrafica() {
         AdaptadorInstalacion instalacion = SistemaLinux.adaptadorSeleccionado(this);
-        File runtime = new File(instalacion.raiz(this), Wayland.runtimeDir().substring(1));
+        return sesionGraficaPara(instalacion.raiz(this));
+    }
+
+    String protocoloPantallaPara(String id) {
+        AdaptadorInstalacion instalacion = SistemaLinux.adaptador(this, id);
+        File raiz = instalacion.raiz(this);
+        Properties p = sesionGraficaPara(raiz);
+        if (p != null) return p.getProperty("protocol");
+        File runtime = new File(raiz, Wayland.runtimeDir().substring(1));
         return new File(runtime, "linux-session-display").isFile()
                 || new File(runtime, "arch-android-display").isFile() ? "wayland" : null;
     }
 
-    private void aplicarEndpointPantalla(ProcessBuilder pb) {
-        Properties p = sesionGrafica();
+    String protocoloPantalla() {
+        String id = instanciaEnfocadaId != null ? instanciaEnfocadaId : SistemaLinux.seleccionado(this);
+        return protocoloPantallaPara(id);
+    }
+
+    private void aplicarEndpointPantallaPara(ProcessBuilder pb, String id) {
+        AdaptadorInstalacion instalacion = SistemaLinux.adaptador(this, id);
+        File raiz = instalacion.raiz(this);
+        Properties p = sesionGraficaPara(raiz);
         if (p == null) {
-            pb.environment().put("WAYLAND_DISPLAY", waylandDisplay());
+            pb.environment().put("WAYLAND_DISPLAY", waylandDisplayPara(raiz));
             return;
         }
         String protocolo = p.getProperty("protocol", "");
@@ -392,16 +639,29 @@ public class TerminalService extends Service implements TerminalSessionClient {
         pb.environment().put("XDG_SESSION_TYPE", protocolo);
     }
 
-    private void entornoLinux(ProcessBuilder pb) {
-        AdaptadorInstalacion instalacion = SistemaLinux.adaptadorSeleccionado(this);
-        pb.directory(new File(instalacion.raiz(this), instalacion.home(instalacion.raiz(this))));
+    private void aplicarEndpointPantalla(ProcessBuilder pb) {
+        String id = instanciaEnfocadaId != null ? instanciaEnfocadaId : SistemaLinux.seleccionado(this);
+        aplicarEndpointPantallaPara(pb, id);
+    }
+
+    private void entornoLinuxPara(ProcessBuilder pb, String id) {
+        AdaptadorInstalacion instalacion = SistemaLinux.adaptador(this, id);
+        File raiz = instalacion.raiz(this);
+        pb.directory(new File(raiz, instalacion.home(raiz)));
         pb.environment().clear();
-        for (String v : entornoEscritorio) {
+        SesionInstancia s = sesiones.get(id);
+        List<String> env = (s != null && s.entornoEscritorio != null) ? s.entornoEscritorio : entorno(instalacion, raiz);
+        for (String v : env) {
             int i = v.indexOf('=');
-            pb.environment().put(v.substring(0, i), v.substring(i + 1));
+            if (i > 0) pb.environment().put(v.substring(0, i), v.substring(i + 1));
         }
-        String bus = leerBusSesion(instalacion.raiz(this));
+        String bus = leerBusSesion(raiz);
         if (bus != null) pb.environment().put("DBUS_SESSION_BUS_ADDRESS", bus);
+    }
+
+    private void entornoLinux(ProcessBuilder pb) {
+        String id = instanciaEnfocadaId != null ? instanciaEnfocadaId : SistemaLinux.seleccionado(this);
+        entornoLinuxPara(pb, id);
     }
 
     private void agregarBusSesion(List<String> env, File prefijo) {
@@ -432,7 +692,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
         if (instalacion.instalada(this)) home.mkdirs(); // al instalar lo crea el adaptador
         instalacion.preparar(this, prefijo);
         escribirResolvConf(prefijo);
-        Wayland.iniciar(this);
+        Wayland.iniciarPara(this, instalacion.id());
         Abrir.iniciar(this);
         Notificar.iniciar(this);
         PuertoAdb.iniciar(this);
@@ -482,38 +742,60 @@ public class TerminalService extends Service implements TerminalSessionClient {
     // --- TerminalSessionClient ---
 
     @Override
-    public void onTextChanged(TerminalSession s) { if (vista != null) vista.onScreenUpdated(); }
+    public void onTextChanged(TerminalSession s) {
+        if (vista != null && s == sesionVisible) vista.onScreenUpdated();
+    }
 
     @Override
     public void onTitleChanged(TerminalSession s) { }
 
     @Override
     public void onSessionFinished(TerminalSession s) {
-        if (instalando && s == sesion) {
-            // Terminó el instalador: si quedó todo, al escritorio (la terminal vuelve a ser bash)
-            instalando = false;
-            sesion = null;
-            if (SistemaLinux.adaptadorSeleccionado(this).instalada(this)) {
-                if (vista != null && vista.getContext() instanceof android.app.Activity)
-                    ((android.app.Activity) vista.getContext()).finish();
-                File fEsc = new File(SistemaLinux.raizSeleccionada(this), "var/lib/arch-android/escritorio");
-                boolean esSinEntorno = false;
-                try {
-                    if (fEsc.exists()) {
-                        String e = java.nio.file.Files.readString(fEsc.toPath()).trim();
-                        if ("sin-entorno".equals(e)) esSinEntorno = true;
-                    }
-                } catch (Exception ignorada) { }
-                if (esSinEntorno) {
-                    startActivity(new Intent(this, TerminalActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-                } else {
-                    startActivity(new Intent(this, WaylandActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-                }
-                return;
+        SesionInstancia dueña = null;
+        for (SesionInstancia si : sesiones.values()) {
+            if (si.sesionTerminal == s) {
+                dueña = si;
+                break;
             }
         }
-        if (vista != null) vista.onScreenUpdated();
-        else terminarSiNoQuedaNada();
+        if (dueña != null) {
+            if (dueña.instalando) {
+                dueña.instalando = false;
+                dueña.sesionTerminal = null;
+                AdaptadorInstalacion adp = SistemaLinux.adaptador(this, dueña.id);
+                if (adp != null && adp.instalada(this)) {
+                    if (vista != null && s == sesionVisible && vista.getContext() instanceof android.app.Activity) {
+                        ((android.app.Activity) vista.getContext()).finish();
+                    }
+                    File fEsc = new File(SistemaLinux.raiz(this, dueña.id), "var/lib/arch-android/escritorio");
+                    boolean esSinEntorno = false;
+                    try {
+                        if (fEsc.exists()) {
+                            String e = java.nio.file.Files.readString(fEsc.toPath()).trim();
+                            if ("sin-entorno".equals(e)) esSinEntorno = true;
+                        }
+                    } catch (Exception ignorada) { }
+                    if (esSinEntorno) {
+                        Intent i = new Intent(this, TerminalActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        i.putExtra(EXTRA_INSTANCIA_ID, dueña.id);
+                        startActivity(i);
+                    } else {
+                        Intent i = new Intent(this, WaylandActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        i.putExtra(EXTRA_INSTANCIA_ID, dueña.id);
+                        startActivity(i);
+                    }
+                    return;
+                }
+            } else {
+                dueña.sesionTerminal = null;
+                if (!dueña.estaViva()) {
+                    sesiones.remove(dueña.id);
+                }
+            }
+        }
+        if (vista != null && s == sesionVisible) vista.onScreenUpdated();
+        terminarSiNoQuedaNada();
+        actualizarNotificacion();
     }
 
     @Override
@@ -533,7 +815,9 @@ public class TerminalService extends Service implements TerminalSessionClient {
     public void onBell(TerminalSession s) { }
 
     @Override
-    public void onColorsChanged(TerminalSession s) { if (vista != null) vista.invalidate(); }
+    public void onColorsChanged(TerminalSession s) {
+        if (vista != null && s == sesionVisible) vista.invalidate();
+    }
 
     @Override
     public void onTerminalCursorStateChange(boolean visible) { }
@@ -563,10 +847,11 @@ public class TerminalService extends Service implements TerminalSessionClient {
     public void logStackTrace(String tag, Exception e) { Log.e(TAG, tag, e); }
 
     private void reajustarPantalla() {
-        if (!escritorioVivo()) return;
+        String id = instanciaEnfocadaId != null ? instanciaEnfocadaId : SistemaLinux.seleccionado(this);
+        if (!escritorioVivo(id)) return;
         new Thread(() -> {
             try {
-                linux("/usr/bin/bash", "-c",
+                linuxPara(id, "/usr/bin/bash", "-c",
                         "if command -v hyprctl >/dev/null 2>&1; then " +
                         "  hyprctl keyword monitor WAYLAND-1,preferred,auto,${ANDROID_ESCALA:-2.5} >/dev/null 2>&1; " +
                         "elif command -v swaymsg >/dev/null 2>&1; then " +

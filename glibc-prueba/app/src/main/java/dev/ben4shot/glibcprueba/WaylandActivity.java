@@ -51,6 +51,7 @@ public class WaylandActivity extends Activity {
     private static final float SCROLL = 0.35f;
 
     private SurfaceView vista;
+    private String instanciaId;
     private TextView botonCtrl, botonAlt, botonSuper;
     private boolean ctrl, alt, sup;
     private View contenedorControles;
@@ -120,25 +121,35 @@ public class WaylandActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        String idExtra = getIntent().getStringExtra(TerminalService.EXTRA_INSTANCIA_ID);
+        if (idExtra == null) idExtra = SistemaLinux.seleccionado(this);
+        instanciaId = idExtra;
+
         // Primera vez (APK autoinstalable): la terminal con el instalador; al terminar vuelve aquí
-        AdaptadorInstalacion instalacion = SistemaLinux.adaptadorSeleccionado(this);
+        AdaptadorInstalacion instalacion = SistemaLinux.adaptador(this, instanciaId);
         if (!instalacion.instalada(this) && instalacion.instaladorDisponible(this)) {
-            startActivity(new Intent(this, TerminalActivity.class));
+            Intent i = new Intent(this, TerminalActivity.class);
+            i.putExtra(TerminalService.EXTRA_INSTANCIA_ID, instanciaId);
+            startActivity(i);
             finish();
             return;
         }
         // Si el entorno seleccionado es sin-entorno, redirigir directamente a la terminal interactiva
-        java.io.File fEsc = new java.io.File(SistemaLinux.raizSeleccionada(this), "var/lib/arch-android/escritorio");
+        java.io.File fEsc = new java.io.File(SistemaLinux.raiz(this, instanciaId), "var/lib/arch-android/escritorio");
         try {
             if (fEsc.exists() && "sin-entorno".equals(java.nio.file.Files.readString(fEsc.toPath()).trim())) {
-                startActivity(new Intent(this, TerminalActivity.class));
+                Intent i = new Intent(this, TerminalActivity.class);
+                i.putExtra(TerminalService.EXTRA_INSTANCIA_ID, instanciaId);
+                startActivity(i);
                 finish();
                 return;
             }
         } catch (Exception ignorada) { }
-        Wayland.iniciar(this);
+        Wayland.iniciarPara(this, instanciaId);
         // El escritorio elegido arranca solo si aún no está corriendo.
-        startForegroundService(new Intent(this, TerminalService.class).setAction(TerminalService.INICIAR_ESCRITORIO));
+        startForegroundService(new Intent(this, TerminalService.class)
+                .setAction(TerminalService.INICIAR_ESCRITORIO)
+                .putExtra(TerminalService.EXTRA_INSTANCIA_ID, instanciaId));
         atajoTerminal();
         Notificar.clic(getIntent());
 
@@ -710,7 +721,7 @@ public class WaylandActivity extends Activity {
     }
 
     private void mostrarMenuSalida() {
-        SistemaLinux.Instancia inst = SistemaLinux.instanciaSeleccionada(this);
+        SistemaLinux.Instancia inst = SistemaLinux.instancia(this, instanciaId);
         String nombre = inst != null ? inst.nombre : "Linux";
         new AlertDialog.Builder(this)
                 .setTitle("✦ Menú de Sesión (" + nombre + ")")
@@ -720,7 +731,10 @@ public class WaylandActivity extends Activity {
                 })
                 .setNegativeButton("✕ Cerrar sesión", (d, w) -> {
                     Wayland.ventana(null, 0, 0, 0, 0);
-                    startService(new Intent(this, TerminalService.class).setAction(TerminalService.CERRAR_SESION));
+                    Intent i = new Intent(this, TerminalService.class)
+                            .setAction(TerminalService.CERRAR_INSTANCIA)
+                            .putExtra(TerminalService.EXTRA_INSTANCIA_ID, instanciaId);
+                    startService(i);
                     finish();
                 })
                 .setNeutralButton("Cancelar", null)

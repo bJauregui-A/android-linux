@@ -36,6 +36,7 @@ public class TerminalActivity extends Activity implements TerminalViewClient {
 
     private TerminalView vista;
     private TerminalService servicio;
+    private String instanciaId;
     private int tamLetra;
     private boolean ctrl, alt;
     private TextView botonCtrl, botonAlt;
@@ -44,8 +45,9 @@ public class TerminalActivity extends Activity implements TerminalViewClient {
         @Override
         public void onServiceConnected(ComponentName name, IBinder binder) {
             servicio = ((TerminalService.Local) binder).servicio();
-            servicio.setVista(vista);
-            vista.attachSession(servicio.sesion());
+            TerminalSession ses = servicio.sesionPara(instanciaId);
+            servicio.setVista(vista, ses);
+            vista.attachSession(ses);
             vista.requestFocus();
         }
 
@@ -59,6 +61,9 @@ public class TerminalActivity extends Activity implements TerminalViewClient {
         if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != 0) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 0);
         }
+
+        instanciaId = getIntent().getStringExtra(TerminalService.EXTRA_INSTANCIA_ID);
+        if (instanciaId == null) instanciaId = SistemaLinux.seleccionado(this);
 
         vista = new TerminalView(this, null);
         vista.setTerminalViewClient(this);
@@ -88,14 +93,14 @@ public class TerminalActivity extends Activity implements TerminalViewClient {
 
     @Override
     protected void onDestroy() {
-        if (servicio != null) servicio.setVista(null);
+        if (servicio != null) servicio.setVista(null, null);
         unbindService(conexion);
         super.onDestroy();
     }
 
     private boolean estaEnCreacion() {
-        if (servicio != null && servicio.estaInstalando()) return true;
-        AdaptadorInstalacion adp = SistemaLinux.adaptadorSeleccionado(this);
+        if (servicio != null && servicio.estaInstalando(instanciaId)) return true;
+        AdaptadorInstalacion adp = SistemaLinux.adaptador(this, instanciaId);
         return adp != null && !adp.instalada(this);
     }
 
@@ -170,7 +175,7 @@ public class TerminalActivity extends Activity implements TerminalViewClient {
     }
 
     private void mostrarMenuCancelar() {
-        SistemaLinux.Instancia inst = SistemaLinux.instanciaSeleccionada(this);
+        SistemaLinux.Instancia inst = SistemaLinux.instancia(this, instanciaId);
         String nombre = inst != null ? inst.nombre : "entorno";
         new AlertDialog.Builder(this)
                 .setTitle("✦ Cancelar creación")
@@ -183,19 +188,21 @@ public class TerminalActivity extends Activity implements TerminalViewClient {
     }
 
     private void cancelarYBorrarInstancia(SistemaLinux.Instancia inst) {
-        if (servicio != null) {
-            servicio.cerrarTodo();
-        } else {
-            startService(new Intent(this, TerminalService.class).setAction(TerminalService.CERRAR_SESION));
-        }
         if (inst != null) {
+            if (servicio != null) {
+                servicio.cerrarInstancia(inst.id);
+            } else {
+                startService(new Intent(this, TerminalService.class)
+                        .setAction(TerminalService.CERRAR_INSTANCIA)
+                        .putExtra(TerminalService.EXTRA_INSTANCIA_ID, inst.id));
+            }
             SistemaLinux.eliminarInstancia(this, inst.id);
         }
         finish();
     }
 
     private void mostrarMenuSalida() {
-        SistemaLinux.Instancia inst = SistemaLinux.instanciaSeleccionada(this);
+        SistemaLinux.Instancia inst = SistemaLinux.instancia(this, instanciaId);
         String nombre = inst != null ? inst.nombre : "Linux";
         new AlertDialog.Builder(this)
                 .setTitle("✦ Terminal (" + nombre + ")")
@@ -204,7 +211,9 @@ public class TerminalActivity extends Activity implements TerminalViewClient {
                     finish();
                 })
                 .setNegativeButton("✕ Cerrar sesión", (d, w) -> {
-                    startService(new Intent(this, TerminalService.class).setAction(TerminalService.CERRAR_SESION));
+                    startService(new Intent(this, TerminalService.class)
+                            .setAction(TerminalService.CERRAR_INSTANCIA)
+                            .putExtra(TerminalService.EXTRA_INSTANCIA_ID, instanciaId));
                     finish();
                 })
                 .setNeutralButton("Cancelar", null)
@@ -257,7 +266,7 @@ public class TerminalActivity extends Activity implements TerminalViewClient {
     // Enter con la sesión terminada cierra la terminal (y el servicio si no queda sway).
     private boolean cerrarSiTermino(TerminalSession s) {
         if (s == null || s.isRunning()) return false;
-        if (servicio != null) servicio.cerrarSesion();
+        if (servicio != null) servicio.cerrarSesionTerminal(instanciaId);
         finish();
         return true;
     }

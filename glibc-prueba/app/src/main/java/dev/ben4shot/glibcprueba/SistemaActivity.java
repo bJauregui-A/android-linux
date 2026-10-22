@@ -34,6 +34,7 @@ import com.termux.view.TerminalView;
 import com.termux.view.TerminalViewClient;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.List;
 
 // Pantalla principal de la app: lista de entornos Linux (instancias) disponibles y
@@ -83,6 +84,11 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
 
         TextView tituloSeccion = texto("❯ ENTORNOS DISPONIBLES (INSTANCIAS)", 13, true, ACCENTO_CIAN);
         cabeceraInstancias.addView(tituloSeccion, new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+        TextView btnRed = crearBotonChip("⇄ RED", ACCENTO_AMBAR, this::mostrarDialogoPortForward);
+        cabeceraInstancias.addView(btnRed);
+
+        cabeceraInstancias.addView(espacioHorizontal(dp(8)));
 
         TextView btnCrear = crearBotonChip("＋ CREAR", ACCENTO_PURPURA, this::mostrarDialogoCreacion);
         cabeceraInstancias.addView(btnCrear);
@@ -434,7 +440,9 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
             header.addView(tagTipo, lpTipo);
         }
 
-        boolean corriendo = TerminalService.tieneSesionActiva() && inst.id.equals(TerminalService.instanciaActivaId());
+        boolean corriendo = TerminalService.estaCorriendo(inst.id);
+        boolean tieneTerm = TerminalService.tieneTerminal(inst.id);
+        boolean tieneEsc = TerminalService.tieneEscritorio(inst.id);
         if (corriendo) {
             TextView tagCorriendo = textoBadge("● EN EJECUCIÓN", ACCENTO_VERDE);
             LinearLayout.LayoutParams lpCorr = new LinearLayout.LayoutParams(-2, -2);
@@ -463,14 +471,14 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         acciones.setLayoutParams(lpAcc);
 
         if (esSinEntorno) {
-            String textoBoton = corriendo ? "▶ CONSOLA (ACTIVA)" : "▶ CONSOLA";
+            String textoBoton = tieneTerm ? "▶ CONSOLA (ACTIVA)" : "▶ CONSOLA";
             TextView btnConsola = crearBotonChip(textoBoton, ACCENTO_VERDE, () -> {
                 activarYEjecutar(inst.id, false);
             });
             acciones.addView(btnConsola);
         } else {
             // Botón INICIAR ESCRITORIO o VOLVER si ya está corriendo
-            String textoBoton = corriendo ? "▶ VOLVER" : "▶ ESCRITORIO";
+            String textoBoton = tieneEsc ? "▶ VOLVER" : "▶ ESCRITORIO";
             TextView btnIniciar = crearBotonChip(textoBoton, ACCENTO_VERDE, () -> {
                 activarYEjecutar(inst.id, true);
             });
@@ -479,7 +487,8 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
             acciones.addView(espacioHorizontal(dp(8)));
 
             // Botón TERMINAL
-            TextView btnTerminal = crearBotonChip(">_ TERMINAL", ACCENTO_AZUL, () -> {
+            String textoTerminal = tieneTerm ? ">_ TERMINAL (ACTIVA)" : ">_ TERMINAL";
+            TextView btnTerminal = crearBotonChip(textoTerminal, ACCENTO_AZUL, () -> {
                 activarYEjecutar(inst.id, false);
             });
             acciones.addView(btnTerminal);
@@ -514,13 +523,19 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
             File fEsc = new File(SistemaLinux.raiz(this, id), "var/lib/arch-android/escritorio");
             try {
                 if (fEsc.exists() && "sin-entorno".equals(java.nio.file.Files.readString(fEsc.toPath()).trim())) {
-                    startActivity(new Intent(this, TerminalActivity.class));
+                    Intent i = new Intent(this, TerminalActivity.class);
+                    i.putExtra(TerminalService.EXTRA_INSTANCIA_ID, id);
+                    startActivity(i);
                     return;
                 }
             } catch (Exception ignorada) { }
-            startActivity(new Intent(this, WaylandActivity.class));
+            Intent i = new Intent(this, WaylandActivity.class);
+            i.putExtra(TerminalService.EXTRA_INSTANCIA_ID, id);
+            startActivity(i);
         } else {
-            startActivity(new Intent(this, TerminalActivity.class));
+            Intent i = new Intent(this, TerminalActivity.class);
+            i.putExtra(TerminalService.EXTRA_INSTANCIA_ID, id);
+            startActivity(i);
         }
     }
 
@@ -575,7 +590,27 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
 
         layout.addView(rg);
 
-        TextView lblNombre = texto("❯ 2. Nombre del Entorno:", 13, true, ACCENTO_CIAN);
+        TextView lblTipo = texto("❯ 2. Tipo de Entorno:", 13, true, ACCENTO_CIAN);
+        LinearLayout.LayoutParams lpTipo = new LinearLayout.LayoutParams(-1, -2);
+        lpTipo.topMargin = dp(14);
+        layout.addView(lblTipo, lpTipo);
+
+        RadioGroup rgTipo = new RadioGroup(this);
+        RadioButton rbGrafico = new RadioButton(this);
+        rbGrafico.setText("Con Entorno Gráfico (Wayland / GPU Turnip)");
+        rbGrafico.setTextColor(TEXTO_CLARO);
+        rbGrafico.setTypeface(Typeface.MONOSPACE);
+        rbGrafico.setChecked(true);
+        rgTipo.addView(rbGrafico);
+
+        RadioButton rbConsola = new RadioButton(this);
+        rbConsola.setText("Consola pura / Servidor (Headless, sin GPU)");
+        rbConsola.setTextColor(TEXTO_CLARO);
+        rbConsola.setTypeface(Typeface.MONOSPACE);
+        rgTipo.addView(rbConsola);
+        layout.addView(rgTipo);
+
+        TextView lblNombre = texto("❯ 3. Nombre del Entorno:", 13, true, ACCENTO_CIAN);
         LinearLayout.LayoutParams lp2 = new LinearLayout.LayoutParams(-1, -2);
         lp2.topMargin = dp(14);
         layout.addView(lblNombre, lp2);
@@ -605,15 +640,202 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
                 input.setError("Ingresa un nombre");
                 return;
             }
+            boolean esConsola = rbConsola.isChecked();
             dialog.dismiss();
             try {
                 SistemaLinux.Instancia nueva = SistemaLinux.crearInstancia(this, nom, SistemaLinux.ARCH);
+                if (esConsola) {
+                    File fEsc = new File(SistemaLinux.raiz(this, nueva.id), "var/lib/arch-android/escritorio");
+                    fEsc.getParentFile().mkdirs();
+                    try (java.io.FileWriter fw = new java.io.FileWriter(fEsc)) {
+                        fw.write("sin-entorno\n");
+                    }
+                }
                 actualizarLista();
                 activarYEjecutar(nueva.id, false);
             } catch (Exception e) {
                 Toast.makeText(this, "Error: " + e.getMessage(), Toast.LENGTH_LONG).show();
             }
         });
+    }
+
+    private void mostrarDialogoPortForward() {
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(dp(20), dp(16), dp(20), dp(16));
+        layout.setBackgroundColor(FONDO_OSCURO);
+
+        TextView banner = texto("╭─ ✦ REENVÍO DE PUERTOS (PORT FORWARD) ───────╮", 11, true, ACCENTO_AMBAR);
+        layout.addView(banner);
+
+        android.widget.CheckBox cbHabilitado = new android.widget.CheckBox(this);
+        cbHabilitado.setText("Habilitar servicio de reenvío de puertos");
+        cbHabilitado.setTextColor(TEXTO_CLARO);
+        cbHabilitado.setTypeface(Typeface.MONOSPACE);
+        cbHabilitado.setChecked(RedManager.esHabilitado(this));
+        cbHabilitado.setOnCheckedChangeListener((bv, isChecked) -> {
+            RedManager.setHabilitado(this, isChecked);
+        });
+        LinearLayout.LayoutParams lpCb = new LinearLayout.LayoutParams(-1, -2);
+        lpCb.topMargin = dp(8);
+        lpCb.bottomMargin = dp(4);
+        layout.addView(cbHabilitado, lpCb);
+
+        // Configuración de Subred Virtual
+        LinearLayout filaSubred = new LinearLayout(this);
+        filaSubred.setOrientation(LinearLayout.HORIZONTAL);
+        filaSubred.setGravity(Gravity.CENTER_VERTICAL);
+        TextView lblSubred = texto("Subred virtual: ", 12, true, ACCENTO_CIAN);
+        filaSubred.addView(lblSubred);
+
+        EditText inSubred = new EditText(this);
+        inSubred.setText(RedManager.obtenerSubred(this));
+        inSubred.setTextColor(TEXTO_CLARO);
+        inSubred.setTypeface(Typeface.MONOSPACE);
+        inSubred.setTextSize(12);
+        inSubred.setBackground(crearFondo(0xff16202c, BORDE_BOTON, dp(6), dp(1)));
+        inSubred.setPadding(dp(8), dp(5), dp(8), dp(5));
+        LinearLayout.LayoutParams lpInSub = new LinearLayout.LayoutParams(0, -2, 1.0f);
+        lpInSub.rightMargin = dp(6);
+        filaSubred.addView(inSubred, lpInSub);
+
+        Runnable[] recargarRef = new Runnable[1];
+
+        TextView btnGuardarSubred = crearBotonChip("GUARDAR", ACCENTO_CIAN, () -> {
+            String sub = inSubred.getText().toString().trim();
+            if (!sub.isEmpty()) {
+                RedManager.setSubred(this, sub);
+                if (recargarRef[0] != null) recargarRef[0].run();
+                Toast.makeText(this, "Subred: " + sub, Toast.LENGTH_SHORT).show();
+            }
+        });
+        filaSubred.addView(btnGuardarSubred);
+
+        LinearLayout.LayoutParams lpSubred = new LinearLayout.LayoutParams(-1, -2);
+        lpSubred.bottomMargin = dp(8);
+        layout.addView(filaSubred, lpSubred);
+
+        ScrollView scrollReglas = new ScrollView(this);
+        LinearLayout contReglas = new LinearLayout(this);
+        contReglas.setOrientation(LinearLayout.VERTICAL);
+        scrollReglas.addView(contReglas);
+
+        recargarRef[0] = () -> {
+            contReglas.removeAllViews();
+            List<RedManager.Regla> reglas = RedManager.listarReglas(this);
+            if (reglas.isEmpty()) {
+                contReglas.addView(texto("  No hay reglas activas. Agrega una abajo.", 11, false, TEXTO_MUTED));
+            } else {
+                for (RedManager.Regla r : reglas) {
+                    LinearLayout fila = new LinearLayout(this);
+                    fila.setOrientation(LinearLayout.HORIZONTAL);
+                    fila.setGravity(Gravity.CENTER_VERTICAL);
+                    fila.setPadding(dp(10), dp(8), dp(10), dp(8));
+                    fila.setBackground(crearFondo(0xff16202c, BORDE_NORMAL, dp(6), dp(1)));
+
+                    String ipInst = RedManager.ipParaInstancia(this, r.instanciaId);
+                    TextView info = texto(":" + r.puertoExterno + " ➜ " + r.instanciaId + " (" + ipInst + "):" + r.puertoInterno, 12, true, r.activa ? ACCENTO_VERDE : TEXTO_MUTED);
+                    fila.addView(info, new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+                    TextView btnDel = crearBotonChip("✕", ACCENTO_ROJO, () -> {
+                        reglas.remove(r);
+                        RedManager.guardarReglas(this, reglas);
+                        RedManager.actualizar(this);
+                        recargarRef[0].run();
+                    });
+                    fila.addView(btnDel);
+
+                    LinearLayout.LayoutParams lpFila = new LinearLayout.LayoutParams(-1, -2);
+                    lpFila.bottomMargin = dp(6);
+                    contReglas.addView(fila, lpFila);
+                }
+            }
+        };
+        recargarRef[0].run();
+
+        LinearLayout.LayoutParams lpScroll = new LinearLayout.LayoutParams(-1, dp(130));
+        layout.addView(scrollReglas, lpScroll);
+
+        TextView titNueva = texto("❯ Nueva regla de reenvío:", 12, true, ACCENTO_CIAN);
+        LinearLayout.LayoutParams lpTitN = new LinearLayout.LayoutParams(-1, -2);
+        lpTitN.topMargin = dp(12);
+        layout.addView(titNueva, lpTitN);
+
+        LinearLayout form = new LinearLayout(this);
+        form.setOrientation(LinearLayout.HORIZONTAL);
+        form.setGravity(Gravity.CENTER_VERTICAL);
+
+        EditText inExt = new EditText(this);
+        inExt.setHint("Ext (8022)");
+        inExt.setHintTextColor(0xff556272);
+        inExt.setTextColor(TEXTO_CLARO);
+        inExt.setTypeface(Typeface.MONOSPACE);
+        inExt.setTextSize(12);
+        inExt.setInputType(InputType.TYPE_CLASS_NUMBER);
+        inExt.setBackground(crearFondo(0xff16202c, BORDE_BOTON, dp(6), dp(1)));
+        inExt.setPadding(dp(8), dp(6), dp(8), dp(6));
+        form.addView(inExt, new LinearLayout.LayoutParams(dp(85), -2));
+
+        TextView flecha = texto(" ➜ ", 12, true, TEXTO_MUTED);
+        form.addView(flecha);
+
+        List<SistemaLinux.Instancia> insts = SistemaLinux.listarInstancias(this);
+        android.widget.Spinner spinInst = new android.widget.Spinner(this);
+        List<String> nombresInst = new ArrayList<>();
+        for (SistemaLinux.Instancia i : insts) nombresInst.add(i.nombre + " (" + RedManager.ipParaInstancia(this, i.id) + ")");
+        android.widget.ArrayAdapter<String> adapter = new android.widget.ArrayAdapter<>(
+                this, android.R.layout.simple_spinner_dropdown_item, nombresInst);
+        spinInst.setAdapter(adapter);
+        form.addView(spinInst, new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+        EditText inInt = new EditText(this);
+        inInt.setHint("Int (22)");
+        inInt.setHintTextColor(0xff556272);
+        inInt.setTextColor(TEXTO_CLARO);
+        inInt.setTypeface(Typeface.MONOSPACE);
+        inInt.setTextSize(12);
+        inInt.setInputType(InputType.TYPE_CLASS_NUMBER);
+        inInt.setBackground(crearFondo(0xff16202c, BORDE_BOTON, dp(6), dp(1)));
+        inInt.setPadding(dp(8), dp(6), dp(8), dp(6));
+        form.addView(inInt, new LinearLayout.LayoutParams(dp(75), -2));
+
+        LinearLayout.LayoutParams lpForm = new LinearLayout.LayoutParams(-1, -2);
+        lpForm.topMargin = dp(6);
+        layout.addView(form, lpForm);
+
+        TextView btnAdd = crearBotonChip("＋ AGREGAR REGLA", ACCENTO_VERDE, () -> {
+            String sExt = inExt.getText().toString().trim();
+            String sInt = inInt.getText().toString().trim();
+            int idx = spinInst.getSelectedItemPosition();
+            if (sExt.isEmpty() || sInt.isEmpty() || idx < 0 || idx >= insts.size()) {
+                Toast.makeText(this, "Completa los campos", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            try {
+                int pExt = Integer.parseInt(sExt);
+                int pInt = Integer.parseInt(sInt);
+                String instId = insts.get(idx).id;
+                List<RedManager.Regla> reglas = RedManager.listarReglas(this);
+                reglas.add(new RedManager.Regla(String.valueOf(System.currentTimeMillis()), pExt, instId, pInt, true));
+                RedManager.guardarReglas(this, reglas);
+                RedManager.actualizar(this);
+                inExt.setText("");
+                inInt.setText("");
+                recargarRef[0].run();
+                Toast.makeText(this, "Regla agregada :" + pExt + " ➜ " + instId + ":" + pInt, Toast.LENGTH_SHORT).show();
+            } catch (Exception ex) {
+                Toast.makeText(this, "Puerto inválido", Toast.LENGTH_SHORT).show();
+            }
+        });
+        LinearLayout.LayoutParams lpAdd = new LinearLayout.LayoutParams(-2, -2);
+        lpAdd.topMargin = dp(10);
+        layout.addView(btnAdd, lpAdd);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setView(layout)
+                .setPositiveButton("CERRAR", null)
+                .create();
+        dialog.show();
     }
 
     private TextView crearBotonChip(String texto, int colorAcento, Runnable accion) {

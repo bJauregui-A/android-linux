@@ -23,7 +23,12 @@ final class Wayland {
 
     // Idempotente: lo llaman la terminal y WaylandActivity.
     static synchronized void iniciar(Context ctx) {
-        File dir = new File(SistemaLinux.raizSeleccionada(ctx), runtimeDir().substring(1));
+        iniciarPara(ctx, SistemaLinux.seleccionado(ctx));
+    }
+
+    static synchronized void iniciarPara(Context ctx, String instanciaId) {
+        File raiz = instanciaId != null ? SistemaLinux.raiz(ctx, instanciaId) : SistemaLinux.raizSeleccionada(ctx);
+        File dir = new File(raiz, runtimeDir().substring(1));
         dir.mkdirs();
         dir.setReadable(false, false);
         dir.setWritable(false, false);

@@ -458,23 +458,37 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
    - Se cierra tocando el botón `[ ✕ CERRAR ]`, el botón `[ ▼ ]`, el fondo fuera del panel o con el botón/gesto de atrás (`onBackPressed`), manteniendo la sesión viva en segundo plano.
    - APK recompilada e instalada en el Redmi (`adb install -r`).
 
-**Siguiente sesión (63ª):**
-1. **Punto 3.3: Soporte para ejecución de binarios estáticos (`execve_x` en `android-path.c`):**
-   - **Problema técnico:** En Android (API 36 / SELinux no-root), el kernel niega `execve` directo sobre `/data/data/...` (`W^X` / `noexec`). `android-path.c` sortea esto lanzando todos los binarios dinámicos mediante el cargador `libldp.so` (ubicado en `nativeLibraryDir`), usando `libldp.so --library-path ... <binario> <args>`. Sin embargo, los binarios compilados estáticamente (`ldconfig`, herramientas de rescate, binarios Go compilados con `CGO_ENABLED=0`, `busybox` estático) carecen de cabecera `PT_INTERP`, por lo que el cargador dinámico no puede ejecutarlos de forma estándar.
-   - **Estrategia de solución:**
-     - En `execve_x` ([android-path.c](file:///media/ben4shot/E/Develop/Android/glibc-prueba/glibc/glibc-2.43/sysdeps/unix/sysv/linux/aarch64/android-path.c)): al examinar las cabeceras ELF del binario objetivo (`Elf64_Ehdr` y `Elf64_Phdr`), comprobar la presencia de `PT_INTERP`.
-     - Si no hay `PT_INTERP` (binario estático) pero es `ET_DYN` (static-pie, como el `ldconfig` de glibc 2.43) o `ET_EXEC`:
-       - Investigar la invocación directa a través de `libldp.so` o un cargador estático mínimo en espacio de usuario (`user-space elf loader`) residente en `nativeLibraryDir` que mapee los segmentos `PT_LOAD` con `mmap`, configure el auxv / stack inicial y salte al `e_entry`.
-       - Verificar si `libldp.so <binario_estatico>` ya soporta ejecutar `static-pie` directamente en glibc 2.43.
-2. **Prueba de ciclo de vida de instancias en el Redmi:**
-   - Crear una nueva instancia limpia desde el selector de la app (ej. `sway` o `labwc`) para verificar que `primer-arranque.sh` instale sin omisiones la totalidad de `paquetes-escritorio.txt` y el entorno inicie fluido sin quedar congelado en pantalla negra.
-   - Probar la eliminación de una instancia desde el selector de la app y verificar mediante `adb shell run-as ... ls files/instancias/` que los directorios y archivos de solo lectura se eliminen al 100% sin dejar carpetas huérfanas.
-3. **Distribuciones adicionales (Punto 4):**
-   - Compatibilidad con Debian y Ubuntu arm64: creación de adaptadores (`AdaptadorDebianArm64.java`), bootstrap de rootfs y receta de sesión Wayland.
-4. **Servidor / Compositor X11 Directo (Punto 5):**
-   - Compositor/servidor X11 directo sobre DMA-BUF / AHardwareBuffer para clientes X11 puros sin intermediación de Xwayland.
+**63ª sesión (2026-10-22, repo + Redmi por USB):**
+1. **Multi-sesión concurrente en segundo plano:**
+   - En [TerminalService.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/TerminalService.java): refactorizado a arquitectura multi-sesión con clase interna `SesionInstancia` y mapa concurrente `Map<String, SesionInstancia> sesiones`. Ahora cada instancia (`sway`, `labwc`, `server`, etc.) corre en su propio hilo y proceso independiente sin sobreescribir la sesión activa ni matarse al abrir otra.
+   - En [TerminalActivity.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/TerminalActivity.java) y [WaylandActivity.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/WaylandActivity.java): soporte de `EXTRA_INSTANCIA_ID` para acoplarse y desacoplarse dinámicamente de cualquier sesión viva.
+   - En [Wayland.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/Wayland.java): método `iniciarPara(Context, instanciaId)` que crea sockets y enlaces simbólicos de Wayland (`wayland-0`, `wayland-0.lock`) aislados por instancia.
+   - En [SistemaActivity.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/SistemaActivity.java): tarjetas de entorno con badges `● EN EJECUCIÓN` concurrentes y botones `[ ▶ VOLVER ]` y `[ ▶ CONSOLA (ACTIVA) ]` para saltar libremente entre instancias abiertas.
+2. **Port Forwarding dinámico y subred virtual en la UI:**
+   - Creado [RedManager.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/RedManager.java): gestor de reenvío TCP en espacio de usuario. Modela reglas de forward (`puertoExterno`, `instanciaId`, `puertoInterno`, `activa`), gestiona sockets de escucha y pool de hilos de retransmisión bidireccional, y asigna IPs virtuales deterministas por instancia basadas en una subred configurable (ej. `10.0.0.0/24` o `192.168.100.0/24`).
+   - En [SistemaActivity.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/SistemaActivity.java): agregado botón `[ ⇄ RED ]` en la cabecera que abre un diálogo modal con:
+     - Configuración y cambio dinámico de la subred virtual privada.
+     - Tabla de reglas activas y botón para agregar nuevas reglas (puerto externo en el celular → instancia de destino y puerto interno).
+     - Switch de activación inmediata por regla.
+3. **Instalador ligero para instancias de consola / servidor (Headless):**
+   - En [SistemaActivity.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/SistemaActivity.java): el menú `＋ CREAR` ahora permite elegir entre:
+     - `Con Entorno Gráfico` (escritorios Wayland con stack Turnip/Mesa completo).
+     - `Consola pura / Servidor (Headless)` (escribe `sin-entorno` directamente).
+   - En [instalar.sh](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/instalar.sh): si el entorno seleccionado es `sin-entorno`, la extracción de `capa.tgz` omite automáticamente todos los paquetes gráficos pesados (`turnip*`, `mesa-gl*`, `wlroots*`, `sway*`, `libudmabuf-shim.so`, `gtk2*`), reduciendo drásticamente el espacio y el tiempo de despliegue.
+4. **Investigación y prueba en vivo del puerto 22 en Android:**
+   - Verificado que una app estándar (UID 10xxx) tiene restringidos los puertos < 1024 por `/proc/sys/net/ipv4/ip_unprivileged_port_start = 1024`.
+   - Comprobado en vivo en el Redmi 15 5G que el usuario `shell` (UID 2000, ADB) tiene la capacidad `CAP_NET_BIND_SERVICE`. Se ejecutó `nc -l -p 22` y el kernel aceptó el `LISTEN` en `0.0.0.0:22`. Es viable usar un proxy ligero lanzado por ADB local para escuchar en el puerto 22 real de la Wi-Fi sin root.
+5. **Despliegue limpio en el Redmi 15 5G:**
+   - A petición del usuario, se desinstaló completamente la app anterior con `adb uninstall dev.ben4shot.glibcprueba.sdk36` y se instaló desde cero el nuevo paquete `app-sdk36-debug.apk` (Success).
+
+**Siguiente sesión (64ª):**
+1. **Prueba en limpio en el teléfono:**
+   - Abrir la app limpia y crear una primera instancia gráfica o de consola.
+   - Probar el nuevo diálogo `[ ⇄ RED ]`, asignación de subred y reenvío de puertos.
+   - Probar la concurrencia entre dos instancias simultáneas.
+2. **Punto 3.3: Soporte para ejecución de binarios estáticos (`execve_x` en `android-path.c`).**
+3. **Distribuciones adicionales (Debian / Ubuntu arm64).**
+4. **Proxy de puerto 22 en segundo plano vía ADB local (`adb-conectar`).**
 5. **Estado y notas operativas del teléfono:**
    - Dispositivo: Redmi 15 5G (`spring`, Snapdragon 4 Gen 2, serial `dab6b001`).
-   - Instancias en el teléfono: `sway-54452`, `cosmic-67805`, `niri-70360`, `phosh-4056`, `server-81205`, `server-36543`. **No correr `am force-stop`, desinstalar el APK ni reiniciar la app sin confirmación previa del usuario**.
    - Reconexión de depuración inalámbrica local en el teléfono si se reinicia o pierde Wi-Fi: script `adb-conectar` (`~/.local/bin/adb-conectar`).
-**Cómo consultar Hyprland desde el PC (sin tocar nada):** guardar un script con `cd files/archlinux; PID=$(ps -A -o PID,ARGS | grep "argv0 Hyprland" | grep -v grep | head -1 | awk '{print $1}'); L=$(awk '/libldp.so/{print $6; exit}' /proc/$PID/maps); SIG=$(ls -t run/user/10331/hypr | head -1); export GLIBC_PREFIX=$PWD GLIBC_LOADER=$L XDG_RUNTIME_DIR=/run/user/10331 HYPRLAND_INSTANCE_SIGNATURE=$SIG; $L $PWD/usr/bin/hyprctl -j monitors all` y correrlo con `adb shell 'run-as dev.ben4shot.glibcprueba.sdk36 sh -s' < script`. Con `adb` siempre `< /dev/null` (si no, `run-as` se queda esperando stdin). No usar `hyprctl output create`: crea salidas extra.

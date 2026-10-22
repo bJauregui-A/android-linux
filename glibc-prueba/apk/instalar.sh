@@ -12,10 +12,16 @@ mkdir -p "$P/tmp" "$P/dev/shm/.sysv" 2>/dev/null || true
 chmod 1777 "$P/dev/shm" "$P/dev/shm/.sysv" 2>/dev/null || true
 
 # Limpiar pantalla y mostrar banner
+mkdir -p "$E"
+ESCRITORIO_PREVIO=$(cat "$E/escritorio" 2>/dev/null || true)
 printf '\033[2J\033[H'
 printf '\e[1;38;5;141m┌────────────────────────────────────────────────────────────┐\e[0m\n'
 printf '\e[1;38;5;141m│\e[0m  \e[1;38;5;51mINSTALADOR DE ARCH LINUX ARM\e[0m                             \e[1;38;5;141m│\e[0m\n'
-printf '\e[1;38;5;141m│\e[0m  \e[38;5;250mExtracción del sistema base y capa acelerada por GPU\e[0m     \e[1;38;5;141m│\e[0m\n'
+if [ "$ESCRITORIO_PREVIO" = "sin-entorno" ]; then
+    printf '\e[1;38;5;141m│\e[0m  \e[38;5;250mExtracción del sistema base ligero (modo consola/servidor)\e[0m  \e[1;38;5;141m│\e[0m\n'
+else
+    printf '\e[1;38;5;141m│\e[0m  \e[38;5;250mExtracción del sistema base y capa acelerada por GPU\e[0m     \e[1;38;5;141m│\e[0m\n'
+fi
 printf '\e[1;38;5;141m└────────────────────────────────────────────────────────────┘\e[0m\n'
 
 # Comprobar espacio antes de escribir cientos de MB
@@ -33,10 +39,14 @@ if [ "$LIBRES" -lt 3145728 ]; then
     case "$seguir" in s|S|si|SI|Si|sí|SÍ) ;; *) echo "Instalación cancelada; libera espacio y vuelve a abrir la app."; exit 1;; esac
 fi
 
-extraer() { # extraer <offset> <largo> <qué>
-    printf '\e[1;38;5;81m==> Extrayendo:\e[0m %s...\n' "$3"
+extraer() { # extraer <offset> <largo> <qué> [tar options...]
+    OFF="$1"
+    LEN="$2"
+    QUE="$3"
+    shift 3
+    printf '\e[1;38;5;81m==> Extrayendo:\e[0m %s...\n' "$QUE"
     : > "$LOG"
-    if tail -c +$(($1 + 1)) "$APK" | head -c "$2" | tar -xzf - -C "$P" 2> "$LOG"; then
+    if tail -c +$(($OFF + 1)) "$APK" | head -c "$LEN" | tar -xzf - -C "$P" "$@" 2> "$LOG"; then
         printf '    \e[1;38;5;48m✔ Listo\e[0m\n'
     else
         printf '    \e[1;38;5;196m✖ Falló la extracción. Detalles:\e[0m\n'
@@ -50,7 +60,17 @@ touch "$E/instalando"
 if [ ! -e "$E/extraido" ]; then
     printf '\n\e[1;38;5;111m┌─ [2/2] Extracción de Capas y Binarios Nativos ─────────────┐\e[0m\n'
     extraer "$BASE_OFF" "$BASE_LEN" "Arch Linux ARM base (pacman + glibc propia)"
-    extraer "$CAPA_OFF" "$CAPA_LEN" "Capa GPU (Turnip, Zink, Mesa, wlroots, configs)"
+    if [ "$ESCRITORIO_PREVIO" = "sin-entorno" ]; then
+        extraer "$CAPA_OFF" "$CAPA_LEN" "Scripts y utilidades base (sin capa GPU)" \
+            --exclude='usr/local/turnip*' \
+            --exclude='usr/local/mesa-gl*' \
+            --exclude='usr/local/wlroots*' \
+            --exclude='usr/local/sway*' \
+            --exclude='usr/local/lib/libudmabuf-shim.so' \
+            --exclude='opt/gtk2*'
+    else
+        extraer "$CAPA_OFF" "$CAPA_LEN" "Capa GPU (Turnip, Zink, Mesa, wlroots, configs)"
+    fi
     touch "$E/extraido"
     printf '\e[1;38;5;111m└────────────────────────────────────────────────────────────┘\e[0m\n'
 fi

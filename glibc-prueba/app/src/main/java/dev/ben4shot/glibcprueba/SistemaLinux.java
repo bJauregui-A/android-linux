@@ -202,9 +202,11 @@ final class SistemaLinux {
         }
         if (objetivo == null) return false;
         // Si la instancia eliminada está activa en TerminalService, cerrar sus procesos
-        if (TerminalService.tieneSesionActiva() && id.equals(TerminalService.instanciaActivaId())) {
+        if (TerminalService.estaCorriendo(id)) {
             try {
-                c.startService(new Intent(c, TerminalService.class).setAction(TerminalService.CERRAR_SESION));
+                c.startService(new Intent(c, TerminalService.class)
+                        .setAction(TerminalService.CERRAR_INSTANCIA)
+                        .putExtra(TerminalService.EXTRA_INSTANCIA_ID, id));
             } catch (Exception e) {
                 Log.w(TAG, "error al solicitar cierre de sesión", e);
             }
