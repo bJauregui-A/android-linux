@@ -154,7 +154,10 @@ public class TerminalService extends Service implements TerminalSessionClient {
                 "    esac; " +
                 "  fi; " +
                 "done; " +
-                "rm -f " + path + "/tmp/arch-android-display " + path + "/run/user/*/wayland-[1-9]* " + path + "/run/user/*/sway-ipc.*.sock 2>/dev/null"
+                "rm -f " + path + "/tmp/arch-android-display " + path + "/run/user/*/wayland-[1-9]* " + path + "/run/user/*/sway-ipc.*.sock 2>/dev/null; " +
+                "rm -rf " + path + "/dev/shm/.sysv " + path + "/dev/shm/* 2>/dev/null; " +
+                "mkdir -p " + path + "/dev/shm/.sysv 2>/dev/null; " +
+                "chmod 1777 " + path + "/dev/shm " + path + "/dev/shm/.sysv 2>/dev/null"
             };
             Runtime.getRuntime().exec(cmd).waitFor();
         } catch (Exception e) {

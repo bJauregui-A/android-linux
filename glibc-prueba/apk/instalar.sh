@@ -8,7 +8,8 @@ PATH=/system/bin:$PATH
 P=$GLIBC_PREFIX
 E=$P/var/lib/arch-android
 LOG=$P/tmp/instalacion-extraccion.log
-mkdir -p "$P/tmp"
+mkdir -p "$P/tmp" "$P/dev/shm/.sysv" 2>/dev/null || true
+chmod 1777 "$P/dev/shm" "$P/dev/shm/.sysv" 2>/dev/null || true
 
 # Limpiar pantalla y mostrar banner
 printf '\033[2J\033[H'

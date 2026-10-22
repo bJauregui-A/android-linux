@@ -97,6 +97,8 @@ final class CapaSesion {
             relativo = "usr/local/share/arch-android/paquetes-zsh.txt";
         } else if (nombre.equals("apk/instalar-aur.sh")) {
             relativo = "usr/local/bin/instalar-aur";
+        } else if (nombre.equals("android/android-shm-limpiar")) {
+            relativo = "usr/local/bin/android-shm-limpiar";
         } else if (nombre.equals("escritorios/sesion-android")) {
             relativo = "usr/local/bin/sesion-android";
         } else if (nombre.equals("escritorios/autostart-android")) {

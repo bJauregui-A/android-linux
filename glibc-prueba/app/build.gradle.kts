@@ -9,10 +9,11 @@ val packageSessionLayer = tasks.register<Exec>("packageSessionLayer") {
     inputs.file(file("../apk/primer-arranque.sh"))
     inputs.file(file("../apk/paquetes-zsh.txt"))
     inputs.file(file("../apk/instalar-aur.sh"))
+    inputs.file(file("../android/android-shm-limpiar"))
     outputs.file(archive)
     doFirst { archive.parentFile.mkdirs() }
     commandLine("tar", "-czf", archive.absolutePath, "-C", file("..").absolutePath,
-        "escritorios", "apk/primer-arranque.sh", "apk/paquetes-zsh.txt", "apk/instalar-aur.sh")
+        "escritorios", "apk/primer-arranque.sh", "apk/paquetes-zsh.txt", "apk/instalar-aur.sh", "android/android-shm-limpiar")
 }
 
 android {

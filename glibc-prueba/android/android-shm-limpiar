@@ -1,0 +1,101 @@
+#!/usr/bin/python3
+"""Limpia segmentos de memoria compartida y semáforos huérfanos en /dev/shm/.sysv
+de procesos que ya no existen (evita acumulación en disco y desgaste de flash).
+"""
+import os
+import struct
+import sys
+
+MAGIA_SEM = 0x53454D31
+MAGIA_SHM = 0x53484D31
+
+
+def proceso_vivo(pid):
+    if pid <= 1:
+        return False
+    return os.path.exists(f"/proc/{pid}")
+
+
+def limpiar_sysv(dir_sysv="/dev/shm/.sysv"):
+    if not os.path.isdir(dir_sysv):
+        return 0
+
+    borrados = 0
+    archivos = os.listdir(dir_sysv)
+
+    # 1. Limpiar enlaces rotos (shmk.* y semk.*)
+    for nombre in archivos:
+        if nombre.startswith("shmk.") or nombre.startswith("semk."):
+            ruta = os.path.join(dir_sysv, nombre)
+            if os.path.islink(ruta) and not os.path.exists(ruta):
+                try:
+                    os.unlink(ruta)
+                    borrados += 1
+                except OSError:
+                    pass
+
+    # 2. Revisar segmentos shm.<id> y conjuntos sem.<id>
+    for nombre in archivos:
+        if not (nombre.startswith("shm.") or nombre.startswith("sem.")):
+            continue
+        ruta = os.path.join(dir_sysv, nombre)
+        try:
+            st = os.stat(ruta)
+            if st.st_size < 32:
+                continue
+            with open(ruta, "rb") as f:
+                cab = f.read(min(st.st_size, 4096))
+            if len(cab) < 32:
+                continue
+
+            magia = struct.unpack_from("<I", cab, 0)[0]
+            if magia == MAGIA_SHM:
+                # struct cab_shm:
+                # int magia (0), int cerrojo (4), int borrado (8), int pad (12)
+                # struct shmid_ds ds (aprox 112 bytes en aarch64)
+                # struct pegado pegados[64]: { int pid; int n; }
+                borrado = struct.unpack_from("<i", cab, 8)[0]
+                # Buscar todos los PIDs registrados en la cabecera
+                pids_vivos = 0
+                total_pids = 0
+                # Los enteros de 4 bytes a lo largo de la cabecera contienen cpid, lpid y pegados
+                for offset in range(16, len(cab) - 4, 4):
+                    pid = struct.unpack_from("<i", cab, offset)[0]
+                    if 1 < pid < 4194304:
+                        total_pids += 1
+                        if proceso_vivo(pid):
+                            pids_vivos += 1
+                # Si está marcado para borrar (IPC_RMID) o no tiene procesos vivos
+                if pids_vivos == 0:
+                    try:
+                        os.unlink(ruta)
+                        borrados += 1
+                    except OSError:
+                        pass
+
+            elif magia == MAGIA_SEM:
+                # struct cab_sem:
+                # int magia (0), int cerrojo (4), uint turno (8), int borrado (12), int nsems (16)
+                pids_vivos = 0
+                for offset in range(16, len(cab) - 4, 4):
+                    pid = struct.unpack_from("<i", cab, offset)[0]
+                    if 1 < pid < 4194304:
+                        if proceso_vivo(pid):
+                            pids_vivos += 1
+                if pids_vivos == 0:
+                    try:
+                        os.unlink(ruta)
+                        borrados += 1
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+
+    return borrados
+
+
+if __name__ == "__main__":
+    dir_target = sys.argv[1] if len(sys.argv) > 1 else "/dev/shm/.sysv"
+    n = limpiar_sysv(dir_target)
+    if n > 0:
+        print(f"android-shm-limpiar: {n} objetos huérfanos eliminados en {dir_target}")

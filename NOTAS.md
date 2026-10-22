@@ -367,9 +367,20 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
 6. **Compilación y despliegue:**
    - Regenerada `capa.tgz` con `python3 apk/capa.py`, compilada APK `sdk36Debug` e instalada con éxito en el Redmi 15 5G (`adb -s dab6b001 install -r`).
 
-**Siguiente sesión (59ª):**
-1. Probar en el Redmi la creación de una instancia limpia de Sway u otro escritorio (comprobar que pacman instala la base completa y el escritorio inicia con fluidez sin quedarse en negro).
-2. Verificar que al eliminar una instancia desde el selector de la app, su carpeta en `files/instancias/` se elimine completamente del disco.
-3. Compatibilidad con Debian y Ubuntu arm64 (Wayland / adaptador).
-4. Servidor / Compositor X11 Directo (sin Xwayland como intermediario).
+**59ª sesión (2026-10-22, repo + Redmi por USB):**
+1. **Limpieza y reciclaje de `/dev/shm` y `/dev/shm/.sysv` (Punto 3.1):**
+   - En `sesion-android`: al iniciar la sesión gráfica se purga completamente `/dev/shm/.sysv` y `/dev/shm/*` restableciendo permisos `1777`, asegurando que cada escritorio gráfico comience con 0 bytes de residuos en almacenamiento flash (imitando el comportamiento de un tmpfs nativo en Linux). Al salir (`detener_servicios`), vuelve a limpiar los segmentos.
+   - En `TerminalService.java`: `limpiarProcesosInstancia()` ahora purga `/dev/shm/.sysv` y `/dev/shm/*` al cerrar o alternar instancias en segundo plano.
+   - En `apk/instalar.sh`: creación garantizada de `dev/shm/.sysv` con permisos `1777` durante el bootstrap de nuevas instancias.
+   - Creado `android/android-shm-limpiar` (`/usr/local/bin/android-shm-limpiar`): recolector en Python que inspecciona las cabeceras binarias `struct cab_shm` y `struct cab_sem` de `/dev/shm/.sysv/`. Si todos los PIDs registrados (creador, último operador y procesos adheridos en `pegados`) están muertos en `/proc`, o si hay symlinks rotos (`shmk.*`, `semk.*`), los desvincula inmediatamente.
+   - En `autostart-android`: bucle en segundo plano que invoca `android-shm-limpiar` periódicamente (cada 45 s) para recolectar segmentos huérfanos durante la sesión (ej. cierres abruptos de Steam, Wine o clientes X11).
+   - Integrado en `CapaSesion.java`, `app/build.gradle.kts` (`packageSessionLayer`) y `apk/capa.py`. Desplegado en caliente a las instancias existentes en el Redmi (`sway-54452`, `niri-70360`, `cosmic-67805`, `phosh-4056`) sin interrumpir los procesos activos.
+
+**Siguiente sesión (60ª):**
+1. Punto 3.2: glibc 0020 — Emulación de Netlink (`ip a` e `ip r`: bind falso y generación de GETLINK sintético a partir de GETADDR e ioctl).
+2. Punto 3.3: Ejecución de binarios estáticos (cargador de ELF static-pie en espacio de usuario desde `execve`).
+3. Probar en el Redmi la creación de una instancia limpia de Sway u otro escritorio (comprobar que pacman instala la base completa y el escritorio inicia con fluidez sin quedarse en negro).
+4. Verificar que al eliminar una instancia desde el selector de la app, su carpeta en `files/instancias/` se elimine completamente del disco.
+5. Compatibilidad con Debian y Ubuntu arm64 (Wayland / adaptador).
+6. Servidor / Compositor X11 Directo (sin Xwayland como intermediario).
 **Cómo consultar Hyprland desde el PC (sin tocar nada):** guardar un script con `cd files/archlinux; PID=$(ps -A -o PID,ARGS | grep "argv0 Hyprland" | grep -v grep | head -1 | awk '{print $1}'); L=$(awk '/libldp.so/{print $6; exit}' /proc/$PID/maps); SIG=$(ls -t run/user/10331/hypr | head -1); export GLIBC_PREFIX=$PWD GLIBC_LOADER=$L XDG_RUNTIME_DIR=/run/user/10331 HYPRLAND_INSTANCE_SIGNATURE=$SIG; $L $PWD/usr/bin/hyprctl -j monitors all` y correrlo con `adb shell 'run-as dev.ben4shot.glibcprueba.sdk36 sh -s' < script`. Con `adb` siempre `< /dev/null` (si no, `run-as` se queda esperando stdin). No usar `hyprctl output create`: crea salidas extra.

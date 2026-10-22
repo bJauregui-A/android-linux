@@ -166,6 +166,16 @@ if [ -n "$DISPLAY" ] && [ -x /usr/local/bin/steam ] && ! pgrep -x steam >/dev/nu
     if iniciar steam proceso /usr/local/bin/steam; then steam_iniciado=1; fi
 fi
 
+# Limpieza periódica de memoria compartida huérfana en segundo plano.
+if [ -x /usr/local/bin/android-shm-limpiar ]; then
+    (while true; do
+        sleep 45
+        /usr/local/bin/android-shm-limpiar >/dev/null 2>&1 || true
+    done) &
+    pids+=("$!")
+    names+=("shm-limpiar")
+fi
+
 # Seguir vivo aunque esta instalación no tenga servicios opcionales instalados.
 if [ "${#pids[@]}" -eq 0 ]; then
     sleep 86400 &

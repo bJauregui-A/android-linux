@@ -23,6 +23,7 @@ Que el teléfono (Redmi 15 5G, HyperOS, **sin root**) sea a la vez Android y un 
 | AUR (yay / paru) | ✅ `yay v13.0.1` aarch64 binario oficial precompilado en `/usr/local/bin/yay`, evitando bloqueos de `makepkg` por `GLIBC_FAKEROOT=1` |
 | Autenticación PAM / Shadow | ✅ `/usr/bin/zsh` y `/bin/zsh` en `/etc/shells` y `/etc/pam.d/phosh` con `system-auth`, permitiendo desbloqueo por contraseña |
 | Resize con teclado | ✅ botón ⛶ descuenta `altoIme` y `barraTeclas` para adaptar la altura de Wayland en pantalla |
+| Limpieza y reciclaje /dev/shm | ✅ limpieza automática en sesion-android y TerminalService al inicio/cierre, y recolector en caliente android-shm-limpiar en segundo plano (autostart-android cada 45 s) |
 | Hyprland (53ª) | ✅ arranca y se ve (confirmado): `anfitrion.c` responde al `configure` inicial también con `attach(NULL)` (Aquamarine) y reenvía el tamaño a todas las toplevel. Los otros 13 perfiles: re-verificar que se vean (el recorrido de la 52ª solo comprobaba proceso+socket). Contraseña de usuario: la pide ahora el instalador (`--contrasena`); falta probar desbloqueo |
 | Recetas sistema + escritorio | ✅ 14 perfiles de escritorio para Arch ARM64 (`sway`, `hyprland`, `labwc`, `xfce`, `lxqt`, `kde`, `plasma-movil`, `phosh`, `niri`, `cosmic`, `wayfire`, `river`, `qtile`, `weston`), todos instalados y probados en el dispositivo (`ESTADO=probado`) |
 

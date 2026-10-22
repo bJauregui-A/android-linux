@@ -185,6 +185,11 @@ fi
 # Quitar el socket del padre: el nuevo compositor debe conectarse al anfitrión por wayland-0,
 # pero publicará su propio socket en XDG_RUNTIME_DIR. Limpiar restos de compositores anteriores.
 rm -f "$XDG_RUNTIME_DIR/$MARCADOR_PANTALLA" "$XDG_RUNTIME_DIR"/wayland-[1-9]* "$XDG_RUNTIME_DIR"/sway-ipc.*.sock
+
+# Limpiar restos huérfanos de memoria compartida y SysV IPC de sesiones previas
+rm -rf /dev/shm/.sysv /dev/shm/* 2>/dev/null || true
+mkdir -p /dev/shm/.sysv 2>/dev/null || true
+chmod 1777 /dev/shm /dev/shm/.sysv 2>/dev/null || true
 export "$VARIABLE_CONEXION_HOST=$VALOR_CONEXION_HOST"
 # El proveedor reserva el socket de salida para cualquier receta que no lo
 # elija sola. Se evitan también los locks heredados de sesiones anteriores.
@@ -214,6 +219,8 @@ detener_servicios() {
     kill -TERM "$auto" 2>/dev/null
     wait "$auto" 2>/dev/null
     auto=
+    # Limpiar restos de memoria compartida al terminar la sesión
+    rm -rf /dev/shm/.sysv /dev/shm/* 2>/dev/null || true
 }
 
 detener_target_grafico() {

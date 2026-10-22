@@ -51,6 +51,7 @@ ARCHIVOS = [
     ("android/android-abrir", "usr/local/bin/android-abrir", 0o755),
     ("android/xdg-open", "usr/local/bin/xdg-open", 0o755),
     ("android/reajustar-pantalla", "usr/local/bin/reajustar-pantalla", 0o755),
+    ("android/android-shm-limpiar", "usr/local/bin/android-shm-limpiar", 0o755),
     ("android/android-notificaciones", "usr/local/bin/android-notificaciones", 0o755),
     ("android/org.freedesktop.Notifications.service",
      f"{H}/.local/share/dbus-1/services/org.freedesktop.Notifications.service", 0o644),
