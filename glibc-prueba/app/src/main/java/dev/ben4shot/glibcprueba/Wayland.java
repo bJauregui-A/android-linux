@@ -64,6 +64,9 @@ final class Wayland {
     // surface null = la ventana se fue (el último cuadro queda guardado).
     static native void ventana(Surface surface, int ancho, int alto, int mmAncho, int mmAlto);
 
+    // Limpia el fotograma retenido para no dejar residuos visuales al cambiar o cerrar sesión.
+    static native void limpiarPantalla();
+
     // Puntero; coordenadas en píxeles de la vista.
     static native void mover(float x, float y);
 

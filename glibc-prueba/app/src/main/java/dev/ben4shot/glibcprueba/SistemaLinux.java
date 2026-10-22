@@ -1,6 +1,7 @@
 package dev.ben4shot.glibcprueba;
 
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.util.Log;
 
@@ -200,9 +201,27 @@ final class SistemaLinux {
             }
         }
         if (objetivo == null) return false;
+        // Si la instancia eliminada está activa en TerminalService, cerrar sus procesos
+        if (TerminalService.tieneSesionActiva() && id.equals(TerminalService.instanciaActivaId())) {
+            try {
+                c.startService(new Intent(c, TerminalService.class).setAction(TerminalService.CERRAR_SESION));
+            } catch (Exception e) {
+                Log.w(TAG, "error al solicitar cierre de sesión", e);
+            }
+        }
         // Eliminar archivos del entorno en segundo plano para no bloquear el hilo de interfaz (evita ANR)
         File dir = new File(c.getFilesDir(), objetivo.rutaRelativa);
-        new Thread(() -> borrarRecursivo(dir), "borrar-instancia").start();
+        new Thread(() -> {
+            try {
+                borrarRecursivo(dir);
+                if (dir.exists()) {
+                    String[] cmd = new String[]{"/system/bin/sh", "-c", "chmod -R u+w '" + dir.getAbsolutePath() + "' 2>/dev/null; rm -rf '" + dir.getAbsolutePath() + "'"};
+                    Runtime.getRuntime().exec(cmd).waitFor();
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "error al borrar directorio de instancia", e);
+            }
+        }, "borrar-instancia").start();
         lista.remove(objetivo);
         guardarInstancias(c, lista);
         if (id.equals(preferencias(c).getString(PREF_ACTIVA, ""))) {
@@ -217,6 +236,9 @@ final class SistemaLinux {
 
     private static void borrarRecursivo(File f) {
         if (f == null || !f.exists()) return;
+        f.setReadable(true, false);
+        f.setWritable(true, false);
+        f.setExecutable(true, false);
         if (f.isDirectory()) {
             File[] hijos = f.listFiles();
             if (hijos != null) {

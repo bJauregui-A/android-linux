@@ -351,15 +351,20 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
 6. **Compilación y despliegue**:
    - Compilada APK `sdk36Debug` e instalada exitosamente en el Redmi 15 5G (`adb -s dab6b001 install -r`).
 
-**Siguiente sesión (58ª):**
-1. **Compatibilidad con Debian y Ubuntu arm64**:
-   - Aclarado que Debian (Buster/Bookworm/Trixie) y Ubuntu (20.04/22.04/24.04) usan **Wayland por defecto** (GNOME Wayland, Sway, Hyprland, Labwc, Wayfire, Weston disponibles oficialmente en arm64). No están atados a X11.
-   - Crear script de bootstrap (`scripts/bootstrap-debian.py` o descarga/extracción de rootfs arm64 oficial) integrando la glibc propia (`libc.so.6.00NN`) y adaptador de sistema `AdaptadorDebianArm64.java`.
-2. **Servidor / Compositor X11 Directo (sin Xwayland como intermediario)**:
-   - Diseñar e implementar el servidor X11 directo para escritorios puramente X11 (XFCE, Openbox, LXDE):
-     - Opción A: Servidor X11 nativo integrado en la app sobre `ANativeWindow` (estilo DDX de Termux-X11/Lorie o KDrive compilado con NDK), sin capa Wayland.
-     - Opción B: Xwayland rootful anfitrión (servidor X11 puro `DISPLAY=:1` a pantalla completa contra `anfitrion.c`, sin compositor de escritorio Wayland intermedio; el gestor de ventanas X11 toma el root directamente).
-3. **Verificación en el Redmi**:
-   - Probar en vivo el modal de salida/cierre y el botón de la notificación.
-   - Probar desbloqueo con contraseña en Phosh y arranque de Qtile.
+**58ª sesión (2026-10-22, repo + Redmi por USB):**
+1. **Inclusión garantizada de paquetes base de escritorio (`primer-arranque.sh`):**
+   - Corregida omisión en `primer-arranque.sh` donde `PACMAN_A_INSTALAR` solo incluía `$ED/$ESC/paquetes.txt`. Como `escritorios/sway/paquetes.txt` delega en `paquetes-escritorio.txt` (que contiene `base`, `sway`, `mesa`, `libevdev`, etc.), una instalación limpia de Sway quedaba sin paquetes gráficos y fallaba con `libevdev.so.2 not found` (código 127). Se agregó la inclusión incondicional de `paquetes-escritorio.txt`.
+2. **Limpieza de fotograma retenido al cerrar/cambiar sesión (`anfitrion.c`, `Wayland.java`, `TerminalService.java`):**
+   - `anfitrion.c` conservaba `en_pantalla` y lo re-proyectaba si el nuevo compositor no enviaba cuadros nuevos, mostrando imágenes residuales (fotograma congelado de Phosh) cuando un escritorio fallaba al iniciar. Se implementó `Wayland.limpiarPantalla()` que destruye la capa SurfaceControl y anula `en_pantalla` en `cerrarEscritorio()`.
+3. **Borrado efectivo y permisos de directorios de instancias (`SistemaLinux.java`):**
+   - En `SistemaLinux.java`, `borrarRecursivo` ahora fuerza permisos de lectura/escritura/ejecución (`setWritable(true, false)`) y ejecuta `chmod -R u+w && rm -rf` como respaldo para que directorios de solo lectura del rootfs no fallen en silencio. Si la instancia eliminada está activa, se detiene su servicio en `TerminalService`.
+   - Limpiados los directorios huérfanos residuales en `files/instancias/`.
+4. **Compilación y despliegue:**
+   - Regenerada `capa.tgz` con `python3 apk/capa.py`, compilada APK `sdk36Debug` e instalada con éxito en el Redmi 15 5G (`adb -s dab6b001 install -r`).
+
+**Siguiente sesión (59ª):**
+1. Probar en el Redmi la creación de una instancia limpia de Sway u otro escritorio (comprobar que pacman instala la base completa y el escritorio inicia con fluidez sin quedarse en negro).
+2. Verificar que al eliminar una instancia desde el selector de la app, su carpeta en `files/instancias/` se elimine completamente del disco.
+3. Compatibilidad con Debian y Ubuntu arm64 (Wayland / adaptador).
+4. Servidor / Compositor X11 Directo (sin Xwayland como intermediario).
 **Cómo consultar Hyprland desde el PC (sin tocar nada):** guardar un script con `cd files/archlinux; PID=$(ps -A -o PID,ARGS | grep "argv0 Hyprland" | grep -v grep | head -1 | awk '{print $1}'); L=$(awk '/libldp.so/{print $6; exit}' /proc/$PID/maps); SIG=$(ls -t run/user/10331/hypr | head -1); export GLIBC_PREFIX=$PWD GLIBC_LOADER=$L XDG_RUNTIME_DIR=/run/user/10331 HYPRLAND_INSTANCE_SIGNATURE=$SIG; $L $PWD/usr/bin/hyprctl -j monitors all` y correrlo con `adb shell 'run-as dev.ben4shot.glibcprueba.sdk36 sh -s' < script`. Con `adb` siempre `< /dev/null` (si no, `run-as` se queda esperando stdin). No usar `hyprctl output create`: crea salidas extra.

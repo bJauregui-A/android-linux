@@ -2456,6 +2456,23 @@ Java_dev_ben4shot_glibcprueba_Wayland_ventana (JNIEnv *env, jclass cls, jobject 
 }
 
 JNIEXPORT void JNICALL
+Java_dev_ben4shot_glibcprueba_Wayland_limpiarPantalla (JNIEnv *env, jclass cls)
+{
+  pthread_mutex_lock (&mtx);
+  if (capa != NULL)
+    {
+      ASurfaceTransaction *tr = ASurfaceTransaction_create ();
+      ASurfaceTransaction_reparent (tr, capa, NULL);
+      ASurfaceTransaction_apply (tr);
+      ASurfaceTransaction_delete (tr);
+      ASurfaceControl_release (capa);
+      capa = NULL;
+    }
+  en_pantalla = NULL;
+  pthread_mutex_unlock (&mtx);
+}
+
+JNIEXPORT void JNICALL
 Java_dev_ben4shot_glibcprueba_Wayland_mover (JNIEnv *env, jclass cls, jfloat x, jfloat y)
 {
   encolar ((struct evento) { .tipo = EV_MOVER, .x = x, .y = y });

@@ -469,7 +469,17 @@ elegido() { grep -qx "$1" $E/opcionales; }
 grupos="escritorio $(tr '\n' ' ' < $E/opcionales)"
 
 # Recoger paquetes específicos para pacman y para AUR
-PACMAN_A_INSTALAR=($(sed 's/#.*//' $ED/$ESC/paquetes.txt))
+PACMAN_A_INSTALAR=()
+# Base mínima de escritorio (gráficos, compositor, utilidades esenciales)
+if [ -f "$D/paquetes-escritorio.txt" ]; then
+    PACMAN_A_INSTALAR+=($(sed 's/#.*//' "$D/paquetes-escritorio.txt"))
+elif [ -f "$(dirname "$0")/paquetes-escritorio.txt" ]; then
+    PACMAN_A_INSTALAR+=($(sed 's/#.*//' "$(dirname "$0")/paquetes-escritorio.txt"))
+fi
+# Paquetes específicos del entorno seleccionado
+if [ -f "$ED/$ESC/paquetes.txt" ]; then
+    PACMAN_A_INSTALAR+=($(sed 's/#.*//' "$ED/$ESC/paquetes.txt"))
+fi
 AUR_A_INSTALAR=()
 
 for i in "${!GRUPOS[@]}"; do

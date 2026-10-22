@@ -117,6 +117,9 @@ public class TerminalService extends Service implements TerminalSessionClient {
     }
 
     synchronized void cerrarEscritorio() {
+        try {
+            Wayland.limpiarPantalla();
+        } catch (Throwable ignorada) { }
         if (escritorio != null) {
             try {
                 escritorio.destroyForcibly();
