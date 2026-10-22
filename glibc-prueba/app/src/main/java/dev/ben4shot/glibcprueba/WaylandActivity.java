@@ -29,11 +29,17 @@ import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
+import android.text.SpannableStringBuilder;
+import android.text.Spanned;
+import android.text.style.ForegroundColorSpan;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
+import java.io.File;
+import java.nio.file.Files;
 import java.text.Normalizer;
 import java.util.HashSet;
 import java.util.List;
@@ -213,6 +219,12 @@ public class WaylandActivity extends Activity {
         FrameLayout.LayoutParams paramsControles = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT);
         raiz.addView(contenedorControles, paramsControles);
+
+        overlayArranque = crearOverlayArranque();
+        FrameLayout.LayoutParams paramsOverlay = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT);
+        raiz.addView(overlayArranque, paramsOverlay);
+        iniciarMonitoreoArranque();
 
         raiz.setOnApplyWindowInsetsListener((v, insets) -> {
             android.graphics.Insets ime = insets.getInsets(WindowInsets.Type.ime());
@@ -718,6 +730,196 @@ public class WaylandActivity extends Activity {
             case "↑": pulsar(103); return;
             case "→": pulsar(106); return;
         }
+    }
+
+    private View overlayArranque;
+    private TextView textoBootLog;
+    private LinearLayout panelRescate;
+    private ScrollView scrollBootLog;
+    private TextView tituloArranque;
+    private int lineasLeidasBoot = 0;
+    private boolean arranqueFinalizado = false;
+    private final Handler handlerBoot = new Handler(Looper.getMainLooper());
+    private final Runnable comprobadorArranque = new Runnable() {
+        @Override
+        public void run() {
+            if (isFinishing() || isDestroyed()) return;
+            actualizarEstadoArranque();
+            if (!arranqueFinalizado) {
+                handlerBoot.postDelayed(this, 150);
+            }
+        }
+    };
+
+    private View crearOverlayArranque() {
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setBackgroundColor(0xff0b0f14);
+        layout.setPadding(dp(20), dp(36), dp(20), dp(20));
+
+        SistemaLinux.Instancia inst = SistemaLinux.instancia(this, instanciaId);
+        String nombreInst = inst != null ? inst.nombre : (instanciaId != null ? instanciaId : "arch-principal");
+        tituloArranque = new TextView(this);
+        tituloArranque.setText("❯ INICIANDO ENTORNO: [" + nombreInst + "]");
+        tituloArranque.setTextColor(0xff58a6ff);
+        tituloArranque.setTextSize(14);
+        tituloArranque.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        layout.addView(tituloArranque);
+
+        TextView sub = new TextView(this);
+        sub.setText("Comprobando servicios y servidor gráfico Wayland...");
+        sub.setTextColor(0xff8b949e);
+        sub.setTextSize(11);
+        sub.setTypeface(Typeface.MONOSPACE);
+        LinearLayout.LayoutParams lpSub = new LinearLayout.LayoutParams(-1, -2);
+        lpSub.topMargin = dp(4);
+        lpSub.bottomMargin = dp(14);
+        layout.addView(sub, lpSub);
+
+        scrollBootLog = new ScrollView(this);
+        scrollBootLog.setFillViewport(true);
+        textoBootLog = new TextView(this);
+        textoBootLog.setTextColor(0xffe6edf3);
+        textoBootLog.setTextSize(11);
+        textoBootLog.setTypeface(Typeface.MONOSPACE);
+        textoBootLog.setLineSpacing(dp(2), 1.0f);
+        scrollBootLog.addView(textoBootLog, new FrameLayout.LayoutParams(-1, -2));
+
+        LinearLayout.LayoutParams lpScroll = new LinearLayout.LayoutParams(-1, 0, 1.0f);
+        layout.addView(scrollBootLog, lpScroll);
+
+        panelRescate = new LinearLayout(this);
+        panelRescate.setOrientation(LinearLayout.VERTICAL);
+        panelRescate.setVisibility(View.GONE);
+        panelRescate.setPadding(0, dp(12), 0, 0);
+
+        TextView errAviso = new TextView(this);
+        errAviso.setText("✖ El entorno no pudo iniciar. Puedes entrar a la consola para repararlo:");
+        errAviso.setTextColor(0xffff7b72);
+        errAviso.setTextSize(12);
+        errAviso.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        panelRescate.addView(errAviso);
+
+        LinearLayout botones = new LinearLayout(this);
+        botones.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams lpBotones = new LinearLayout.LayoutParams(-1, -2);
+        lpBotones.topMargin = dp(10);
+        botones.setLayoutParams(lpBotones);
+
+        TextView btnConsola = new TextView(this);
+        btnConsola.setText("❯ CONSOLA DE RESCATE [" + nombreInst + "]");
+        btnConsola.setTextColor(0xff00e676);
+        btnConsola.setTextSize(12);
+        btnConsola.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        btnConsola.setBackground(crearFondo(0xff16202c, 0xff00e676, dp(6), dp(1)));
+        btnConsola.setPadding(dp(14), dp(8), dp(14), dp(8));
+        btnConsola.setClickable(true);
+        btnConsola.setOnClickListener(v -> {
+            Intent i = new Intent(WaylandActivity.this, TerminalActivity.class);
+            i.putExtra(TerminalService.EXTRA_INSTANCIA_ID, instanciaId);
+            startActivity(i);
+            finish();
+        });
+        botones.addView(btnConsola);
+
+        View sep = new View(this);
+        sep.setLayoutParams(new LinearLayout.LayoutParams(dp(10), 1));
+        botones.addView(sep);
+
+        TextView btnVolver = new TextView(this);
+        btnVolver.setText("✕ VOLVER");
+        btnVolver.setTextColor(0xff8b949e);
+        btnVolver.setTextSize(12);
+        btnVolver.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        btnVolver.setBackground(crearFondo(0xff16202c, 0xff30363d, dp(6), dp(1)));
+        btnVolver.setPadding(dp(14), dp(8), dp(14), dp(8));
+        btnVolver.setClickable(true);
+        btnVolver.setOnClickListener(v -> volverAlInicio());
+        botones.addView(btnVolver);
+
+        panelRescate.addView(botones);
+        layout.addView(panelRescate);
+
+        return layout;
+    }
+
+    private void iniciarMonitoreoArranque() {
+        arranqueFinalizado = false;
+        lineasLeidasBoot = 0;
+        handlerBoot.removeCallbacks(comprobadorArranque);
+        handlerBoot.post(comprobadorArranque);
+    }
+
+    private void actualizarEstadoArranque() {
+        File raizInstancia = SistemaLinux.raiz(this, instanciaId);
+        File dirRun = new File(raizInstancia, Wayland.runtimeDir().substring(1));
+        File fBoot = new File(dirRun, "linux-session-boot.log");
+        File fEstado = new File(dirRun, "linux-session.estado");
+
+        if (fBoot.exists()) {
+            try {
+                List<String> lineas = Files.readAllLines(fBoot.toPath());
+                if (lineas.size() > lineasLeidasBoot) {
+                    SpannableStringBuilder sb = new SpannableStringBuilder();
+                    for (int i = 0; i < lineas.size(); i++) {
+                        String l = lineas.get(i);
+                        l = l.replaceAll("\u001B\\[[;\\d]*m", "");
+                        int inicioLinea = sb.length();
+                        sb.append(l).append("\n");
+
+                        if (l.contains("[  OK  ]")) {
+                            int idx = l.indexOf("[  OK  ]");
+                            sb.setSpan(new ForegroundColorSpan(0xff00e676), inicioLinea + idx, inicioLinea + idx + 8, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                        } else if (l.contains("[FAILED]")) {
+                            int idx = l.indexOf("[FAILED]");
+                            sb.setSpan(new ForegroundColorSpan(0xffff5252), inicioLinea + idx, inicioLinea + idx + 8, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                        } else if (l.contains("[ INFO ]")) {
+                            int idx = l.indexOf("[ INFO ]");
+                            sb.setSpan(new ForegroundColorSpan(0xff40c4ff), inicioLinea + idx, inicioLinea + idx + 8, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                        }
+                    }
+                    textoBootLog.setText(sb);
+                    lineasLeidasBoot = lineas.size();
+                    if (scrollBootLog != null) {
+                        scrollBootLog.post(() -> scrollBootLog.fullScroll(View.FOCUS_DOWN));
+                    }
+                }
+            } catch (Exception ignored) { }
+        }
+
+        if (fEstado.exists()) {
+            try {
+                String estado = Files.readString(fEstado.toPath()).trim();
+                if (estado.startsWith("LISTO:")) {
+                    arranqueFinalizado = true;
+                    if (overlayArranque != null && overlayArranque.getVisibility() == View.VISIBLE) {
+                        textoBootLog.append("\n[  OK  ] Sesión gráfica lista. Conectando pantalla...");
+                        overlayArranque.animate()
+                                .alpha(0f)
+                                .setDuration(350)
+                                .withEndAction(() -> overlayArranque.setVisibility(View.GONE));
+                    }
+                } else if (estado.startsWith("FALLO:")) {
+                    arranqueFinalizado = true;
+                    if (tituloArranque != null) {
+                        tituloArranque.setText("✖ ERROR AL INICIAR ENTORNO");
+                        tituloArranque.setTextColor(0xffff5252);
+                    }
+                    if (panelRescate != null) {
+                        panelRescate.setVisibility(View.VISIBLE);
+                    }
+                    if (scrollBootLog != null) {
+                        scrollBootLog.post(() -> scrollBootLog.fullScroll(View.FOCUS_DOWN));
+                    }
+                }
+            } catch (Exception ignored) { }
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        handlerBoot.removeCallbacks(comprobadorArranque);
+        super.onDestroy();
     }
 
     private void volverAlInicio() {

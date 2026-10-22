@@ -60,6 +60,7 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
 
     private LinearLayout contenedorInstancias;
     private FrameLayout overlayConsola;
+    private TextView titOverlay;
     private TerminalView vistaTerminal;
     private TerminalSession sesionConsola;
     private int tamLetra;
@@ -167,7 +168,7 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         cabeceraOverlay.setPadding(dp(14), dp(10), dp(12), dp(10));
         cabeceraOverlay.setBackgroundColor(0xff121924);
 
-        TextView titOverlay = texto("❯ CONSOLA REAL (files/)", 12, true, ACCENTO_VERDE);
+        titOverlay = texto("❯ CONSOLA", 12, true, ACCENTO_VERDE);
         cabeceraOverlay.addView(titOverlay, new LinearLayout.LayoutParams(0, -2, 1.0f));
 
         TextView btnCerrarOverlay = crearBotonChip("✕ CERRAR", ACCENTO_ROJO, () -> mostrarOverlayConsola(false));
@@ -276,18 +277,50 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
     }
 
     private void iniciarConsola() {
-        File filesDir = getFilesDir();
-        String cwd = filesDir.getAbsolutePath();
-        String[] env = new String[]{
-                "PATH=/system/bin:/system/xbin",
-                "HOME=" + cwd,
-                "TERM=xterm-256color",
-                "TMPDIR=" + getCacheDir().getAbsolutePath(),
-                "ANDROID_DATA=" + System.getenv("ANDROID_DATA"),
-                "ANDROID_ROOT=" + System.getenv("ANDROID_ROOT")
-        };
-        String[] args = new String[]{"sh", "-i"};
-        sesionConsola = new TerminalSession("/system/bin/sh", cwd, args, env, 5000, this);
+        if (sesionConsola != null && sesionConsola.isRunning()) {
+            sesionConsola.finishIfRunning();
+        }
+        String instId = SistemaLinux.seleccionado(this);
+        if (instId == null) instId = "arch-principal";
+        SistemaLinux.Instancia inst = SistemaLinux.instancia(this, instId);
+        String nombreInst = inst != null ? inst.nombre : instId;
+        if (titOverlay != null) {
+            titOverlay.setText("❯ CONSOLA: [" + nombreInst + "]");
+        }
+
+        AdaptadorInstalacion adaptador = SistemaLinux.adaptador(this, instId);
+        File prefijo = adaptador.raiz(this);
+        File binBash = new File(prefijo, "usr/bin/bash");
+        File binZsh = new File(prefijo, "usr/bin/zsh");
+
+        if (adaptador.instalada(this) && (binZsh.exists() || binBash.exists())) {
+            String cargador = adaptador.cargador(this);
+            String homeRel = adaptador.home(prefijo);
+            File homeDir = new File(prefijo, homeRel);
+            String shell = binZsh.exists() ? "/usr/bin/zsh" : "/usr/bin/bash";
+            List<String> envList = new ArrayList<>();
+            envList.add("PATH=/usr/local/bin:/usr/bin:/bin:/system/bin");
+            envList.add("HOME=" + homeDir.getAbsolutePath());
+            envList.add("USER=" + adaptador.usuario(prefijo));
+            envList.add("SHELL=" + shell);
+            envList.add("TERM=xterm-256color");
+            envList.add("GLIBC_PREFIX=" + prefijo.getAbsolutePath());
+            envList.add("TMPDIR=/tmp");
+            String[] args = new String[]{shell, "-i"};
+            sesionConsola = new TerminalSession(cargador, homeDir.getAbsolutePath(), args, envList.toArray(new String[0]), 5000, this);
+        } else {
+            String cwd = prefijo.exists() ? prefijo.getAbsolutePath() : getFilesDir().getAbsolutePath();
+            String[] env = new String[]{
+                    "PATH=/system/bin:/system/xbin",
+                    "HOME=" + cwd,
+                    "TERM=xterm-256color",
+                    "TMPDIR=" + getCacheDir().getAbsolutePath(),
+                    "ANDROID_DATA=" + System.getenv("ANDROID_DATA"),
+                    "ANDROID_ROOT=" + System.getenv("ANDROID_ROOT")
+            };
+            String[] args = new String[]{"sh", "-i"};
+            sesionConsola = new TerminalSession("/system/bin/sh", cwd, args, env, 5000, this);
+        }
         vistaTerminal.attachSession(sesionConsola);
         vistaTerminal.onScreenUpdated();
     }
@@ -509,6 +542,7 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
             if (!activa) {
                 SistemaLinux.seleccionarInstancia(this, inst.id);
                 actualizarLista();
+                iniciarConsola();
             } else {
                 activarYEjecutar(inst.id, !esSinEntorno);
             }

@@ -34,6 +34,10 @@ steam_iniciado=
 cerrando=
 log_dir=/tmp/linux-session-services
 mkdir -p "$log_dir"
+boot_file="$XDG_RUNTIME_DIR/linux-session-boot.log"
+boot_ok() { printf '\e[1;32m[  OK  ]\e[0m %s\n' "$*" >> "$boot_file"; }
+boot_fail() { printf '\e[1;31m[FAILED]\e[0m %s\n' "$*" >> "$boot_file"; }
+
 registro() { printf '%s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$*" >> /tmp/autostart-android.log; }
 
 iniciar() {
@@ -58,10 +62,12 @@ iniciar() {
     done
     if [ -n "$listo" ]; then
         registro "$nombre READY check=$espera pid=$pid"
+        boot_ok "Started service '$nombre'."
         unset listo
         return 0
     fi
     registro "$nombre FAILED check=$espera pid=$pid log=$log"
+    boot_fail "Failed to start service '$nombre' ($espera check failed)."
     kill -TERM "$pid" 2>/dev/null
     wait "$pid" 2>/dev/null
     unset 'pids[-1]' 'names[-1]' listo

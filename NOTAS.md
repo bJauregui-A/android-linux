@@ -531,7 +531,20 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
    - Eliminados para el usuario 0 vía ADB: `com.mi.appfinder` (GetApps, ~133 MB), `com.google.android.videos` (Google TV, ~100 MB), `com.miui.daemon` (telemetría, ~68 MB), `com.milink.service` + `com.xiaomi.mi_connect_service` (~122 MB), `com.miui.miwallpaper` (~62 MB) y `com.google.android.googlequicksearchbox` (~290 MB en 3 procesos).
    - Lista actualizada en [debloat/eliminados.txt](file:///media/ben4shot/E/Develop/Android/debloat/eliminados.txt). Total liberado de RAM física y servicios en segundo plano: ~750 MB. Reversible con `debloat/restaurar.sh`.
 
-**Siguiente sesión (66ª):**
+**66ª sesión (2026-10-22, repo + Redmi por USB):**
+1. **Visualizador de arranque estilo PC y Detección de fallos:**
+   - En [sesion-android](file:///media/ben4shot/E/Develop/Android/glibc-prueba/escritorios/sesion-android) y [autostart-android](file:///media/ben4shot/E/Develop/Android/glibc-prueba/escritorios/autostart-android): integrado registro de arranque estructurado en `$XDG_RUNTIME_DIR/linux-session-boot.log` con etiquetas estándar `[  OK  ]`, `[FAILED]` e `[ INFO ]` para cada servicio (D-Bus, Wayland compositor, SSH, PipeWire, WirePlumber, PulseAudio, watchers de portapapeles).
+   - En [WaylandActivity.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/WaylandActivity.java): añadido overlay de boot interactivo con estética de terminal Linux (`#0b0f14`, tipografía monospace, resaltado en verde/rojo).
+     - Si el arranque es exitoso (`LISTO:...`), realiza un desvanecimiento suave (fade out) de 350 ms hacia el escritorio Wayland.
+     - Si ocurre un fallo (`FALLO:...` o muerte del compositor), detiene el arranque, resalta el error en rojo y despliega los botones `[ ❯ CONSOLA DE RESCATE: <instancia> ]` y `[ ✕ VOLVER ]`.
+2. **Consola contextualizada por instancia para reparaciones con `pacman`:**
+   - En [WaylandActivity.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/WaylandActivity.java): el botón de rescate lanza `TerminalActivity` vinculado estrictamente a la instancia afectada (`EXTRA_INSTANCIA_ID`), permitiendo reparar configuraciones o reinstalar paquetes en su propio `/var/lib/pacman/` sin contaminar otras instancias.
+   - En [SistemaActivity.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/SistemaActivity.java): la consola inferior ahora detecta la instancia seleccionada (`SistemaLinux.seleccionado`) y lanza el shell interactivo (`zsh`/`bash`) con su propio cargador glibc, prefijo y herramientas nativas, actualizando la cabecera dinámica `❯ CONSOLA: [<instancia>]`.
+3. **Despliegue y verificación:**
+   - Paquete de sesión regenerado automáticamente por Gradle (`packageSessionLayer`).
+   - APK `sdk36Debug` compilada e instalada en el Redmi 15 5G con `adb install -r` (Success, datos conservados).
+
+**Siguiente sesión (67ª):**
 1. **Configuración de proxy en puerto 22 real de Wi-Fi:**
    - Implementar y poner a prueba el script o daemon en espacio `shell` (UID 2000, con `CAP_NET_BIND_SERVICE`) vía `adb-conectar` para escuchar en `0.0.0.0:22` y redirigir el tráfico SSH directamente a la instancia seleccionada o configurada en la UI de Red.
 2. **Pruebas avanzadas de la subred virtual y reenvío de puertos:**

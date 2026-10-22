@@ -167,6 +167,16 @@ bus_tmp="$bus_file.$$"
 printf '%s\n' "$DBUS_SESSION_BUS_ADDRESS" > "$bus_tmp" && mv -f "$bus_tmp" "$bus_file"
 pid_file="$XDG_RUNTIME_DIR/linux-session.pid"
 estado_file="$XDG_RUNTIME_DIR/linux-session.estado"
+boot_file="$XDG_RUNTIME_DIR/linux-session-boot.log"
+: > "$boot_file"
+
+boot_ok() { printf '\e[1;32m[  OK  ]\e[0m %s\n' "$*" >> "$boot_file"; }
+boot_fail() { printf '\e[1;31m[FAILED]\e[0m %s\n' "$*" >> "$boot_file"; }
+boot_info() { printf '\e[1;34m[ INFO ]\e[0m %s\n' "$*" >> "$boot_file"; }
+
+boot_ok "Started D-Bus Session Message Bus."
+boot_ok "Set up runtime environment and task affinity (cores 0-7)."
+
 printf '%s\n' "$$" > "$pid_file"
 printf 'INICIANDO:%s\n' "$id" > "$estado_file"
 
@@ -208,6 +218,7 @@ anteriores=" $(for s in "$XDG_RUNTIME_DIR"/wayland-*; do
     printf '%s:%s ' "${s##*/}" "$(stat -c %i "$s" 2>/dev/null)"
 done) "
 inicio=$SECONDS
+boot_info "Starting graphical environment '$id' using provider '$proveedor'..."
 # Cada compositor tiene su grupo de procesos. DEs como Plasma arrancan muchos hijos y
 # dbus-run-session puede envolverlos; terminar solo el PID del wrapper deja procesos huérfanos.
 setsid /usr/bin/bash "$D/$id/sesion" > "/tmp/$id.log" 2>&1 &
@@ -337,11 +348,15 @@ if [ -s "$XDG_RUNTIME_DIR/$MARCADOR_PANTALLA" ]; then
         fi
     fi
     # Los servicios comparten este bus y el ciclo de vida del supervisor, no el del WM.
+    boot_ok "Wayland compositor ready on display '$endpoint'."
+    boot_ok "Reached target Graphical Interface ($id)."
     printf 'LISTO:%s:%s\n' "$id" "$endpoint" > "$estado_file"
     autostart-android --esperar > /tmp/autostart-android.log 2>&1 &
     auto=$!
 else
     sin_socket=1
+    boot_fail "Provider $proveedor did not reach readiness ($COMPROBACION_READY) in ${TIEMPO_READY}s for $id."
+    boot_info "Check '/tmp/$id.log' for error details."
     printf 'FALLO:%s:sin-socket\n' "$id" > "$estado_file"
     echo "el proveedor $proveedor no alcanzó readiness ($COMPROBACION_READY) en ${TIEMPO_READY}s para $id" >> "/tmp/$id.log"
     kill -TERM -- "-$hijo" 2>/dev/null
