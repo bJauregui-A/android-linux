@@ -193,6 +193,8 @@ public class WaylandActivity extends Activity {
 
         FrameLayout raiz = new FrameLayout(this);
         raiz.setBackgroundColor(Color.BLACK);
+        raiz.setClipChildren(false);
+        raiz.setClipToPadding(false);
         raiz.addView(vista, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
