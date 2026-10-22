@@ -360,7 +360,7 @@ public class WaylandActivity extends Activity {
         contenedor.setClipChildren(false);
         contenedor.setClipToPadding(false);
 
-        // 1. Botón flotante discreto (FAB) para reabrir la barra cuando está minimizada
+        // 1. Botón flotante discreto (FAB) para reabrir la barra cuando está minimizada (arrastrable)
         TextView fab = new TextView(this);
         fab.setText("⌨");
         fab.setTextSize(18);
@@ -368,22 +368,68 @@ public class WaylandActivity extends Activity {
         fab.setGravity(Gravity.CENTER);
         fab.setBackground(crearFondo(0xbb0f172a, 0x6638bdf8, dp(20), dp(1)));
         fab.setElevation(dp(6));
-        fab.setClickable(true);
         FrameLayout.LayoutParams lpFab = new FrameLayout.LayoutParams(dp(40), dp(40));
         lpFab.gravity = Gravity.BOTTOM | Gravity.END;
         lpFab.rightMargin = dp(16);
         lpFab.bottomMargin = dp(16);
         fab.setLayoutParams(lpFab);
         fab.setVisibility(View.GONE);
-        fab.setOnClickListener(v -> mostrarBarra(true));
+
+        View.OnTouchListener arrastreFab = new View.OnTouchListener() {
+            private float dX, dY, startX, startY;
+            private boolean moviendo;
+
+            @Override
+            public boolean onTouch(View v, MotionEvent e) {
+                switch (e.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        startX = e.getRawX();
+                        startY = e.getRawY();
+                        dX = fab.getTranslationX() - e.getRawX();
+                        dY = fab.getTranslationY() - e.getRawY();
+                        moviendo = false;
+                        return true;
+
+                    case MotionEvent.ACTION_MOVE:
+                        float diff = (float) Math.hypot(e.getRawX() - startX, e.getRawY() - startY);
+                        if (!moviendo && diff > dp(6)) {
+                            moviendo = true;
+                        }
+                        if (moviendo) {
+                            float nx = e.getRawX() + dX;
+                            float ny = e.getRawY() + dY;
+                            View p = (View) fab.getParent();
+                            if (p != null) {
+                                float minX = -(p.getWidth() - fab.getWidth() - dp(16));
+                                nx = Math.max(minX, Math.min(0, nx));
+                                float maxArriba = -(p.getHeight() - fab.getHeight() - dp(24));
+                                ny = Math.max(maxArriba, Math.min(0, ny));
+                            }
+                            fab.setTranslationX(nx);
+                            fab.setTranslationY(ny);
+                        }
+                        return true;
+
+                    case MotionEvent.ACTION_UP:
+                        if (!moviendo) {
+                            mostrarBarra(true);
+                        }
+                        return true;
+                }
+                return false;
+            }
+        };
+        fab.setOnTouchListener(arrastreFab);
         botonAlternar = fab;
         contenedor.addView(fab);
 
-        // 2. Barra flotante tipo "Pill"
-        FrameLayout marcoBarra = new FrameLayout(this);
+        // 2. Barra flotante tipo "Pill" (arrastrable)
+        LinearLayout marcoBarra = new LinearLayout(this);
+        marcoBarra.setOrientation(LinearLayout.HORIZONTAL);
+        marcoBarra.setGravity(Gravity.CENTER_VERTICAL);
         marcoBarra.setBackground(crearFondo(0xee0f172a, 0x4438bdf8, dp(16), dp(1)));
         marcoBarra.setElevation(dp(8));
-        marcoBarra.setPadding(dp(6), dp(5), dp(6), dp(5));
+        marcoBarra.setPadding(dp(5), dp(4), dp(5), dp(4));
         FrameLayout.LayoutParams lpMarco = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
         lpMarco.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
@@ -392,6 +438,20 @@ public class WaylandActivity extends Activity {
         lpMarco.rightMargin = dp(10);
         marcoBarra.setLayoutParams(lpMarco);
 
+        // Manija de arrastre a la izquierda
+        TextView handle = new TextView(this);
+        handle.setText("⠿");
+        handle.setTextSize(14);
+        handle.setTextColor(0xff94a3b8);
+        handle.setGravity(Gravity.CENTER);
+        handle.setPadding(dp(8), dp(7), dp(8), dp(7));
+        handle.setBackground(crearFondo(0xff16202c, 0x22ffffff, dp(8), dp(1)));
+        LinearLayout.LayoutParams lpH = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lpH.rightMargin = dp(4);
+        marcoBarra.addView(handle, lpH);
+
+        // Centro: Scroll horizontal con las teclas
         HorizontalScrollView scroll = new HorizontalScrollView(this);
         scroll.setFillViewport(false);
         scroll.setHorizontalScrollBarEnabled(false);
@@ -401,7 +461,7 @@ public class WaylandActivity extends Activity {
         fila.setOrientation(LinearLayout.HORIZONTAL);
         fila.setGravity(Gravity.CENTER_VERTICAL);
 
-        String[] teclas = {"⌨", "⛶", "ESC", "TAB", "CTRL", "ALT", "SUPER", "←", "↓", "↑", "→", "SALIR", "▼"};
+        String[] teclas = {"⌨", "⛶", "ESC", "TAB", "CTRL", "ALT", "SUPER", "←", "↓", "↑", "→", "SALIR"};
         for (String t : teclas) {
             TextView b = new TextView(this);
             b.setText(t);
@@ -414,9 +474,6 @@ public class WaylandActivity extends Activity {
             if (t.equals("SALIR")) {
                 b.setTextColor(0xffff6b6b);
                 b.setBackground(crearFondo(0xff2a1616, 0x66ff6b6b, dp(8), dp(1)));
-            } else if (t.equals("▼")) {
-                b.setTextColor(0xff94a3b8);
-                b.setBackground(crearFondo(0xff16202c, 0x33ffffff, dp(8), dp(1)));
             } else {
                 b.setTextColor(0xfff8fafc);
                 b.setBackground(crearFondo(0xff1e293b, 0x22ffffff, dp(8), dp(1)));
@@ -435,7 +492,72 @@ public class WaylandActivity extends Activity {
         }
 
         scroll.addView(fila, new FrameLayout.LayoutParams(-2, -2));
-        marcoBarra.addView(scroll, new FrameLayout.LayoutParams(-2, -2));
+        LinearLayout.LayoutParams lpScroll = new LinearLayout.LayoutParams(0, -2, 1.0f);
+        lpScroll.rightMargin = dp(4);
+        marcoBarra.addView(scroll, lpScroll);
+
+        // Botón minimizar SIEMPRE fijo a la derecha fuera del scroll
+        TextView btnMin = new TextView(this);
+        btnMin.setText("▼");
+        btnMin.setSingleLine(true);
+        btnMin.setGravity(Gravity.CENTER);
+        btnMin.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        btnMin.setTextSize(12);
+        btnMin.setPadding(dp(11), dp(7), dp(11), dp(7));
+        btnMin.setTextColor(0xff94a3b8);
+        btnMin.setBackground(crearFondo(0xff16202c, 0x33ffffff, dp(8), dp(1)));
+        btnMin.setOnClickListener(v -> mostrarBarra(false));
+        LinearLayout.LayoutParams lpMin = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        marcoBarra.addView(btnMin, lpMin);
+
+        // Arrastre para mover la barra flotante a cualquier posición vertical/horizontal
+        View.OnTouchListener arrastreBarra = new View.OnTouchListener() {
+            private float dX, dY, startX, startY;
+            private boolean moviendo;
+
+            @Override
+            public boolean onTouch(View v, MotionEvent e) {
+                switch (e.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        startX = e.getRawX();
+                        startY = e.getRawY();
+                        dX = marcoBarra.getTranslationX() - e.getRawX();
+                        dY = marcoBarra.getTranslationY() - e.getRawY();
+                        moviendo = false;
+                        return true;
+
+                    case MotionEvent.ACTION_MOVE:
+                        float diff = (float) Math.hypot(e.getRawX() - startX, e.getRawY() - startY);
+                        if (!moviendo && diff > dp(5)) {
+                            moviendo = true;
+                        }
+                        if (moviendo) {
+                            float nx = e.getRawX() + dX;
+                            float ny = e.getRawY() + dY;
+                            View p = (View) marcoBarra.getParent();
+                            if (p != null) {
+                                float maxDer = (p.getWidth() - marcoBarra.getWidth()) / 2.0f;
+                                float maxIzq = -maxDer;
+                                nx = Math.max(maxIzq, Math.min(maxDer, nx));
+                                float maxAbajo = 0;
+                                float maxArriba = -(p.getHeight() - marcoBarra.getHeight() - dp(24));
+                                ny = Math.max(maxArriba, Math.min(maxAbajo, ny));
+                            }
+                            marcoBarra.setTranslationX(nx);
+                            marcoBarra.setTranslationY(ny);
+                        }
+                        return true;
+
+                    case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL:
+                        return moviendo;
+                }
+                return false;
+            }
+        };
+        handle.setOnTouchListener(arrastreBarra);
+
         barraTeclas = marcoBarra;
         contenedor.addView(marcoBarra);
 
@@ -460,9 +582,6 @@ public class WaylandActivity extends Activity {
                 return;
             case "SALIR":
                 mostrarMenuSalida();
-                return;
-            case "▼":
-                mostrarBarra(false);
                 return;
             case "CTRL": ctrl = !ctrl; Wayland.tecla(CTRL, ctrl); marcar(); return;
             case "ALT": alt = !alt; Wayland.tecla(ALT, alt); marcar(); return;
@@ -507,8 +626,8 @@ public class WaylandActivity extends Activity {
             int alto = altoPadre;
             FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) vista.getLayoutParams();
             if (altoIme > 0) {
-                int barraH = (barraTeclas != null && barraTeclas.getVisibility() == View.VISIBLE) ? barraTeclas.getHeight() : 0;
-                alto = Math.max(200, altoPadre - altoIme - barraH);
+                // Al ser la barra flotante, la superficie solo descuenta la altura del teclado virtual
+                alto = Math.max(200, altoPadre - altoIme);
                 if (lp.height != alto) {
                     lp.height = alto;
                     lp.gravity = Gravity.TOP;
