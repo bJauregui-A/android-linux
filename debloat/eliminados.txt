@@ -20,3 +20,10 @@ com.android.egg
 com.android.dreams.basic
 com.android.dreams.phototable
 com.longcheertel.AutoTest
+com.mi.appfinder
+com.google.android.videos
+com.miui.daemon
+com.milink.service
+com.xiaomi.mi_connect_service
+com.miui.miwallpaper
+com.google.android.googlequicksearchbox

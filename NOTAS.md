@@ -527,6 +527,9 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
      - Pool acotado: reemplazado `Executors.newCachedThreadPool()` sin límite por un `ThreadPoolExecutor` acotado (máximo 16 hilos) con descarte seguro ante saturación.
      - Limpiada la regla en bucle de `shared_prefs/red_config.xml` en el Redmi.
    - Resultado: CPU en reposo bajó inmediatamente a **755% idle** (de 800%), uso de swap zram se redujo drásticamente y la app opera en reposo total. APK compilada e instalada con éxito (`adb install -r`).
+5. **Debloat Fase 2 (2026-10-22):**
+   - Eliminados para el usuario 0 vía ADB: `com.mi.appfinder` (GetApps, ~133 MB), `com.google.android.videos` (Google TV, ~100 MB), `com.miui.daemon` (telemetría, ~68 MB), `com.milink.service` + `com.xiaomi.mi_connect_service` (~122 MB), `com.miui.miwallpaper` (~62 MB) y `com.google.android.googlequicksearchbox` (~290 MB en 3 procesos).
+   - Lista actualizada en [debloat/eliminados.txt](file:///media/ben4shot/E/Develop/Android/debloat/eliminados.txt). Total liberado de RAM física y servicios en segundo plano: ~750 MB. Reversible con `debloat/restaurar.sh`.
 
 **Siguiente sesión (66ª):**
 1. **Configuración de proxy en puerto 22 real de Wi-Fi:**
