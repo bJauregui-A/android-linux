@@ -152,12 +152,13 @@ Script de reconexión rápida creado en `~/.local/bin/adb-conectar` (escaneo de 
   1. Añadido el módulo `aur` (`paquetes-aur.txt`) con `yay-bin`, `yay`, `paru-bin`, `paru`, `base-devel` y `git`.
   2. Al pulsar **TAB** sobre cualquier módulo en el paso `[4/4]`, se abre un submenú interactivo para seleccionar/deseleccionar paquetes individuales uno a uno (por defecto todos activos al marcar el módulo).
   3. Manejo de exclusión mutua automática entre variantes precompiladas (`-bin`) y compiladas desde fuentes para evitar conflictos en pacman.
-- **Compilación de APK y sincronización:** APK `sdk36Debug` compilada exitosamente (`BUILD SUCCESSFUL in 1s`); scripts y listas copiados directamente al prefijo de la instancia activa en el teléfono (`files/instancias/arch-89213`) y a `files/archlinux`.
+- **Compilación de APK e instalación:** APK `sdk36Debug` compilada exitosamente (`BUILD SUCCESSFUL in 1s`); scripts y listas copiados directamente al prefijo de la instancia activa en el teléfono (`files/instancias/arch-89213`) y a `files/archlinux`. APK instalada en el Redmi con `adb install -r` (Success; datos e instancias conservados).
 
 **Siguiente sesión (55ª):**
-1. Reinstalar la APK (`adb install -r`) cuando el usuario decida para activar el nuevo comportamiento de `resize` en `WaylandActivity`.
-2. Probar la instalación de `yay` / `paru` en la terminal mediante `instalar-aur yay-bin` (o `subir-aur.sh yay-bin`).
-3. glibc 0020 (`ip a`/`ip r`) y pruebas pendientes de Morrowind.
+1. Probar en pantalla el nuevo comportamiento de `resize` (⛶) con el teclado virtual abierto y cerrado dentro del entorno gráfico.
+2. Probar la instalación de `yay` / `paru` en la terminal mediante `instalar-aur yay-bin` (o desde el PC con `glibc-prueba/scripts/subir-aur.sh yay-bin`).
+3. glibc 0020 (`ip a`/`ip r`: bind netlink falso + `GETLINK` sintético) y pruebas pendientes de Morrowind.
+4. Ajustes finos de atajos o entorno predeterminado en los 14 escritorios.
 **Antes (26ª), hecho:** agy interactivo real ✅, android-tools instalado ✅, emparejamiento y conexión local ✅, permisos de shell obtenidos ✅, script adb-conectar ✅.
 **Antes (25ª), hecho solo lo de `agy` — en orden:**
 (1) **glibc 0019 (era 0018, la tomó la pila de SIGSYS): `ip a`/`ip r`** (bind netlink falso + `GETLINK` sintético, ver arriba). Probar libc aislada antes de instalar (`instalar-glibc.sh`).
