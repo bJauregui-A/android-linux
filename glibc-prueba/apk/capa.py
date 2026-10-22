@@ -89,7 +89,8 @@ PLANTILLAS = [
 
 class Salida:
     def __init__(self, path):
-        self.t = tarfile.open(path, "w", format=tarfile.GNU_FORMAT)
+        modo = "w:gz" if path.endswith((".tgz", ".tar.gz")) else "w"
+        self.t = tarfile.open(path, modo, format=tarfile.GNU_FORMAT)
         self.dirs = set()
 
     def directorio(self, nombre):

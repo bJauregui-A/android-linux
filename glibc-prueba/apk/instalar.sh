@@ -46,7 +46,11 @@ extraer() { # extraer <offset> <largo> <qué> [tar options...]
     shift 3
     printf '\e[1;38;5;81m==> Extrayendo:\e[0m %s...\n' "$QUE"
     : > "$LOG"
-    if tail -c +$(($OFF + 1)) "$APK" | head -c "$LEN" | tar -xzf - -C "$P" "$@" 2> "$LOG"; then
+    zflag=""
+    case $(tail -c +$(($OFF + 1)) "$APK" | head -c 2 | od -An -tx1 2>/dev/null | tr -d ' \n') in
+        1f8b) zflag="-z" ;;
+    esac
+    if tail -c +$(($OFF + 1)) "$APK" | head -c "$LEN" | tar $zflag -xf - -C "$P" "$@" 2> "$LOG"; then
         printf '    \e[1;38;5;48m✔ Listo\e[0m\n'
     else
         printf '    \e[1;38;5;196m✖ Falló la extracción. Detalles:\e[0m\n'

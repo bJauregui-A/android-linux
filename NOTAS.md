@@ -505,7 +505,14 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
    - Compilada e instalada la APK en el Redmi 15 5G (`adb install -r`, datos conservados).
    - Comprobado por el usuario: concurrencia multi-sesión funcionando con persistencia independiente de archivos, la fila de botones sube automáticamente sobre el teclado virtual y la terminal se redimensiona correctamente en vivo (incluyendo `nano`).
 
-**Siguiente sesión (65ª):**
+**65ª sesión (2026-10-22, repo + Redmi por USB):**
+1. **Corrección de extracción de capas en el instalador (`zcat: not gzip`):**
+   - Causa: en la sesión 64 se regeneró `capa.tgz` llamando directamente a `apk/capa.py --out trabajo/assets-sdk36/capa.tgz`. Como `capa.py` abría el tarfile en modo `"w"` (tar plano sin comprimir) y la compresión con gzip antes ocurría en `apk/armar.sh`, el asset quedó como tar sin comprimir de ~90 MB en el APK. Al intentar extraer la capa GPU, `tar -xzf` en Android Toybox arrojaba `zcat: not gzip` y `tar: had errors`.
+   - En [capa.py](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/capa.py): `Salida` ahora detecta si la ruta termina en `.tgz` o `.tar.gz` y abre con `mode="w:gz"` automáticamente. `capa.tgz` regenerado pasa de 90 MB a 26 MB.
+   - En [instalar.sh](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/instalar.sh): `extraer()` ahora inspecciona los primeros bytes del asset en el APK (`od -An -tx1`) buscando `1f8b` para usar `-z` solo cuando los datos son gzip, permitiendo compatibilidad bidireccional limpia (gzip o tar plano).
+   - `capa.tgz` y `instalar.sh` actualizados en `trabajo/assets-sdk36/`, APK recompilada (`assembleSdk36Debug`) e instalada con éxito en el Redmi 15 5G con `adb install -r`.
+
+**Siguiente sesión (66ª):**
 1. **Configuración de proxy en puerto 22 real de Wi-Fi:**
    - Implementar y poner a prueba el script o daemon en espacio `shell` (UID 2000, con `CAP_NET_BIND_SERVICE`) vía `adb-conectar` para escuchar en `0.0.0.0:22` y redirigir el tráfico SSH directamente a la instancia seleccionada o configurada en la UI de Red.
 2. **Pruebas avanzadas de la subred virtual y reenvío de puertos:**
