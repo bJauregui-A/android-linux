@@ -448,6 +448,15 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
      3. Purga y borra en segundo plano todos los archivos creados en `files/instancias/<id>`.
      4. Cierra la actividad volviendo al menú principal de [SistemaActivity.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/SistemaActivity.java).
    - APK recompilada e instalada en el Redmi (`adb install -r`).
+3. **Consola en overlay con bordes redondeados en la pantalla de inicio:**
+   - En [SistemaActivity.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/SistemaActivity.java): se eliminó la terminal fija que ocupaba la mitad de la pantalla al iniciar. Ahora la lista de entornos ocupa todo el espacio vertical disponible con scroll fluido.
+   - En la parte inferior se colocó una tarjeta/apartado interactivo: `❯ CONSOLA DEL SISTEMA (files/) • [ ▶ ABRIR ]`.
+   - Al tocar el apartado, se despliega un **overlay modal flotante** con fondo scrim translúcido y panel con **bordes redondeados** (`dp(16)`), sombra y marco elevado, que contiene:
+     - Cabecera con título `❯ CONSOLA REAL (files/)` y botón `[ ✕ CERRAR ]`.
+     - Terminal interactiva completa con su shell en `files/`.
+     - Barra de teclas virtuales modificadoras (`ESC`, `TAB`, `CTRL`, `ALT`, flechas y botón `[ ▼ ]` para replegar).
+   - Se cierra tocando el botón `[ ✕ CERRAR ]`, el botón `[ ▼ ]`, el fondo fuera del panel o con el botón/gesto de atrás (`onBackPressed`), manteniendo la sesión viva en segundo plano.
+   - APK recompilada e instalada en el Redmi (`adb install -r`).
 
 **Siguiente sesión (63ª):**
 1. **Punto 3.3: Soporte para ejecución de binarios estáticos (`execve_x` en `android-path.c`):**

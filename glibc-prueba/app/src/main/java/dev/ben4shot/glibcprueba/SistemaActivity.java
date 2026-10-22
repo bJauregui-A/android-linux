@@ -58,6 +58,7 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
     private static final int ACCENTO_AMBAR = 0xffd29922;
 
     private LinearLayout contenedorInstancias;
+    private FrameLayout overlayConsola;
     private TerminalView vistaTerminal;
     private TerminalSession sesionConsola;
     private int tamLetra;
@@ -68,10 +69,12 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
     protected void onCreate(Bundle state) {
         super.onCreate(state);
 
-        LinearLayout raiz = new LinearLayout(this);
-        raiz.setOrientation(LinearLayout.VERTICAL);
+        FrameLayout raiz = new FrameLayout(this);
         raiz.setBackgroundColor(FONDO_OSCURO);
-        raiz.setPadding(dp(14), dp(16), dp(14), dp(10));
+
+        LinearLayout raizPrincipal = new LinearLayout(this);
+        raizPrincipal.setOrientation(LinearLayout.VERTICAL);
+        raizPrincipal.setBackgroundColor(FONDO_OSCURO);
 
         // Cabecera de la sección de entornos (con botón compacto para crear nueva instancia)
         LinearLayout cabeceraInstancias = new LinearLayout(this);
@@ -86,7 +89,7 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
 
         LinearLayout.LayoutParams lpCab = new LinearLayout.LayoutParams(-1, -2);
         lpCab.bottomMargin = dp(10);
-        raiz.addView(cabeceraInstancias, lpCab);
+        raizPrincipal.addView(cabeceraInstancias, lpCab);
 
         // Contenedor scrollable para las tarjetas de instancias
         ScrollView scrollInstancias = new ScrollView(this);
@@ -95,16 +98,76 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         contenedorInstancias.setOrientation(LinearLayout.VERTICAL);
         scrollInstancias.addView(contenedorInstancias);
 
-        // Altura adaptable para las instancias: máximo ~200dp para no tapar la consola
-        LinearLayout.LayoutParams lpScrollInst = new LinearLayout.LayoutParams(-1, -2);
+        // Ocupa el espacio principal de la pantalla
+        LinearLayout.LayoutParams lpScrollInst = new LinearLayout.LayoutParams(-1, 0, 1.0f);
         lpScrollInst.bottomMargin = dp(10);
-        raiz.addView(scrollInstancias, lpScrollInst);
+        raizPrincipal.addView(scrollInstancias, lpScrollInst);
 
-        // Cabecera de la consola real
-        TextView tituloConsola = texto("❯ CONSOLA REAL (files/)", 12, true, ACCENTO_VERDE);
-        LinearLayout.LayoutParams lpTitConsola = new LinearLayout.LayoutParams(-1, -2);
-        lpTitConsola.bottomMargin = dp(6);
-        raiz.addView(tituloConsola, lpTitConsola);
+        // Apartado de consola (toca para abrir el overlay flotante)
+        LinearLayout apartadoConsola = new LinearLayout(this);
+        apartadoConsola.setOrientation(LinearLayout.HORIZONTAL);
+        apartadoConsola.setGravity(Gravity.CENTER_VERTICAL);
+        apartadoConsola.setBackground(crearFondo(PANEL_CARD, BORDE_NORMAL, dp(10), dp(1)));
+        apartadoConsola.setPadding(dp(14), dp(12), dp(14), dp(12));
+        apartadoConsola.setClickable(true);
+        apartadoConsola.setFocusable(true);
+
+        LinearLayout infoConsola = new LinearLayout(this);
+        infoConsola.setOrientation(LinearLayout.VERTICAL);
+
+        TextView titConsola = texto("❯ CONSOLA DEL SISTEMA (files/)", 12, true, ACCENTO_VERDE);
+        infoConsola.addView(titConsola);
+
+        TextView subConsola = texto("Terminal interactiva (/system/bin/sh) • Toca para abrir", 11, false, TEXTO_MUTED);
+        LinearLayout.LayoutParams lpSub = new LinearLayout.LayoutParams(-2, -2);
+        lpSub.topMargin = dp(2);
+        infoConsola.addView(subConsola, lpSub);
+
+        apartadoConsola.addView(infoConsola, new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+        TextView btnAbrirConsola = textoBadge("▶ ABRIR", ACCENTO_VERDE);
+        btnAbrirConsola.setPadding(dp(12), dp(6), dp(12), dp(6));
+        apartadoConsola.addView(btnAbrirConsola);
+
+        apartadoConsola.setOnClickListener(v -> mostrarOverlayConsola(true));
+
+        LinearLayout.LayoutParams lpApartado = new LinearLayout.LayoutParams(-1, -2);
+        lpApartado.bottomMargin = dp(4);
+        raizPrincipal.addView(apartadoConsola, lpApartado);
+
+        raiz.addView(raizPrincipal, new FrameLayout.LayoutParams(-1, -1));
+
+        // Overlay de la consola (oculto por defecto con scrim semi-transparente)
+        overlayConsola = new FrameLayout(this);
+        overlayConsola.setVisibility(View.GONE);
+        overlayConsola.setBackgroundColor(0xb3000000);
+        overlayConsola.setClickable(true);
+        overlayConsola.setFocusable(true);
+        overlayConsola.setOnClickListener(v -> mostrarOverlayConsola(false));
+
+        // Panel flotante de la consola con bordes redondeados y sombra
+        LinearLayout panelConsola = new LinearLayout(this);
+        panelConsola.setOrientation(LinearLayout.VERTICAL);
+        panelConsola.setBackground(crearFondo(0xff0d131b, BORDE_NORMAL, dp(16), dp(1)));
+        panelConsola.setClipToOutline(true);
+        panelConsola.setElevation(dp(12));
+        panelConsola.setClickable(true);
+        panelConsola.setOnClickListener(v -> {});
+
+        // Cabecera del panel overlay
+        LinearLayout cabeceraOverlay = new LinearLayout(this);
+        cabeceraOverlay.setOrientation(LinearLayout.HORIZONTAL);
+        cabeceraOverlay.setGravity(Gravity.CENTER_VERTICAL);
+        cabeceraOverlay.setPadding(dp(14), dp(10), dp(12), dp(10));
+        cabeceraOverlay.setBackgroundColor(0xff121924);
+
+        TextView titOverlay = texto("❯ CONSOLA REAL (files/)", 12, true, ACCENTO_VERDE);
+        cabeceraOverlay.addView(titOverlay, new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+        TextView btnCerrarOverlay = crearBotonChip("✕ CERRAR", ACCENTO_ROJO, () -> mostrarOverlayConsola(false));
+        cabeceraOverlay.addView(btnCerrarOverlay);
+
+        panelConsola.addView(cabeceraOverlay, new LinearLayout.LayoutParams(-1, -2));
 
         // Vista de la terminal de Termux conectada a una shell /system/bin/sh interactiva
         vistaTerminal = new TerminalView(this, null);
@@ -115,19 +178,23 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         vistaTerminal.setTextSize(tamLetra);
         vistaTerminal.setTypeface(Typeface.MONOSPACE);
 
-        LinearLayout contenedorTerminal = new LinearLayout(this);
-        contenedorTerminal.setOrientation(LinearLayout.VERTICAL);
-        contenedorTerminal.setBackground(crearFondo(0xff0a0e14, BORDE_NORMAL, dp(8), dp(1)));
-        contenedorTerminal.setPadding(dp(6), dp(6), dp(6), dp(6));
-        contenedorTerminal.addView(vistaTerminal, new LinearLayout.LayoutParams(-1, 0, 1.0f));
-        contenedorTerminal.addView(filaTeclas(), new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout.LayoutParams lpTerm = new LinearLayout.LayoutParams(-1, 0, 1.0f);
+        lpTerm.setMargins(dp(6), dp(4), dp(6), dp(4));
+        panelConsola.addView(vistaTerminal, lpTerm);
 
-        raiz.addView(contenedorTerminal, new LinearLayout.LayoutParams(-1, 0, 1.0f));
+        panelConsola.addView(filaTeclas(), new LinearLayout.LayoutParams(-1, -2));
+
+        FrameLayout.LayoutParams lpPanel = new FrameLayout.LayoutParams(-1, -1);
+        lpPanel.setMargins(dp(8), dp(24), dp(8), dp(8));
+        overlayConsola.addView(panelConsola, lpPanel);
+
+        raiz.addView(overlayConsola, new FrameLayout.LayoutParams(-1, -1));
 
         // Ajuste dinámico para barras del sistema y teclado virtual (IME)
         raiz.setOnApplyWindowInsetsListener((v, insets) -> {
             android.graphics.Insets i = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.ime());
-            v.setPadding(i.left + dp(14), i.top + dp(10), i.right + dp(14), i.bottom + dp(6));
+            raizPrincipal.setPadding(i.left + dp(14), i.top + dp(10), i.right + dp(14), i.bottom + dp(6));
+            overlayConsola.setPadding(i.left, i.top, i.right, i.bottom);
             return WindowInsets.CONSUMED;
         });
 
@@ -135,6 +202,51 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
 
         actualizarLista();
         iniciarConsola();
+    }
+
+    private void mostrarOverlayConsola(boolean mostrar) {
+        if (overlayConsola == null) return;
+        if (mostrar) {
+            overlayConsola.setVisibility(View.VISIBLE);
+            if (sesionConsola == null || !sesionConsola.isRunning()) {
+                iniciarConsola();
+            } else if (vistaTerminal != null) {
+                vistaTerminal.onScreenUpdated();
+            }
+            if (vistaTerminal != null) {
+                vistaTerminal.requestFocus();
+                vistaTerminal.post(() -> {
+                    InputMethodManager imm = getSystemService(InputMethodManager.class);
+                    if (imm != null) imm.showSoftInput(vistaTerminal, 0);
+                });
+            }
+        } else {
+            if (vistaTerminal != null) {
+                InputMethodManager imm = getSystemService(InputMethodManager.class);
+                if (imm != null) imm.hideSoftInputFromWindow(vistaTerminal.getWindowToken(), 0);
+            }
+            overlayConsola.setVisibility(View.GONE);
+        }
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (overlayConsola != null && overlayConsola.getVisibility() == View.VISIBLE) {
+            mostrarOverlayConsola(false);
+            return;
+        }
+        super.onBackPressed();
+    }
+
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
+            if (overlayConsola != null && overlayConsola.getVisibility() == View.VISIBLE) {
+                mostrarOverlayConsola(false);
+                return true;
+            }
+        }
+        return super.onKeyDown(keyCode, event);
     }
 
     @Override
@@ -185,17 +297,22 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         fila.setGravity(Gravity.CENTER_VERTICAL);
         fila.setPadding(dp(4), dp(4), dp(4), dp(4));
 
-        String[] teclas = {"⌨", "ESC", "TAB", "CTRL", "ALT", "←", "↓", "↑", "→"};
+        String[] teclas = {"⌨", "ESC", "TAB", "CTRL", "ALT", "←", "↓", "↑", "→", "▼"};
         for (String t : teclas) {
             TextView b = new TextView(this);
             b.setText(t);
             b.setSingleLine(true);
-            b.setTextColor(TEXTO_CLARO);
             b.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
             b.setTextSize(12);
             b.setGravity(Gravity.CENTER);
             b.setPadding(dp(12), dp(6), dp(12), dp(6));
-            b.setBackground(crearFondo(0xff16202c, 0x22ffffff, dp(6), dp(1)));
+            if (t.equals("▼")) {
+                b.setTextColor(ACCENTO_ROJO);
+                b.setBackground(crearFondo(0xff2a1616, 0x66ff6b6b, dp(6), dp(1)));
+            } else {
+                b.setTextColor(TEXTO_CLARO);
+                b.setBackground(crearFondo(0xff16202c, 0x22ffffff, dp(6), dp(1)));
+            }
             b.setOnClickListener(v -> tecla(t));
             if (t.equals("CTRL")) botonCtrl = b;
             if (t.equals("ALT")) botonAlt = b;
@@ -214,6 +331,9 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
             case "⌨":
                 vistaTerminal.requestFocus();
                 getSystemService(InputMethodManager.class).showSoftInput(vistaTerminal, 0);
+                return;
+            case "▼":
+                mostrarOverlayConsola(false);
                 return;
             case "CTRL": ctrl = !ctrl; marcarModificadores(); return;
             case "ALT": alt = !alt; marcarModificadores(); return;
