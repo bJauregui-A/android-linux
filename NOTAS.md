@@ -433,7 +433,15 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
      - En [WaylandActivity.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/WaylandActivity.java): si se abre por error sobre una instancia sin entorno gráfico, redirige automáticamente a la terminal.
    - APK `sdk36Debug` compilada e instalada en el Redmi (`adb install -r`, datos conservados); scripts desplegados en las instancias activas.
 
-**Siguiente sesión (62ª):**
+**62ª sesión (2026-10-22, repo + Redmi por USB):**
+1. **Corrección de "Sin Entorno" en la creación de nuevas instancias:**
+   - **Diagnóstico:** En la 61ª sesión se crearon la receta `escritorios/sin-entorno/` y el proveedor `proveedores/ninguno/` y se actualizaron en las instancias existentes, pero no se había regenerado el paquete base de assets `trabajo/assets-sdk36/capa.tgz` con `apk/capa.py`. Al pulsar `＋ CREAR` en la app para inicializar un nuevo entorno (como `server-36543` o `server-81205`), el instalador `instalar.sh` extraía el `capa.tgz` previo embebido en la APK, el cual contenía la lista antigua de `escritorios/orden` (terminaba en `weston`) y carecía de `sin-entorno`. Por ello, en el paso `[3/4] Selección de Entorno de Escritorio`, la opción "Sin Entorno" no aparecía en el menú.
+   - **Solución y regeneración:**
+     - Regenerado `trabajo/assets-sdk36/capa.tgz` mediante `python3 apk/capa.py --prefix ... --compilados ...` incluyendo `sin-entorno/`, `proveedores/ninguno/` y el nuevo `orden` de 15 opciones.
+     - Compilada la APK `sdk36Debug` con Gradle (`BUILD SUCCESSFUL`) e instalada en el Redmi con `adb install -r` (Success; datos e instancias conservados).
+     - Actualizados los archivos de recetas y `primer-arranque.sh` en las instancias pendientes creadas en el teléfono (`server-81205` y `server-36543`) para que muestren "Sin Entorno" de inmediato.
+
+**Siguiente sesión (63ª):**
 1. **Punto 3.3: Soporte para ejecución de binarios estáticos (`execve_x` en `android-path.c`):**
    - **Problema técnico:** En Android (API 36 / SELinux no-root), el kernel niega `execve` directo sobre `/data/data/...` (`W^X` / `noexec`). `android-path.c` sortea esto lanzando todos los binarios dinámicos mediante el cargador `libldp.so` (ubicado en `nativeLibraryDir`), usando `libldp.so --library-path ... <binario> <args>`. Sin embargo, los binarios compilados estáticamente (`ldconfig`, herramientas de rescate, binarios Go compilados con `CGO_ENABLED=0`, `busybox` estático) carecen de cabecera `PT_INTERP`, por lo que el cargador dinámico no puede ejecutarlos de forma estándar.
    - **Estrategia de solución:**
@@ -450,6 +458,6 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
    - Compositor/servidor X11 directo sobre DMA-BUF / AHardwareBuffer para clientes X11 puros sin intermediación de Xwayland.
 5. **Estado y notas operativas del teléfono:**
    - Dispositivo: Redmi 15 5G (`spring`, Snapdragon 4 Gen 2, serial `dab6b001`).
-   - Instancias activas en segundo plano: `sway-54452`, `cosmic-67805`, `niri-70360`, `phosh-4056`. **No correr `am force-stop`, desinstalar el APK ni reiniciar la app sin confirmación previa del usuario**.
+   - Instancias en el teléfono: `sway-54452`, `cosmic-67805`, `niri-70360`, `phosh-4056`, `server-81205`, `server-36543`. **No correr `am force-stop`, desinstalar el APK ni reiniciar la app sin confirmación previa del usuario**.
    - Reconexión de depuración inalámbrica local en el teléfono si se reinicia o pierde Wi-Fi: script `adb-conectar` (`~/.local/bin/adb-conectar`).
 **Cómo consultar Hyprland desde el PC (sin tocar nada):** guardar un script con `cd files/archlinux; PID=$(ps -A -o PID,ARGS | grep "argv0 Hyprland" | grep -v grep | head -1 | awk '{print $1}'); L=$(awk '/libldp.so/{print $6; exit}' /proc/$PID/maps); SIG=$(ls -t run/user/10331/hypr | head -1); export GLIBC_PREFIX=$PWD GLIBC_LOADER=$L XDG_RUNTIME_DIR=/run/user/10331 HYPRLAND_INSTANCE_SIGNATURE=$SIG; $L $PWD/usr/bin/hyprctl -j monitors all` y correrlo con `adb shell 'run-as dev.ben4shot.glibcprueba.sdk36 sh -s' < script`. Con `adb` siempre `< /dev/null` (si no, `run-as` se queda esperando stdin). No usar `hyprctl output create`: crea salidas extra.
