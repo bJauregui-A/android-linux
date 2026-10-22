@@ -602,13 +602,13 @@ elegido zsh && {
 }
 # Ajustar rutas reales del prefijo en ld.so.conf.d y preferencias de Firefox
 if [ -n "$GLIBC_PREFIX" ]; then
-    P_REL=$(echo "$GLIBC_PREFIX" | sed -E 's|^/data/(user/0|data)/||')
+    P_REL=$(echo "$GLIBC_PREFIX" | sed -E 's@^/data/(user/0|data)/@@')
     sed -i "s|@P@|$P_REL|g; s|dev.ben4shot.glibcprueba.[^/]*/files/[^/\"']*|$P_REL|g" /etc/ld.so.conf.d/android-prefijo.conf 2>/dev/null || true
     ldconfig 2>/dev/null || true
 fi
 FF=/usr/lib/firefox/browser/defaults/preferences
 if [ -d "$FF" ]; then
-    P_REL=$(echo "${GLIBC_PREFIX:-dev.ben4shot.glibcprueba.sdk36/files/archlinux}" | sed -E 's|^/data/(user/0|data)/||')
+    P_REL=$(echo "${GLIBC_PREFIX:-dev.ben4shot.glibcprueba.sdk36/files/archlinux}" | sed -E 's@^/data/(user/0|data)/@@')
     sed "s|/home/user/|/home/$N/|g; s|@P@|$P_REL|g; s|dev.ben4shot.glibcprueba.[^/]*/files/[^/\"',]*|$P_REL|g" "$D/firefox-android.js" > "$FF/android.js"
 fi
 [ -f /usr/share/applications/firefox.desktop ] &&
