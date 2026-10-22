@@ -598,11 +598,39 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
      - **Solución definitiva**: Se eliminó el symlink del filesystem. `/usr/lib/systemd/system` se mantiene como el directorio real estándar de paquetes pacman. En [supervisor/service-daemon.c](file:///media/ben4shot/E/Develop/Android/glibc-prueba/supervisor/service-daemon.c), el supervisor ahora soporta de forma nativa ambos directorios: lee `/etc/services.d` (personalizados/habilitados) y busca también en `/usr/lib/systemd/system` (paquetes oficiales), listando todas las unidades en `service list`. Al ejecutar `service <nombre> enable`, crea automáticamente un symlink en `/etc/services.d/<nombre>.service` hacia la unidad del sistema.
    - Todo recompilado, empaquetado en `capa.tgz`, `service`, `service-daemon` y APK instalada en el Redmi 15 5G. pacman instala los paquetes con 0 conflictos.
 
-**Siguiente sesión (68ª):**
+68ª sesión (2026-10-22):
+- **Diagnóstico y corrección de la IP privada en `ip a`:**
+  - Se descubrió que en `SistemaActivity.java`, la pestaña `⊞ MÁQUINAS / IPS` solo sugería la IP determinista (`10.0.0.2`) en el `EditText`, pero solo se guardaba a `/etc/virtual-ip` si el usuario oprimía manualmente el botón `💾`.
+  - Solución:
+    - En [TerminalService.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/TerminalService.java): auto-escritura obligatoria de `/etc/virtual-ip` al inicializar `entorno()`.
+    - En [SistemaLinux.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/SistemaLinux.java): auto-asignación y escritura inmediata de `/etc/virtual-ip` con `RedManager.asignarIp` al crear cualquier nueva instancia.
+  - Al existir `/etc/virtual-ip`, `ip a` reporta de inmediato:
+    `99: vnet0: <BROADCAST,UP> mtu 1500 link/ether inet 10.0.0.2/24 scope global vnet0`.
+- **Diagnóstico y corrección de `ping` (ICMP sin root en Android 16):**
+  - Al ejecutar `ping` en la instancia se producía el error: `/usr/bin/ping: prctl: Operation not permitted`.
+  - Causa 1: `iputils ping` llama a `prctl(PR_SET_KEEPCAPS, 1)` para retener capabilities antes de invocar `setuid(getuid())`. En Android sin root, el kernel deniega esto con `EPERM`. Al fallar, ping aborta sin llegar a abrir el socket ICMP.
+  - Causa 2: glibc generaba el stub de `prctl` en ensamblador crudo desde `syscalls.list`, ignorando shims en C.
+  - Solución en glibc (parche formal [0022-android-virtual-net.patch](file:///media/ben4shot/E/Develop/Android/glibc-prueba/glibc/parches/0022-android-virtual-net.patch)):
+    1. Deshabilitada la generación automática de `prctl` en `sysdeps/unix/sysv/linux/syscalls.list`.
+    2. Creado [sysdeps/unix/sysv/linux/aarch64/prctl.c](file:///media/ben4shot/E/Develop/Android/glibc-prueba/glibc/glibc-2.43/sysdeps/unix/sysv/linux/aarch64/prctl.c) que simula éxito (retorna 0) para operaciones de capabilities: `PR_CAP_AMBIENT` (47), `PR_CAPBSET_READ` (23), `PR_CAPBSET_DROP` (24), `PR_GET_KEEPCAPS` (7), `PR_SET_KEEPCAPS` (8), `PR_GET_SECUREBITS` (27) y `PR_SET_SECUREBITS` (28).
+    3. Añadida la misma intercepción en `__NR_prctl` dentro de [android-path.c](file:///media/ben4shot/E/Develop/Android/glibc-prueba/glibc/glibc-2.43/sysdeps/unix/sysv/linux/aarch64/android-path.c).
+    4. En `android-path.c`, implementada la redirección de `sendto` hacia la IP virtual propia desviándola a `127.0.0.1`, y traslación inversa simétrica en `recvmsg` y `recvfrom` reescribiendo `127.0.0.1` de vuelta a la IP virtual.
+    5. Filtrado estricto por descriptor (`vip_redir_fd`) en `sendto`/`recvmsg`/`recvfrom`/`close`: si un ping va a `127.0.0.1`, no se toca; si va a `10.0.0.2`, se desvía y se reescribe.
+  - **Pruebas en vivo en el Redmi 15 5G:**
+    - `ping -c 2 127.0.0.1`: 2 paquetes transmitidos, 2 recibidos, 0% packet loss, RTT ~0.5 ms (sin advertencias).
+    - `ping -c 2 10.0.0.2`: 2 paquetes transmitidos, 2 recibidos, 0% packet loss, RTT ~0.5 ms (sin advertencias de diferente dirección).
+- **Empaquetado y sincronización completa:**
+  - Recompilada glibc (`salida/usr/lib/libc.so.6`).
+  - Actualizado `app/src/main/jniLibs/arm64-v8a/libldp.so`.
+  - Reempaquetados `base.tgz` y `capa.tgz` en `trabajo/assets-sdk36/` con `apk/armar.sh sdk36`.
+  - APK `sdk36Debug` compilada e instalada en el dispositivo vía `adb install -r`.
+  - Actualizada `libc.so.6` en la instancia `server-42677` dejando respaldo en `libc.so.6.0022`.
+
+**Siguiente sesión (69ª):**
 1. **Validación en vivo de creación de entornos en el Redmi 15 5G:**
    - Probar la creación de un nuevo entorno (con entorno gráfico o servidor) desde la interfaz de la app, verificando que `primer-arranque.sh` corra de principio a fin sin fallos de PATH ni SIGSYS, completando pacman y registrando la marca `/var/lib/arch-android/instalado`.
+   - Confirmar que la nueva instancia arranque con `99: vnet0` y responda a `ping` inmediatamente.
 2. **Validación de la interfaz de Red y subredes virtuales (`[ ⇄ RED ]`):**
-   - Comprobar la asignación de IPs desde la pestaña `⊞ MÁQUINAS / IPS` y verificar que en cada máquina asignada se genere `/etc/virtual-ip` y aparezca la interfaz sintética `99: vnet0` en `ip a`.
    - Probar la creación de subredes CIDR adicionales en `⑂ SUBREDES` y las reglas de port-forwarding en `⇄ REENVÍO PUERTOS`.
 3. **Validación del Supervisor de servicios nativo en C (`service` / `sv`):**
    - Comprobar el autoarranque del demonio `service-daemon` al abrir sesión interactiva o de escritorio.

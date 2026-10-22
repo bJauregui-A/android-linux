@@ -727,6 +727,10 @@ public class TerminalService extends Service implements TerminalSessionClient {
         if (instalacion.instalada(this)) home.mkdirs(); // al instalar lo crea el adaptador
         instalacion.preparar(this, prefijo);
         escribirResolvConf(prefijo);
+        try {
+            String vip = RedManager.ipParaInstancia(this, instalacion.id());
+            RedManager.escribirVirtualIp(this, instalacion.id(), vip);
+        } catch (Exception ignorada) { }
         Wayland.iniciarPara(this, instalacion.id());
         Abrir.iniciar(this);
         Notificar.iniciar(this);

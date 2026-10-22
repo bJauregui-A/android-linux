@@ -186,6 +186,10 @@ final class SistemaLinux {
         Instancia nueva = new Instancia(id, nombre, distroId, rutaRelativa, System.currentTimeMillis());
         lista.add(nueva);
         guardarInstancias(c, lista);
+        try {
+            String ipSugerida = RedManager.ipParaInstancia(c, nueva.id);
+            RedManager.asignarIp(c, nueva.id, "sub_default", ipSugerida);
+        } catch (Exception ignorada) { }
         seleccionarInstancia(c, nueva.id);
         Log.i(TAG, "creada instancia " + id + " en " + rutaRelativa);
         return nueva;

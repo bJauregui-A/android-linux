@@ -1,6 +1,6 @@
-diff -uNr a/sysdeps/unix/sysv/linux/aarch64/android-path.c b/sysdeps/unix/sysv/linux/aarch64/android-path.c
---- a/sysdeps/unix/sysv/linux/aarch64/android-path.c	2026-10-22 17:45:31.210140887 -0300
-+++ b/sysdeps/unix/sysv/linux/aarch64/android-path.c	2026-10-22 17:44:17.151002018 -0300
+diff -uNr -x '*.orig' -x '*.rej' a/sysdeps/unix/sysv/linux/aarch64/android-path.c b/sysdeps/unix/sysv/linux/aarch64/android-path.c
+--- a/sysdeps/unix/sysv/linux/aarch64/android-path.c	2026-10-22 18:56:38.636859850 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/android-path.c	2026-10-22 18:54:05.962726400 -0300
 @@ -36,6 +36,7 @@
  #include <net/if_arp.h>
  #include <linux/netlink.h>
@@ -9,10 +9,20 @@ diff -uNr a/sysdeps/unix/sysv/linux/aarch64/android-path.c b/sysdeps/unix/sysv/l
  
  #define KEY_PREFIX "GLIBC_PREFIX="
  #define KEY_LOADER "GLIBC_LOADER="
-@@ -1149,6 +1150,225 @@
+@@ -81,6 +82,7 @@
+   __NR_inotify_add_watch, __NR_name_to_handle_at, __NR_linkat,
+   __NR_renameat, __NR_renameat2, __NR_symlinkat, __NR_readlinkat,
+   __NR_getcwd, __NR_bind, __NR_connect, __NR_execve, __NR_execveat,
++  __NR_prctl,
+   __NR_rt_sigprocmask, __NR_rt_sigaction
+ };
+ 
+@@ -1149,6 +1151,227 @@
    return starts (a, b, la + 1);
  }
  
++static int vip_redir_fd = -1;
++
 +static int
 +leer_virtual_ip (uint32_t *ip_out, uint8_t *prefixlen_out)
 +{
@@ -235,7 +245,7 @@ diff -uNr a/sysdeps/unix/sysv/linux/aarch64/android-path.c b/sysdeps/unix/sysv/l
  static size_t
  armar_getlink_sintetico (char *buf, size_t maxlen, const struct nlmsghdr *req_nlh)
  {
-@@ -1298,6 +1518,50 @@
+@@ -1298,6 +1521,50 @@
      }
    raw (__NR_close, s, 0, 0, 0, 0, 0);
  
@@ -286,7 +296,16 @@ diff -uNr a/sysdeps/unix/sysv/linux/aarch64/android-path.c b/sysdeps/unix/sysv/l
    if (is_dump)
      {
        if (out_len + NLMSG_SPACE (sizeof (int)) <= maxlen)
-@@ -1373,6 +1637,39 @@
+@@ -1339,6 +1606,8 @@
+   switch (nr)
+     {
+     case __NR_close:
++      if ((int) a0 == vip_redir_fd)
++	vip_redir_fd = -1;
+       netlink_marcar (a0, 0);
+       uevent_marcar (a0, 0);
+       nl_slot_limpiar (a0);
+@@ -1373,6 +1642,39 @@
  	      }
  	    return r;
  	  }
@@ -326,7 +345,7 @@ diff -uNr a/sysdeps/unix/sysv/linux/aarch64/android-path.c b/sysdeps/unix/sysv/l
  	break;
        }
      case __NR_getsockname:
-@@ -1399,6 +1696,15 @@
+@@ -1399,6 +1701,15 @@
  	      nl_lock_release ();
  	      return a2;
  	    }
@@ -342,7 +361,33 @@ diff -uNr a/sysdeps/unix/sysv/linux/aarch64/android-path.c b/sysdeps/unix/sysv/l
  	  if (nlh->nlmsg_type == RTM_GETNEIGH)
  	    {
  	      nl_lock_acquire ();
-@@ -1429,7 +1735,8 @@
+@@ -1417,6 +1728,25 @@
+ 	      return a2;
+ 	    }
+ 	}
++      if (a4 != 0 && (size_t) a5 >= sizeof (struct sockaddr_in))
++	{
++	  const struct sockaddr *sa = (const struct sockaddr *) a4;
++	  if (sa->sa_family == AF_INET)
++	    {
++	      struct sockaddr_in sin_copy;
++	      mcopy ((char *) &sin_copy, (const char *) a4, sizeof (sin_copy));
++	      uint32_t vip = 0;
++	      uint8_t vlen = 0;
++	      if (leer_virtual_ip (&vip, &vlen) && sin_copy.sin_addr.s_addr == vip)
++		{
++		  vip_redir_fd = (int) a0;
++		  sin_copy.sin_addr.s_addr = 0x0100007f; /* 127.0.0.1 */
++		  return raw (nr, a0, a1, a2, a3, (long int) &sin_copy, a5);
++		}
++	      else if ((int) a0 == vip_redir_fd)
++		vip_redir_fd = -1;
++	    }
++	}
+       return raw (nr, a0, a1, a2, a3, a4, a5);
+     case __NR_sendmsg:
+       if (netlink_es (a0) && a1 != 0)
+@@ -1429,7 +1759,8 @@
  	      if (ib != NULL && il >= sizeof (struct nlmsghdr))
  		{
  		  const struct nlmsghdr *nlh = (const struct nlmsghdr *) ib;
@@ -352,3 +397,114 @@ diff -uNr a/sysdeps/unix/sysv/linux/aarch64/android-path.c b/sysdeps/unix/sysv/l
  		    return __android_path_syscall (__NR_sendto, a0, (long int) ib, il, a2, 0, 0);
  		}
  	    }
+@@ -1471,7 +1802,23 @@
+ 	    return total;
+ 	  }
+ 	nl_lock_release ();
+-	return raw (nr, a0, a1, a2, a3, a4, a5);
++	long int ret = raw (nr, a0, a1, a2, a3, a4, a5);
++	if (ret >= 0 && a1 != 0 && (int) a0 == vip_redir_fd)
++	  {
++	    struct msghdr *mh = (struct msghdr *) a1;
++	    if (mh->msg_name != NULL && (size_t) mh->msg_namelen >= sizeof (struct sockaddr_in))
++	      {
++		struct sockaddr_in *sin = (struct sockaddr_in *) mh->msg_name;
++		if (sin->sin_family == AF_INET && sin->sin_addr.s_addr == 0x0100007f)
++		  {
++		    uint32_t vip = 0;
++		    uint8_t vlen = 0;
++		    if (leer_virtual_ip (&vip, &vlen) && vip != 0)
++		      sin->sin_addr.s_addr = vip;
++		  }
++	      }
++	  }
++	return ret;
+       }
+     case __NR_recvfrom:
+       {
+@@ -1502,8 +1849,27 @@
+ 	    return cp;
+ 	  }
+ 	nl_lock_release ();
+-	return raw (nr, a0, a1, a2, a3, a4, a5);
++	long int ret = raw (nr, a0, a1, a2, a3, a4, a5);
++	if (ret >= 0 && a4 != 0 && a5 != 0 && *(socklen_t *) a5 >= sizeof (struct sockaddr_in) && (int) a0 == vip_redir_fd)
++	  {
++	    struct sockaddr_in *sin = (struct sockaddr_in *) a4;
++	    if (sin->sin_family == AF_INET && sin->sin_addr.s_addr == 0x0100007f)
++	      {
++		uint32_t vip = 0;
++		uint8_t vlen = 0;
++		if (leer_virtual_ip (&vip, &vlen) && vip != 0)
++		  sin->sin_addr.s_addr = vip;
++	      }
++	  }
++	return ret;
+       }
++    case __NR_prctl:
++      if (a0 == 47 /* PR_CAP_AMBIENT */ || a0 == 23 /* PR_CAPBSET_READ */ ||
++	  a0 == 24 /* PR_CAPBSET_DROP */ || a0 == 7 /* PR_GET_KEEPCAPS */ ||
++	  a0 == 8 /* PR_SET_KEEPCAPS */ || a0 == 27 /* PR_GET_SECUREBITS */ ||
++	  a0 == 28 /* PR_SET_SECUREBITS */)
++	return 0;
++      return raw (nr, a0, a1, a2, a3, a4, a5);
+     case __NR_rt_sigaction:
+     case __NR_rt_sigprocmask:
+       return raw (nr, a0, a1, a2, a3, a4, a5);
+diff -uNr -x '*.orig' -x '*.rej' a/sysdeps/unix/sysv/linux/aarch64/prctl.c b/sysdeps/unix/sysv/linux/aarch64/prctl.c
+--- a/sysdeps/unix/sysv/linux/aarch64/prctl.c	1969-12-31 21:00:00.000000000 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/prctl.c	2026-10-22 18:48:54.888694082 -0300
+@@ -0,0 +1,30 @@
++/* prctl - Linux specific syscall. Android ARM64 shim.
++   Simula exito en PR_CAP_AMBIENT para herramientas como ping sin root. */
++
++#include <sysdep.h>
++#include <stdarg.h>
++#include <sys/prctl.h>
++
++int
++__prctl (int option, ...)
++{
++  va_list arg;
++  va_start (arg, option);
++  unsigned long int arg2 = va_arg (arg, unsigned long int);
++  unsigned long int arg3 = va_arg (arg, unsigned long int);
++  unsigned long int arg4 = va_arg (arg, unsigned long int);
++  unsigned long int arg5 = va_arg (arg, unsigned long int);
++  va_end (arg);
++
++  /* En Android sin root, simular éxito en operaciones de capabilities */
++  if (option == 47 /* PR_CAP_AMBIENT */ || option == 23 /* PR_CAPBSET_READ */ ||
++      option == 24 /* PR_CAPBSET_DROP */ || option == 7 /* PR_GET_KEEPCAPS */ ||
++      option == 8 /* PR_SET_KEEPCAPS */ || option == 27 /* PR_GET_SECUREBITS */ ||
++      option == 28 /* PR_SET_SECUREBITS */)
++    return 0;
++
++  return INLINE_SYSCALL_CALL (prctl, option, arg2, arg3, arg4, arg5);
++}
++
++libc_hidden_def (__prctl)
++weak_alias (__prctl, prctl)
+diff -uNr -x '*.orig' -x '*.rej' a/sysdeps/unix/sysv/linux/aarch64/sysdep.h b/sysdeps/unix/sysv/linux/aarch64/sysdep.h
+--- a/sysdeps/unix/sysv/linux/aarch64/sysdep.h	2026-10-22 18:56:38.635312561 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/sysdep.h	2026-10-22 18:20:03.619631803 -0300
+@@ -214,6 +214,7 @@
+     case __NR_execveat: case __NR_ioctl: case __NR_socket:
+     case __NR_getsockname: case __NR_sendto: case __NR_sendmsg:
+     case __NR_recvmsg: case __NR_recvfrom: case __NR_close:
++    case __NR_prctl:
+     case __NR_getuid: case __NR_geteuid: case __NR_getgid: case __NR_getegid:
+     case __NR_getresuid: case __NR_getresgid: case __NR_fchown:
+     case __NR_setuid: case __NR_setgid: case __NR_setreuid:
+diff -uNr -x '*.orig' -x '*.rej' a/sysdeps/unix/sysv/linux/syscalls.list b/sysdeps/unix/sysv/linux/syscalls.list
+--- a/sysdeps/unix/sysv/linux/syscalls.list	2026-01-23 17:54:00.000000000 -0300
++++ b/sysdeps/unix/sysv/linux/syscalls.list	2026-10-22 18:35:13.914854062 -0300
+@@ -47,7 +47,7 @@
+ pipe2		-	pipe2		i:fi	__pipe2		pipe2
+ pidfd_open	EXTRA	pidfd_open	i:iU	pidfd_open
+ pidfd_getfd	EXTRA	pidfd_getfd	i:iiU	pidfd_getfd
+-prctl		EXTRA	prctl		i:iiiii	__prctl		prctl __prctl_time64
++# prctl		EXTRA	prctl		i:iiiii	__prctl		prctl __prctl_time64
+ pivot_root	EXTRA	pivot_root	i:ss	pivot_root
+ pidfd_send_signal	EXTRA	pidfd_send_signal	i:iiPU	pidfd_send_signal
+ process_madvise EXTRA   process_madvise i:iPniU process_madvise
