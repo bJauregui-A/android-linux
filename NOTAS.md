@@ -598,12 +598,18 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
    - Todo recompilado, empaquetado en `capa.tgz`, `libldp.so` y APK instalada en el Redmi 15 5G. Verificado con `service list` mostrando 57 servicios gestionados.
 
 **Siguiente sesión (68ª):**
-1. **Instalación y validación final de la APK en el Redmi:**
-   - Notificar al usuario para aplicar `adb install -r` con el APK actualizado.
-   - Validar la nueva interfaz de Red (`[ ⇄ RED ]`) con pestañas `⊞ MÁQUINAS / IPS`, `⑂ SUBREDES` y verificar la asignación dinámica de IPs y su reflejo en `ip a` en múltiples instancias.
-2. **Configuración de proxy en puerto 22 real de Wi-Fi:**
+1. **Validación en vivo de creación de entornos en el Redmi 15 5G:**
+   - Probar la creación de un nuevo entorno (con entorno gráfico o servidor) desde la interfaz de la app, verificando que `primer-arranque.sh` corra de principio a fin sin fallos de PATH ni SIGSYS, completando pacman y registrando la marca `/var/lib/arch-android/instalado`.
+2. **Validación de la interfaz de Red y subredes virtuales (`[ ⇄ RED ]`):**
+   - Comprobar la asignación de IPs desde la pestaña `⊞ MÁQUINAS / IPS` y verificar que en cada máquina asignada se genere `/etc/virtual-ip` y aparezca la interfaz sintética `99: vnet0` en `ip a`.
+   - Probar la creación de subredes CIDR adicionales en `⑂ SUBREDES` y las reglas de port-forwarding en `⇄ REENVÍO PUERTOS`.
+3. **Validación del Supervisor de servicios nativo en C (`service` / `sv`):**
+   - Comprobar el autoarranque del demonio `service-daemon` al abrir sesión interactiva o de escritorio.
+   - Probar gestión de servicios con `service <nombre> start/stop/status/logs/list`.
+   - Probar la instalación de nuevos servicios vía `sudo pacman -S <paquete>` verificando que sus unidades se alojen en `/etc/services.d` vía el symlink `/usr/lib/systemd/system`.
+4. **Proxy en puerto 22 real de Wi-Fi:**
    - Implementar y poner a prueba el script o daemon en espacio `shell` (UID 2000, con `CAP_NET_BIND_SERVICE`) vía `adb-conectar` para escuchar en `0.0.0.0:22` y redirigir el tráfico SSH directamente a la instancia seleccionada o configurada en la UI de Red.
-3. **Punto 3.3: Soporte para ejecución de binarios estáticos (`execve_x` en `android-path.c`):**
+5. **Punto 3.3: Soporte para ejecución de binarios estáticos (`execve_x` en `android-path.c`):**
    - Soporte para binarios estáticos (`ldconfig`, `busybox`, herramientas compiladas estáticamente sin `PT_INTERP`) bajo W^X de Android mediante cargador en espacio de usuario.
-4. **Distribuciones adicionales (Punto 4: Debian y Ubuntu ARM64):**
+6. **Distribuciones adicionales (Punto 4: Debian y Ubuntu ARM64):**
    - Creación de adaptadores (`AdaptadorDebianArm64.java`), bootstrap de rootfs y recetas.
