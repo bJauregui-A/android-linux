@@ -395,7 +395,26 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
      - Respaldadas las versiones previas como `libc.so.6.0019` y desplegada atómicamente la nueva `libc.so.6` (`.0020`) y `ld-linux-aarch64.so.1` (`.0020`) a todas las instancias activas del teléfono (`sway-54452`, `cosmic-67805`, `niri-70360`, `phosh-4056`) mediante `rename` atómico sin interrumpir las sesiones en ejecución.
      - Actualizado `app/src/main/jniLibs/arm64-v8a/libldp.so` y creado el parche `glibc/parches/0020-android-netlink.patch`.
 
-**Siguiente sesión (61ª):**
+**61ª sesión (2026-10-22, repo + Redmi por USB):**
+1. **Diagnóstico del nombre de usuario (`user` vs seleccionado):**
+   - **Causa identificada:** En la interfaz de la app ("✦ NUEVO ENTORNO LINUX"), el campo de texto solicita "Nombre del Entorno" (ej: `cosmic`, `phosh`, `sway`), el cual se utiliza para el identificador de la instancia en `files/instancias/<nombre>-<id>`. Posteriormente, al arrancar la terminal interactiva por primera vez, `primer-arranque.sh` muestra el paso `[1/4] Identidad del Sistema y Usuario: Nombre de usuario [user]: `. La lógica `read -r N; N=${N:-user}` asigna `user` por omisión si se presiona Enter. En `phosh` y `sway` se escribió explícitamente `ben4shot`; en `cosmic` y `niri` se presionó Enter tomando el valor por omisión `user`.
+2. **glibc 0021 — Desbloqueo y autenticación PAM sin Netlink Audit (`0021-android-audit-netlink.patch`):**
+   - **Diagnóstico del rechazo de contraseñas:** Tanto la pantalla de bloqueo de Phosh (`phosh`) como el greeter de COSMIC (`cosmic-greeter` vía servicio PAM `login`) invocan `/usr/bin/unix_chkpwd`. Se aisló el flujo mediante programas de prueba C (`test_chk` y `test_pam`) y se descubrió que `unix_chkpwd` verifica exitosamente el hash SHA-512 en `/etc/shadow`, pero a continuación llama a `audit_open()` (`libaudit`), el cual ejecuta `socket(AF_NETLINK, SOCK_RAW, NETLINK_AUDIT)`. En Android (`untrusted_app`), SELinux niega este socket con `errno = EACCES` (13). `unix_chkpwd` exige que si el socket falla, el kernel devuelva `EPROTONOSUPPORT` o `EINVAL`; al recibir `EACCES`, asume que el sistema de auditoría está corrompido/bloqueado y aborta con código de salida 7 (`PAM_AUTH_ERR`) a pesar de tener la contraseña correcta. Tras 3 intentos, `pam_faillock.so` bloqueaba las cuentas en `/run/faillock/` devolviendo error 4 (`PAM_SYSTEM_ERR`).
+   - **Implementación del parche 0021:**
+     - En `sysdeps/unix/sysv/linux/aarch64/android-path.c`, bajo `case __NR_socket:`:
+       ```c
+       if ((r == -EACCES || r == -EPERM) && a0 == AF_NETLINK && a2 == 9 /* NETLINK_AUDIT */)
+         return -EPROTONOSUPPORT;
+       ```
+     - Recompilada glibc 2.43 con Docker (`glibc-cross`).
+   - **Validación y despliegue:**
+     - Probado de forma aislada en `phosh-4056/tmp/test_libc`: `test_audit` confirmó `audit_open() = -1, errno = 93` (`EPROTONOSUPPORT`). `test_chk` retornó exitosamente código 0 (`PAM_SUCCESS`) con contraseña válida y código 7 con contraseña inválida.
+     - `test_pam` autenticó al 100% tanto con servicio `phosh` como con servicio `login`.
+     - Desplegada atómicamente `libc.so.6.0021` a todas las instancias (`phosh-4056`, `cosmic-67805`, `sway-54452`, `niri-70360`), conservando el respaldo `libc.so.6.0020`.
+     - Limpiados todos los archivos de bloqueo residuales en `run/faillock/`.
+     - Actualizado `app/src/main/jniLibs/arm64-v8a/libldp.so` y creado el parche `glibc/parches/0021-android-audit-netlink.patch`.
+
+**Siguiente sesión (62ª):**
 1. **Punto 3.3: Soporte para ejecución de binarios estáticos (`execve_x` en `android-path.c`):**
    - **Problema técnico:** En Android (API 36 / SELinux no-root), el kernel niega `execve` directo sobre `/data/data/...` (`W^X` / `noexec`). `android-path.c` sortea esto lanzando todos los binarios dinámicos mediante el cargador `libldp.so` (ubicado en `nativeLibraryDir`), usando `libldp.so --library-path ... <binario> <args>`. Sin embargo, los binarios compilados estáticamente (`ldconfig`, herramientas de rescate, binarios Go compilados con `CGO_ENABLED=0`, `busybox` estático) carecen de cabecera `PT_INTERP`, por lo que el cargador dinámico no puede ejecutarlos de forma estándar.
    - **Estrategia de solución:**
