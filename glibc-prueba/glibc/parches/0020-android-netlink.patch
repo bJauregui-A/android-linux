@@ -1,0 +1,542 @@
+--- a/sysdeps/unix/sysv/linux/aarch64/sysdep.h	2026-10-22 03:16:28.468046840 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/sysdep.h	2026-10-22 03:02:33.441085622 -0300
+@@ -212,6 +212,8 @@
+     case __NR_renameat2: case __NR_symlinkat: case __NR_readlinkat:
+     case __NR_getcwd: case __NR_bind: case __NR_connect: case __NR_execve:
+     case __NR_execveat: case __NR_ioctl: case __NR_socket:
++    case __NR_getsockname: case __NR_sendto: case __NR_sendmsg:
++    case __NR_recvmsg: case __NR_recvfrom: case __NR_close:
+     case __NR_getuid: case __NR_geteuid: case __NR_getgid: case __NR_getegid:
+     case __NR_getresuid: case __NR_getresgid: case __NR_fchown:
+     case __NR_setuid: case __NR_setgid: case __NR_setreuid:
+--- a/sysdeps/unix/sysv/linux/aarch64/android-path.c	2026-10-22 03:16:28.475580390 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/android-path.c	2026-10-22 03:13:27.414521344 -0300
+@@ -32,6 +32,10 @@
+ #include <sys/un.h>
+ #include <unistd.h>
+ #include <sys/auxv.h>
++#include <net/if.h>
++#include <net/if_arp.h>
++#include <linux/netlink.h>
++#include <linux/rtnetlink.h>
+ 
+ #define KEY_PREFIX "GLIBC_PREFIX="
+ #define KEY_LOADER "GLIBC_LOADER="
+@@ -1029,6 +1033,304 @@
+ 	 && (uevent_fds[fd / UEV_BITS] >> (fd % UEV_BITS)) & 1;
+ }
+ 
++/* Emulación de Netlink Route (RTM_GETLINK, RTM_GETNEIGH y bind).
++   Android SELinux prohíbe bind(nl_groups=0) y sendto(RTM_GETLINK) a apps
++   sin privilegios (untrusted_app) para evitar fuga de MAC de Wi-Fi.
++   Aquí emulamos bind() y sintetizamos la tabla de enlaces vía SIOCGIFCONF
++   para que `ip a`, `ip r`, `ip link` y check_native() de glibc funcionen.  */
++static unsigned long int netlink_fds[1024 / UEV_BITS];
++
++static void
++netlink_marcar (long int fd, int si)
++{
++  if (fd < 0 || fd >= 1024)
++    return;
++  unsigned long int b = 1UL << (fd % UEV_BITS);
++  if (si)
++    atomic_fetch_or_relaxed (&netlink_fds[fd / UEV_BITS], b);
++  else if (netlink_fds[fd / UEV_BITS] & b)
++    atomic_fetch_and_relaxed (&netlink_fds[fd / UEV_BITS], ~b);
++}
++
++static int
++netlink_es (long int fd)
++{
++  return fd >= 0 && fd < 1024
++	 && ((netlink_fds[fd / UEV_BITS] >> (fd % UEV_BITS)) & 1);
++}
++
++#define NUM_NL_SLOTS 4
++#define NL_BUF_SIZE 4096
++
++struct nl_synth_slot
++{
++  int fd;
++  size_t len;
++  size_t off;
++  char buf[NL_BUF_SIZE];
++};
++
++static struct nl_synth_slot nl_slots[NUM_NL_SLOTS];
++static unsigned int nl_lock;
++
++static inline void
++nl_lock_acquire (void)
++{
++  while (atomic_exchange_acquire (&nl_lock, 1))
++    ;
++}
++
++static inline void
++nl_lock_release (void)
++{
++  atomic_store_release (&nl_lock, 0);
++}
++
++static void
++nl_slot_limpiar (int fd)
++{
++  if (fd < 0)
++    return;
++  nl_lock_acquire ();
++  for (int i = 0; i < NUM_NL_SLOTS; i++)
++    {
++      if (nl_slots[i].fd == fd)
++	{
++	  nl_slots[i].fd = -1;
++	  nl_slots[i].len = 0;
++	  nl_slots[i].off = 0;
++	}
++    }
++  nl_lock_release ();
++}
++
++static struct nl_synth_slot *
++nl_get_slot (int fd, int crear)
++{
++  if (fd < 0)
++    return NULL;
++  for (int i = 0; i < NUM_NL_SLOTS; i++)
++    {
++      if (nl_slots[i].fd == fd)
++	return &nl_slots[i];
++    }
++  if (!crear)
++    return NULL;
++  for (int i = 0; i < NUM_NL_SLOTS; i++)
++    {
++      if (nl_slots[i].fd <= 0)
++	{
++	  nl_slots[i].fd = fd;
++	  nl_slots[i].len = 0;
++	  nl_slots[i].off = 0;
++	  return &nl_slots[i];
++	}
++    }
++  nl_slots[0].fd = fd;
++  nl_slots[0].len = 0;
++  nl_slots[0].off = 0;
++  return &nl_slots[0];
++}
++
++static inline void
++mzero (void *d, size_t n)
++{
++  char *p = (char *) d;
++  for (size_t i = 0; i < n; i++)
++    p[i] = 0;
++}
++
++static inline int
++str_igual (const char *a, const char *b)
++{
++  size_t la = slen (a);
++  if (la != slen (b))
++    return 0;
++  return starts (a, b, la + 1);
++}
++
++static size_t
++armar_getlink_sintetico (char *buf, size_t maxlen, const struct nlmsghdr *req_nlh)
++{
++  uint32_t seq = req_nlh->nlmsg_seq;
++  uint32_t pid = req_nlh->nlmsg_pid ? req_nlh->nlmsg_pid
++				    : (uint32_t) raw (__NR_getpid, 0, 0, 0, 0, 0, 0);
++  int is_dump = (req_nlh->nlmsg_flags & (NLM_F_DUMP | NLM_F_ROOT)) != 0;
++  int target_index = 0;
++  char target_name[IFNAMSIZ];
++  mzero (target_name, sizeof target_name);
++
++  if (!is_dump && req_nlh->nlmsg_len >= NLMSG_LENGTH (sizeof (struct ifinfomsg)))
++    {
++      const struct ifinfomsg *req_ifi = (const struct ifinfomsg *) NLMSG_DATA (req_nlh);
++      target_index = req_ifi->ifi_index;
++      int rtalen = req_nlh->nlmsg_len - NLMSG_LENGTH (sizeof (struct ifinfomsg));
++      const struct rtattr *rta = (const struct rtattr *) ((const char *) req_ifi + NLMSG_ALIGN (sizeof (struct ifinfomsg)));
++      while (RTA_OK (rta, rtalen))
++	{
++	  if (rta->rta_type == IFLA_IFNAME)
++	    {
++	      size_t dl = RTA_PAYLOAD (rta);
++	      if (dl >= sizeof target_name)
++		dl = sizeof target_name - 1;
++	      mcopy (target_name, (const char *) RTA_DATA (rta), dl);
++	      target_name[dl] = '\0';
++	    }
++	  rta = RTA_NEXT (rta, rtalen);
++	}
++    }
++
++  long int s = raw (__NR_socket, AF_INET, SOCK_DGRAM, 0, 0, 0, 0);
++  if (s < 0)
++    return 0;
++
++  char conf_buffer[2048];
++  struct ifconf ifc;
++  ifc.ifc_len = sizeof (conf_buffer);
++  ifc.ifc_buf = conf_buffer;
++
++  if (raw (__NR_ioctl, s, SIOCGIFCONF, (long int) &ifc, 0, 0, 0) < 0)
++    {
++      raw (__NR_close, s, 0, 0, 0, 0, 0);
++      return 0;
++    }
++
++  size_t out_len = 0;
++  char vistos[32][IFNAMSIZ];
++  int nvistos = 0;
++  int found_match = 0;
++
++  int n_ifrs = ifc.ifc_len / sizeof (struct ifreq);
++  struct ifreq *ifrs = ifc.ifc_req;
++
++  for (int i = 0; i < n_ifrs; i++)
++    {
++      const char *name = ifrs[i].ifr_name;
++      int repetido = 0;
++      for (int j = 0; j < nvistos; j++)
++	{
++	  if (str_igual (vistos[j], name))
++	    {
++	      repetido = 1;
++	      break;
++	    }
++	}
++      if (repetido)
++	continue;
++      if (nvistos < 32)
++	{
++	  size_t nl = slen (name);
++	  if (nl >= IFNAMSIZ)
++	    nl = IFNAMSIZ - 1;
++	  mcopy (vistos[nvistos], name, nl);
++	  vistos[nvistos][nl] = '\0';
++	  nvistos++;
++	}
++
++      struct ifreq ifr;
++      mzero (&ifr, sizeof ifr);
++      size_t nl = slen (name);
++      if (nl >= sizeof ifr.ifr_name)
++	nl = sizeof ifr.ifr_name - 1;
++      mcopy (ifr.ifr_name, name, nl);
++      ifr.ifr_name[nl] = '\0';
++
++      short flags = 0;
++      if (raw (__NR_ioctl, s, SIOCGIFFLAGS, (long int) &ifr, 0, 0, 0) == 0)
++	flags = ifr.ifr_flags;
++
++      int mtu = 1500;
++      if (raw (__NR_ioctl, s, SIOCGIFMTU, (long int) &ifr, 0, 0, 0) == 0)
++	mtu = ifr.ifr_mtu;
++
++      int idx = i + 1;
++      if (raw (__NR_ioctl, s, SIOCGIFINDEX, (long int) &ifr, 0, 0, 0) == 0)
++	idx = ifr.ifr_ifindex;
++
++      if (!is_dump)
++	{
++	  if (target_index > 0 && idx != target_index)
++	    continue;
++	  if (target_name[0] != '\0' && !str_igual (target_name, name))
++	    continue;
++	}
++
++      size_t namelen = slen (name) + 1;
++      size_t rta_name_len = RTA_SPACE (namelen);
++      size_t rta_mtu_len = RTA_SPACE (sizeof (uint32_t));
++      size_t msg_len = NLMSG_SPACE (sizeof (struct ifinfomsg)) + rta_name_len + rta_mtu_len;
++
++      if (out_len + msg_len > maxlen)
++	break;
++
++      struct nlmsghdr *nlh = (struct nlmsghdr *) (buf + out_len);
++      nlh->nlmsg_len = msg_len;
++      nlh->nlmsg_type = RTM_NEWLINK;
++      nlh->nlmsg_flags = is_dump ? NLM_F_MULTI : 0;
++      nlh->nlmsg_seq = seq;
++      nlh->nlmsg_pid = pid;
++
++      struct ifinfomsg *ifi = (struct ifinfomsg *) NLMSG_DATA (nlh);
++      ifi->ifi_family = AF_UNSPEC;
++      ifi->ifi_type = (flags & IFF_LOOPBACK) ? ARPHRD_LOOPBACK : ARPHRD_ETHER;
++      ifi->ifi_index = idx;
++      ifi->ifi_flags = flags;
++      ifi->ifi_change = 0;
++
++      char *rta_ptr = (char *) NLMSG_DATA (nlh) + NLMSG_ALIGN (sizeof (struct ifinfomsg));
++
++      struct rtattr *rta_name = (struct rtattr *) rta_ptr;
++      rta_name->rta_type = IFLA_IFNAME;
++      rta_name->rta_len = RTA_LENGTH (namelen);
++      mcopy ((char *) RTA_DATA (rta_name), name, namelen);
++      rta_ptr += rta_name_len;
++
++      struct rtattr *rta_mtu = (struct rtattr *) rta_ptr;
++      rta_mtu->rta_type = IFLA_MTU;
++      rta_mtu->rta_len = RTA_LENGTH (sizeof (uint32_t));
++      *(uint32_t *) RTA_DATA (rta_mtu) = mtu;
++
++      out_len += NLMSG_ALIGN (msg_len);
++      found_match = 1;
++
++      if (!is_dump)
++	break;
++    }
++  raw (__NR_close, s, 0, 0, 0, 0, 0);
++
++  if (is_dump)
++    {
++      if (out_len + NLMSG_SPACE (sizeof (int)) <= maxlen)
++	{
++	  struct nlmsghdr *nlh = (struct nlmsghdr *) (buf + out_len);
++	  nlh->nlmsg_len = NLMSG_LENGTH (sizeof (int));
++	  nlh->nlmsg_type = NLMSG_DONE;
++	  nlh->nlmsg_flags = 0;
++	  nlh->nlmsg_seq = seq;
++	  nlh->nlmsg_pid = pid;
++	  *(int *) NLMSG_DATA (nlh) = 0;
++	  out_len += NLMSG_SPACE (sizeof (int));
++	}
++    }
++  else if (!found_match)
++    {
++      if (out_len + NLMSG_SPACE (sizeof (struct nlmsgerr)) <= maxlen)
++	{
++	  struct nlmsghdr *nlh = (struct nlmsghdr *) (buf + out_len);
++	  nlh->nlmsg_len = NLMSG_LENGTH (sizeof (struct nlmsgerr));
++	  nlh->nlmsg_type = NLMSG_ERROR;
++	  nlh->nlmsg_flags = 0;
++	  nlh->nlmsg_seq = seq;
++	  nlh->nlmsg_pid = pid;
++	  struct nlmsgerr *err = (struct nlmsgerr *) NLMSG_DATA (nlh);
++	  err->error = -ENODEV;
++	  mcopy ((char *) &err->msg, (const char *) req_nlh, sizeof (struct nlmsghdr));
++	  out_len += NLMSG_SPACE (sizeof (struct nlmsgerr));
++	}
++    }
++  return out_len;
++}
++
+ long int
+ __android_path_syscall (long int nr, long int a0, long int a1, long int a2,
+ 			long int a3, long int a4, long int a5)
+@@ -1036,6 +1338,170 @@
+   init ();
+   switch (nr)
+     {
++    case __NR_close:
++      netlink_marcar (a0, 0);
++      uevent_marcar (a0, 0);
++      nl_slot_limpiar (a0);
++      return raw (nr, a0, a1, a2, a3, a4, a5);
++    case __NR_socket:
++      {
++	long int r = raw (nr, a0, a1, a2, 0, 0, 0);
++	int reemplazo = 0;
++	if (r == -EACCES && a0 == AF_NETLINK && a2 == 15 /* KOBJECT_UEVENT */)
++	  {
++	    r = raw (nr, a0, a1, 0 /* NETLINK_ROUTE */, 0, 0, 0);
++	    reemplazo = r >= 0;
++	  }
++	uevent_marcar (r, reemplazo);
++	if (r >= 0 && a0 == AF_NETLINK)
++	  netlink_marcar (r, 1);
++	return r;
++      }
++    case __NR_bind:
++      {
++	const struct sockaddr *sa = (const struct sockaddr *) a1;
++	if (sa != NULL && sa->sa_family == AF_NETLINK)
++	  {
++	    const struct sockaddr_nl *snl = (const struct sockaddr_nl *) a1;
++	    long int r = raw (nr, a0, a1, a2, 0, 0, 0);
++	    if (r == -EACCES && (snl->nl_groups == 0 || uevent_es (a0)))
++	      {
++		netlink_marcar (a0, 1);
++		return 0;
++	      }
++	    return r;
++	  }
++	break;
++      }
++    case __NR_getsockname:
++      {
++	long int r = raw (nr, a0, a1, a2, 0, 0, 0);
++	if (r == 0 && a1 != 0 && netlink_es (a0))
++	  {
++	    struct sockaddr_nl *snl = (struct sockaddr_nl *) a1;
++	    if (snl->nl_family == AF_NETLINK && snl->nl_pid == 0)
++	      snl->nl_pid = (uint32_t) raw (__NR_getpid, 0, 0, 0, 0, 0, 0);
++	  }
++	return r;
++      }
++    case __NR_sendto:
++      if (netlink_es (a0) && a1 != 0 && (size_t) a2 >= sizeof (struct nlmsghdr))
++	{
++	  const struct nlmsghdr *nlh = (const struct nlmsghdr *) a1;
++	  if (nlh->nlmsg_type == RTM_GETLINK)
++	    {
++	      nl_lock_acquire ();
++	      struct nl_synth_slot *sl = nl_get_slot (a0, 1);
++	      sl->len = armar_getlink_sintetico (sl->buf, sizeof (sl->buf), nlh);
++	      sl->off = 0;
++	      nl_lock_release ();
++	      return a2;
++	    }
++	  if (nlh->nlmsg_type == RTM_GETNEIGH)
++	    {
++	      nl_lock_acquire ();
++	      struct nl_synth_slot *sl = nl_get_slot (a0, 1);
++	      struct nlmsghdr *done = (struct nlmsghdr *) sl->buf;
++	      done->nlmsg_len = NLMSG_LENGTH (sizeof (int));
++	      done->nlmsg_type = NLMSG_DONE;
++	      done->nlmsg_flags = 0;
++	      done->nlmsg_seq = nlh->nlmsg_seq;
++	      done->nlmsg_pid = nlh->nlmsg_pid ? nlh->nlmsg_pid
++					       : (uint32_t) raw (__NR_getpid, 0, 0, 0, 0, 0, 0);
++	      *(int *) NLMSG_DATA (done) = 0;
++	      sl->len = NLMSG_SPACE (sizeof (int));
++	      sl->off = 0;
++	      nl_lock_release ();
++	      return a2;
++	    }
++	}
++      return raw (nr, a0, a1, a2, a3, a4, a5);
++    case __NR_sendmsg:
++      if (netlink_es (a0) && a1 != 0)
++	{
++	  const struct msghdr *mh = (const struct msghdr *) a1;
++	  if (mh->msg_iov != NULL && mh->msg_iovlen > 0)
++	    {
++	      const void *ib = mh->msg_iov[0].iov_base;
++	      size_t il = mh->msg_iov[0].iov_len;
++	      if (ib != NULL && il >= sizeof (struct nlmsghdr))
++		{
++		  const struct nlmsghdr *nlh = (const struct nlmsghdr *) ib;
++		  if (nlh->nlmsg_type == RTM_GETLINK || nlh->nlmsg_type == RTM_GETNEIGH)
++		    return __android_path_syscall (__NR_sendto, a0, (long int) ib, il, a2, 0, 0);
++		}
++	    }
++	}
++      return raw (nr, a0, a1, a2, a3, a4, a5);
++    case __NR_recvmsg:
++      {
++	nl_lock_acquire ();
++	struct nl_synth_slot *sl = nl_get_slot (a0, 0);
++	if (sl != NULL && sl->len > sl->off)
++	  {
++	    if (a2 & MSG_PEEK)
++	      {
++		size_t ret = sl->len - sl->off;
++		nl_lock_release ();
++		return ret;
++	      }
++	    struct msghdr *mh = (struct msghdr *) a1;
++	    size_t rem = sl->len - sl->off;
++	    size_t total = 0;
++	    for (size_t i = 0; i < (size_t) mh->msg_iovlen && rem > 0; i++)
++	      {
++		size_t cp = mh->msg_iov[i].iov_len < rem ? mh->msg_iov[i].iov_len : rem;
++		mcopy ((char *) mh->msg_iov[i].iov_base, sl->buf + sl->off, cp);
++		sl->off += cp;
++		rem -= cp;
++		total += cp;
++	      }
++	    if (mh->msg_name != NULL && (size_t) mh->msg_namelen >= sizeof (struct sockaddr_nl))
++	      {
++		struct sockaddr_nl *snl = (struct sockaddr_nl *) mh->msg_name;
++		mzero (snl, sizeof (*snl));
++		snl->nl_family = AF_NETLINK;
++		mh->msg_namelen = sizeof (struct sockaddr_nl);
++	      }
++	    if (sl->off >= sl->len)
++	      sl->fd = -1;
++	    nl_lock_release ();
++	    return total;
++	  }
++	nl_lock_release ();
++	return raw (nr, a0, a1, a2, a3, a4, a5);
++      }
++    case __NR_recvfrom:
++      {
++	nl_lock_acquire ();
++	struct nl_synth_slot *sl = nl_get_slot (a0, 0);
++	if (sl != NULL && sl->len > sl->off)
++	  {
++	    if (a3 & MSG_PEEK)
++	      {
++		size_t ret = sl->len - sl->off;
++		nl_lock_release ();
++		return ret;
++	      }
++	    size_t rem = sl->len - sl->off;
++	    size_t cp = (size_t) a2 < rem ? (size_t) a2 : rem;
++	    mcopy ((char *) a1, sl->buf + sl->off, cp);
++	    sl->off += cp;
++	    if (a4 != 0 && a5 != 0 && *(socklen_t *) a5 >= sizeof (struct sockaddr_nl))
++	      {
++		struct sockaddr_nl *snl = (struct sockaddr_nl *) a4;
++		mzero (snl, sizeof (*snl));
++		snl->nl_family = AF_NETLINK;
++		*(socklen_t *) a5 = sizeof (struct sockaddr_nl);
++	      }
++	    if (sl->off >= sl->len)
++	      sl->fd = -1;
++	    nl_lock_release ();
++	    return cp;
++	  }
++	nl_lock_release ();
++	return raw (nr, a0, a1, a2, a3, a4, a5);
++      }
+     case __NR_rt_sigaction:
+     case __NR_rt_sigprocmask:
+       return raw (nr, a0, a1, a2, a3, a4, a5);
+@@ -1223,16 +1689,6 @@
+     case __NR_connect:
+       {
+ 	const struct sockaddr_un *sa = (const struct sockaddr_un *) a1;
+-	/* bind del reemplazo de NETLINK_KOBJECT_UEVENT (ver __NR_socket):
+-	   negado, se da por hecho.  Solo ese: getaddrinfo también abre
+-	   NETLINK_ROUTE, sabe arreglárselas sin bind y con un bind falso se
+-	   queda esperando una respuesta que no llega.  */
+-	if (nr == __NR_bind && sa != NULL && sa->sun_family == AF_NETLINK
+-	    && uevent_es (a0))
+-	  {
+-	    long int r = raw (nr, a0, a1, a2, 0, 0, 0);
+-	    return r == -EACCES ? 0 : r;
+-	  }
+ 	size_t off = offsetof (struct sockaddr_un, sun_path);
+ 	if (sa == NULL || (size_t) a2 <= off || sa->sun_family != AF_UNIX
+ 	    || sa->sun_path[0] != '/')
+@@ -1289,24 +1745,6 @@
+ 	return evdev_ioctl (a0, a1, a2);
+       break;
+ 
+-    /* udev: el seccomp/SELinux de apps no deja abrir NETLINK_KOBJECT_UEVENT y
+-       libudev falla al crear su monitor (SDL_Init con haptic falla entero: Wine
+-       se queda sin mandos).  Se le da un NETLINK_ROUTE sin grupos (sí se puede
+-       crear): el monitor existe y nunca recibe nada.  Los mandos se encuentran
+-       igual por /dev/input.  */
+-    case __NR_socket:
+-      {
+-	long int r = raw (nr, a0, a1, a2, 0, 0, 0);
+-	int reemplazo = 0;
+-	if (r == -EACCES && a0 == AF_NETLINK && a2 == 15 /* KOBJECT_UEVENT */)
+-	  {
+-	    r = raw (nr, a0, a1, 0 /* NETLINK_ROUTE */, 0, 0, 0);
+-	    reemplazo = r >= 0;
+-	  }
+-	uevent_marcar (r, reemplazo);
+-	return r;
+-      }
+-
+     case __NR_execve:
+       return execve_x ((const char *) a0, (char *const *) a1,
+ 		       (char *const *) a2, b1);
