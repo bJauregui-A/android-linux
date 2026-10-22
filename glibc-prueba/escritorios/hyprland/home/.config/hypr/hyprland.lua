@@ -71,8 +71,9 @@ hl.gesture({
 })
 
 local mainMod = "SUPER"
-hl.bind(mainMod .. " + Return", hl.dsp.exec_cmd("kitty"))
-hl.bind(mainMod .. " + T",      hl.dsp.exec_cmd("kitty"))
+local terminal_cmd = "sh -c 'command -v kitty >/dev/null 2>&1 && exec kitty || command -v foot >/dev/null 2>&1 && exec foot || command -v konsole >/dev/null 2>&1 && exec konsole || command -v alacritty >/dev/null 2>&1 && exec alacritty || exec xterm'"
+hl.bind(mainMod .. " + Return", hl.dsp.exec_cmd(terminal_cmd))
+hl.bind(mainMod .. " + T",      hl.dsp.exec_cmd(terminal_cmd))
 hl.bind(mainMod .. " + Q",      hl.dsp.window.close())
 hl.bind(mainMod .. " + A",      hl.dsp.exec_cmd("fuzzel"))
 hl.bind(mainMod .. " + E",      hl.dsp.exec_cmd("dolphin"))

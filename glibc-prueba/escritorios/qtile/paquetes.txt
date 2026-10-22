@@ -1,1 +1,1 @@
-qtile wlr-randr
+qtile wlr-randr foot

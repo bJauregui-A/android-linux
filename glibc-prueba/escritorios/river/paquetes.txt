@@ -1,1 +1,1 @@
-river-classic wlr-randr
+river-classic wlr-randr foot

@@ -1,1 +1,1 @@
-niri xwayland-satellite wlr-randr
+niri xwayland-satellite wlr-randr foot

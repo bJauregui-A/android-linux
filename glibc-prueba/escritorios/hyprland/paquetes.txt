@@ -1,1 +1,1 @@
-hyprland wlr-randr
+hyprland wlr-randr kitty foot waybar fuzzel

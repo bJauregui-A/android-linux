@@ -1,1 +1,1 @@
-labwc wlr-randr swaybg
+labwc wlr-randr swaybg foot

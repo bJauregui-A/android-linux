@@ -1,1 +1,1 @@
-wayfire wf-shell wlr-randr
+wayfire wf-shell wlr-randr foot

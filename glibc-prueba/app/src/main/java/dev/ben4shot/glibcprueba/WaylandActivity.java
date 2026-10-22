@@ -160,13 +160,8 @@ public class WaylandActivity extends Activity {
             @Override
             public void surfaceChanged(SurfaceHolder h, int formato, int ancho, int alto) {
                 DisplayMetrics dm = getResources().getDisplayMetrics();
-                int altoReal = alto;
-                if (altoIme > 0) {
-                    int barraH = barraTeclas != null ? barraTeclas.getHeight() : 0;
-                    altoReal = Math.max(200, alto - altoIme - barraH);
-                }
-                Wayland.ventana(h.getSurface(), ancho, altoReal,
-                        Math.round(ancho / dm.xdpi * 25.4f), Math.round(altoReal / dm.ydpi * 25.4f));
+                Wayland.ventana(h.getSurface(), ancho, alto,
+                        Math.round(ancho / dm.xdpi * 25.4f), Math.round(alto / dm.ydpi * 25.4f));
                 startService(new Intent(WaylandActivity.this, TerminalService.class)
                         .setAction(TerminalService.REAJUSTAR_PANTALLA));
             }
@@ -361,15 +356,29 @@ public class WaylandActivity extends Activity {
     private void reajustar() {
         inmersivo();
         if (vista != null && vista.getHolder().getSurface() != null) {
-            int ancho = vista.getWidth();
-            int alto = vista.getHeight();
+            android.view.View padre = (android.view.View) vista.getParent();
+            int ancho = padre != null && padre.getWidth() > 0 ? padre.getWidth() : vista.getWidth();
+            int altoPadre = padre != null && padre.getHeight() > 0 ? padre.getHeight() : vista.getHeight();
             WindowInsets insets = vista.getRootWindowInsets();
             if (insets != null) {
                 altoIme = insets.getInsets(WindowInsets.Type.ime()).bottom;
             }
+            int alto = altoPadre;
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) vista.getLayoutParams();
             if (altoIme > 0) {
                 int barraH = barraTeclas != null ? barraTeclas.getHeight() : 0;
-                alto = Math.max(200, alto - altoIme - barraH);
+                alto = Math.max(200, altoPadre - altoIme - barraH);
+                if (lp.height != alto) {
+                    lp.height = alto;
+                    lp.gravity = Gravity.TOP;
+                    vista.setLayoutParams(lp);
+                }
+            } else {
+                if (lp.height != FrameLayout.LayoutParams.MATCH_PARENT) {
+                    lp.height = FrameLayout.LayoutParams.MATCH_PARENT;
+                    lp.gravity = Gravity.NO_GRAVITY;
+                    vista.setLayoutParams(lp);
+                }
             }
             if (ancho > 0 && alto > 0) {
                 DisplayMetrics dm = getResources().getDisplayMetrics();
