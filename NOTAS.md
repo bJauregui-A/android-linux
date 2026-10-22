@@ -562,17 +562,43 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
      - Generada la marca `/var/lib/arch-android/instalado` y eliminado el estado temporal `/var/lib/arch-android/instalando`.
      - Regenerado `trabajo/assets-sdk36/capa.tgz`, compilada e instalada la APK en el teléfono con `adb install -r` (Success). El entorno Niri queda listo para iniciar directamente con el supervisor `sesion-android` y el visualizador de arranque al presionar `▶ ESCRITORIO`.
 
-**Siguiente sesión (67ª):**
-1. **Configuración de proxy en puerto 22 real de Wi-Fi:**
+**67ª sesión (2026-10-22, repo + Redmi por USB):**
+1. **Regla permanente incorporada al contexto de agentes ([AGENTS.md](file:///media/ben4shot/E/Develop/Android/AGENTS.md)):**
+   - Obligación estricta: Siempre que se modifiquen binarios o bibliotecas nativas de glibc (`libldp.so`, `libc.so.6`, shims, etc.), se deben volver a empaquetar e incorporar al APK (`jniLibs`, assets/capa) y sincronizar a las instancias del teléfono; nunca dejar el binario solo en `build/` o solo a medias en `jniLibs`.
+2. **Corrección de `ip a` / `ip r` en glibc nativa:**
+   - Detectado que la versión desplegada en instancias no tenía aplicados los cambios de netlink sintético (`0020-android-netlink`).
+   - Actualizado [apk/capa.py](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/capa.py) para incluir siempre `usr/lib/libc.so.6`.
+   - Desplegada `libc.so.6` con soporte de netlink en las instancias del teléfono dejando respaldo `.0018`.
+3. **Supervisor y gestor de servicios nativo en C puro (`service` / `sv`):**
+   - Desarrollados [supervisor/service-daemon.c](file:///media/ben4shot/E/Develop/Android/glibc-prueba/supervisor/service-daemon.c) y [supervisor/service.c](file:///media/ben4shot/E/Develop/Android/glibc-prueba/supervisor/service.c) en C puro (67 KB compilados a ARM64, 0 dependencias de Python ni systemd).
+   - Acciones soportadas: `start`, `stop`, `restart`, `status`, `enable`, `disable`, `logs`, `list`.
+   - Compatibilidad total con paquetes pacman: symlink `/usr/lib/systemd/system -> /etc/services.d`. Todo servicio instalado por pacman deposita sus unit files directamente en `/etc/services.d` y pasa a ser gestionado por `service`/`sv`.
+   - Autoarranque transparente: integrado script [supervisor.sh](file:///media/ben4shot/E/Develop/Android/glibc-prueba/supervisor/supervisor.sh) en `/etc/profile.d/` y llamada de inicio en [escritorios/autostart-android](file:///media/ben4shot/E/Develop/Android/glibc-prueba/escritorios/autostart-android).
+   - Probado y verificado en vivo en el Redmi 15 5G con `sshd` (`service sshd start`, `service sshd status`, `service list`, `service sshd stop`).
+4. **Gestor de Red Privada Virtual / Subredes e IPs en la UI Android:**
+   - Modificado [RedManager.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/RedManager.java) con persistencia en SharedPreferences para definición de subredes CIDR y asignación de IPs virtuales por máquina.
+   - En [SistemaActivity.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/SistemaActivity.java): diálogo de red dividido en 3 pestañas: `⊞ MÁQUINAS / IPS` (con selector de subred y campo editable de IP individual con botón `💾`), `⑂ SUBREDES` (creación y borrado de rangos de subred) y `⇄ REENVÍO PUERTOS`.
+   - Escritura automática del archivo `/etc/virtual-ip` por instancia al asignar/modificar una IP.
+5. **Implementación de interfaz de red virtual `vnet0` en glibc:**
+   - Parche formal [0022-android-virtual-net.patch](file:///media/ben4shot/E/Develop/Android/glibc-prueba/glibc/parches/0022-android-virtual-net.patch) en `android-path.c`.
+   - Lee `/etc/virtual-ip` y sintetiza una interfaz `vnet0` en `RTM_GETLINK` (ifindex 99, UP, BROADCAST, RUNNING) y `RTM_GETADDR` con su dirección IP y máscara asignadas.
+   - Intercepta llamadas a `bind()` hacia la IP virtual mapeándolas a `INADDR_ANY` para que el kernel Android permita escuchar sin requerir privilegios ni interfaces reales creadas por root.
+   - Intercepta llamadas a `connect()` hacia la IP virtual propia redirigiéndolas a `127.0.0.1` de forma transparente.
+   - Verificado en vivo en el Redmi 15 5G:
+     - `ip a`: muestra `vnet0` con su IP y prefijo (ej. `10.0.0.2/24`).
+     - Servidor de socket Python haciendo bind en `10.0.0.2:9999` y cliente conectándose exitosamente.
+6. **Empaquetado e integración completa:**
+   - Recompilados `salida/usr/lib/libc.so.6`, `app/src/main/jniLibs/arm64-v8a/libldp.so`, `base.tgz` y `capa.tgz`.
+   - Ajustados [apk/instalar.sh](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/instalar.sh) y [apk/primer-arranque.sh](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/primer-arranque.sh) para garantizar la creación del symlink de pacman a `/etc/services.d`.
+   - APK `sdk36Debug` construida exitosamente.
+
+**Siguiente sesión (68ª):**
+1. **Instalación y validación final de la APK en el Redmi:**
+   - Notificar al usuario para aplicar `adb install -r` con el APK actualizado.
+   - Validar la nueva interfaz de Red (`[ ⇄ RED ]`) con pestañas `⊞ MÁQUINAS / IPS`, `⑂ SUBREDES` y verificar la asignación dinámica de IPs y su reflejo en `ip a` en múltiples instancias.
+2. **Configuración de proxy en puerto 22 real de Wi-Fi:**
    - Implementar y poner a prueba el script o daemon en espacio `shell` (UID 2000, con `CAP_NET_BIND_SERVICE`) vía `adb-conectar` para escuchar en `0.0.0.0:22` y redirigir el tráfico SSH directamente a la instancia seleccionada o configurada en la UI de Red.
-2. **Pruebas avanzadas de la subred virtual y reenvío de puertos:**
-   - Probar en vivo las reglas de Port Forwarding desde la UI `[ ⇄ RED ]` (ej. mapear un puerto como el 8080 hacia una instancia y acceder desde el navegador de Android o desde otro dispositivo en la red local).
 3. **Punto 3.3: Soporte para ejecución de binarios estáticos (`execve_x` en `android-path.c`):**
    - Soporte para binarios estáticos (`ldconfig`, `busybox`, herramientas compiladas estáticamente sin `PT_INTERP`) bajo W^X de Android mediante cargador en espacio de usuario.
 4. **Distribuciones adicionales (Punto 4: Debian y Ubuntu ARM64):**
    - Creación de adaptadores (`AdaptadorDebianArm64.java`), bootstrap de rootfs y recetas.
-5. **Estado y notas operativas del teléfono:**
-   - Dispositivo: Redmi 15 5G (`spring`, Snapdragon 4 Gen 2, serial `dab6b001`).
-   - Instancias activas verificadas en concurrencia: dos instancias de consola funcionando independientemente en segundo plano con archivos y procesos aislados.
-   - Instancia gráfica Niri: completamente instalada con 67 paquetes pacman, lista para iniciar vía `▶ ESCRITORIO`.
-   - Reconexión de depuración inalámbrica local en el teléfono si se reinicia o pierde Wi-Fi: script `adb-conectar` (`~/.local/bin/adb-conectar`).

@@ -36,6 +36,7 @@ import com.termux.view.TerminalViewClient;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 // Pantalla principal de la app: lista de entornos Linux (instancias) disponibles y
 // consola shell real y funcional abierta en la carpeta superior (files/) para recorrer
@@ -701,122 +702,297 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
     private void mostrarDialogoPortForward() {
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
-        layout.setPadding(dp(20), dp(16), dp(20), dp(16));
+        layout.setPadding(dp(18), dp(16), dp(18), dp(16));
         layout.setBackgroundColor(FONDO_OSCURO);
 
-        TextView banner = texto("╭─ ✦ REENVÍO DE PUERTOS (PORT FORWARD) ───────╮", 11, true, ACCENTO_AMBAR);
+        TextView banner = texto("╭─ ✦ GESTOR DE RED Y PUERTOS ──────────────────╮", 11, true, ACCENTO_AMBAR);
         layout.addView(banner);
 
+        // Barra de pestañas / secciones
+        LinearLayout barraTabs = new LinearLayout(this);
+        barraTabs.setOrientation(LinearLayout.HORIZONTAL);
+        barraTabs.setGravity(Gravity.CENTER_HORIZONTAL);
+        LinearLayout.LayoutParams lpTabs = new LinearLayout.LayoutParams(-1, -2);
+        lpTabs.topMargin = dp(8);
+        lpTabs.bottomMargin = dp(8);
+        layout.addView(barraTabs, lpTabs);
+
+        final int[] tabActiva = {0}; // 0: Maquinas/IPs, 1: Subredes, 2: Forwarding
+        final LinearLayout[] vistasTabs = new LinearLayout[3];
+
+        Runnable[] actualizarTabs = new Runnable[1];
+
+        for (int i = 0; i < 3; i++) {
+            final int tIdx = i;
+            TextView tabBtn = new TextView(this);
+            tabBtn.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+            tabBtn.setTextSize(11);
+            tabBtn.setPadding(dp(8), dp(6), dp(8), dp(6));
+            tabBtn.setGravity(Gravity.CENTER);
+            if (i == 0) tabBtn.setText("⊞ MÁQUINAS / IPS");
+            else if (i == 1) tabBtn.setText("⑂ SUBREDES");
+            else tabBtn.setText("⇄ REENVÍO PUERTOS");
+
+            LinearLayout.LayoutParams lpT = new LinearLayout.LayoutParams(0, -2, 1.0f);
+            if (i > 0) lpT.leftMargin = dp(4);
+            barraTabs.addView(tabBtn, lpT);
+
+            tabBtn.setOnClickListener(v -> {
+                tabActiva[0] = tIdx;
+                if (actualizarTabs[0] != null) actualizarTabs[0].run();
+            });
+        }
+
+        // Contenedor principal de pestañas
+        LinearLayout contPestañas = new LinearLayout(this);
+        contPestañas.setOrientation(LinearLayout.VERTICAL);
+        layout.addView(contPestañas, new LinearLayout.LayoutParams(-1, dp(260)));
+
+        // --- PESTAÑA 0: MÁQUINAS E IPS ---
+        vistasTabs[0] = new LinearLayout(this);
+        vistasTabs[0].setOrientation(LinearLayout.VERTICAL);
+
+        ScrollView scrollIps = new ScrollView(this);
+        LinearLayout contIps = new LinearLayout(this);
+        contIps.setOrientation(LinearLayout.VERTICAL);
+        scrollIps.addView(contIps);
+        vistasTabs[0].addView(scrollIps, new LinearLayout.LayoutParams(-1, -1));
+
+        Runnable recargarIps = () -> {
+            contIps.removeAllViews();
+            List<SistemaLinux.Instancia> insts = SistemaLinux.listarInstancias(this);
+            List<RedManager.Subred> subs = RedManager.listarSubredes(this);
+            Map<String, RedManager.AsignacionIp> asigs = RedManager.listarAsignaciones(this);
+
+            if (insts.isEmpty()) {
+                contIps.addView(texto("  No hay entornos creados.", 11, false, TEXTO_MUTED));
+                return;
+            }
+
+            for (SistemaLinux.Instancia inst : insts) {
+                LinearLayout tarjeta = new LinearLayout(this);
+                tarjeta.setOrientation(LinearLayout.VERTICAL);
+                tarjeta.setPadding(dp(10), dp(8), dp(10), dp(8));
+                tarjeta.setBackground(crearFondo(0xff16202c, BORDE_NORMAL, dp(6), dp(1)));
+
+                TextView titInst = texto("● " + inst.nombre + " (" + inst.id + ")", 12, true, ACCENTO_VERDE);
+                tarjeta.addView(titInst);
+
+                LinearLayout filaCfg = new LinearLayout(this);
+                filaCfg.setOrientation(LinearLayout.HORIZONTAL);
+                filaCfg.setGravity(Gravity.CENTER_VERTICAL);
+                filaCfg.setPadding(0, dp(4), 0, 0);
+
+                // Selector de subred
+                android.widget.Spinner spSub = new android.widget.Spinner(this);
+                List<String> nomSubs = new ArrayList<>();
+                int selSubIdx = 0;
+                RedManager.AsignacionIp asigActual = asigs.get(inst.id);
+                for (int sIdx = 0; sIdx < subs.size(); sIdx++) {
+                    RedManager.Subred s = subs.get(sIdx);
+                    nomSubs.add(s.nombre + " [" + s.cidr + "]");
+                    if (asigActual != null && s.id.equals(asigActual.subredId)) {
+                        selSubIdx = sIdx;
+                    }
+                }
+                android.widget.ArrayAdapter<String> subAdp = new android.widget.ArrayAdapter<>(
+                        this, android.R.layout.simple_spinner_dropdown_item, nomSubs);
+                spSub.setAdapter(subAdp);
+                spSub.setSelection(selSubIdx);
+                filaCfg.addView(spSub, new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+                // Campo de IP
+                EditText inIp = new EditText(this);
+                inIp.setText(RedManager.ipParaInstancia(this, inst.id));
+                inIp.setTextColor(TEXTO_CLARO);
+                inIp.setTypeface(Typeface.MONOSPACE);
+                inIp.setTextSize(12);
+                inIp.setBackground(crearFondo(0xff0d131a, BORDE_BOTON, dp(6), dp(1)));
+                inIp.setPadding(dp(8), dp(4), dp(8), dp(4));
+                LinearLayout.LayoutParams lpInIp = new LinearLayout.LayoutParams(dp(110), -2);
+                lpInIp.leftMargin = dp(4);
+                lpInIp.rightMargin = dp(4);
+                filaCfg.addView(inIp, lpInIp);
+
+                // Botón guardar IP
+                TextView btnSaveIp = crearBotonChip("💾", ACCENTO_CIAN, () -> {
+                    String ipVal = inIp.getText().toString().trim();
+                    int subIdx = spSub.getSelectedItemPosition();
+                    String subId = (subIdx >= 0 && subIdx < subs.size()) ? subs.get(subIdx).id : "sub_default";
+                    if (!ipVal.isEmpty()) {
+                        RedManager.asignarIp(this, inst.id, subId, ipVal);
+                        Toast.makeText(this, "IP asignada a " + inst.nombre + ": " + ipVal, Toast.LENGTH_SHORT).show();
+                    }
+                });
+                filaCfg.addView(btnSaveIp);
+
+                tarjeta.addView(filaCfg);
+
+                LinearLayout.LayoutParams lpT = new LinearLayout.LayoutParams(-1, -2);
+                lpT.bottomMargin = dp(6);
+                contIps.addView(tarjeta, lpT);
+            }
+        };
+
+        // --- PESTAÑA 1: SUBREDES ---
+        vistasTabs[1] = new LinearLayout(this);
+        vistasTabs[1].setOrientation(LinearLayout.VERTICAL);
+
+        ScrollView scrollSubs = new ScrollView(this);
+        LinearLayout contSubs = new LinearLayout(this);
+        contSubs.setOrientation(LinearLayout.VERTICAL);
+        scrollSubs.addView(contSubs);
+        vistasTabs[1].addView(scrollSubs, new LinearLayout.LayoutParams(-1, dp(150)));
+
+        Runnable[] recargarSubs = new Runnable[1];
+        recargarSubs[0] = () -> {
+            contSubs.removeAllViews();
+            List<RedManager.Subred> subs = RedManager.listarSubredes(this);
+            for (RedManager.Subred s : subs) {
+                LinearLayout fSub = new LinearLayout(this);
+                fSub.setOrientation(LinearLayout.HORIZONTAL);
+                fSub.setGravity(Gravity.CENTER_VERTICAL);
+                fSub.setPadding(dp(8), dp(6), dp(8), dp(6));
+                fSub.setBackground(crearFondo(0xff16202c, BORDE_NORMAL, dp(6), dp(1)));
+
+                TextView inf = texto("⑂ " + s.nombre + " (" + s.cidr + ")", 12, true, ACCENTO_CIAN);
+                fSub.addView(inf, new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+                if (subs.size() > 1) {
+                    TextView btnDel = crearBotonChip("✕", ACCENTO_ROJO, () -> {
+                        RedManager.eliminarSubred(this, s.id);
+                        recargarSubs[0].run();
+                        recargarIps.run();
+                    });
+                    fSub.addView(btnDel);
+                }
+
+                LinearLayout.LayoutParams lpF = new LinearLayout.LayoutParams(-1, -2);
+                lpF.bottomMargin = dp(4);
+                contSubs.addView(fSub, lpF);
+            }
+        };
+
+        TextView titNuevaSub = texto("❯ Crear nueva subred:", 12, true, ACCENTO_AMBAR);
+        LinearLayout.LayoutParams lpTNS = new LinearLayout.LayoutParams(-1, -2);
+        lpTNS.topMargin = dp(6);
+        vistasTabs[1].addView(titNuevaSub, lpTNS);
+
+        LinearLayout formSub = new LinearLayout(this);
+        formSub.setOrientation(LinearLayout.HORIZONTAL);
+        formSub.setGravity(Gravity.CENTER_VERTICAL);
+
+        EditText inNomSub = new EditText(this);
+        inNomSub.setHint("Nombre (ej. Servidores)");
+        inNomSub.setHintTextColor(0xff556272);
+        inNomSub.setTextColor(TEXTO_CLARO);
+        inNomSub.setTypeface(Typeface.MONOSPACE);
+        inNomSub.setTextSize(12);
+        inNomSub.setBackground(crearFondo(0xff16202c, BORDE_BOTON, dp(6), dp(1)));
+        inNomSub.setPadding(dp(8), dp(6), dp(8), dp(6));
+        formSub.addView(inNomSub, new LinearLayout.LayoutParams(0, -2, 1.2f));
+
+        EditText inCidrSub = new EditText(this);
+        inCidrSub.setHint("CIDR (10.0.1.0/24)");
+        inCidrSub.setHintTextColor(0xff556272);
+        inCidrSub.setTextColor(TEXTO_CLARO);
+        inCidrSub.setTypeface(Typeface.MONOSPACE);
+        inCidrSub.setTextSize(12);
+        inCidrSub.setBackground(crearFondo(0xff16202c, BORDE_BOTON, dp(6), dp(1)));
+        inCidrSub.setPadding(dp(8), dp(6), dp(8), dp(6));
+        LinearLayout.LayoutParams lpCidr = new LinearLayout.LayoutParams(0, -2, 1.0f);
+        lpCidr.leftMargin = dp(4);
+        lpCidr.rightMargin = dp(4);
+        formSub.addView(inCidrSub, lpCidr);
+
+        TextView btnCrearSub = crearBotonChip("＋ CREAR", ACCENTO_VERDE, () -> {
+            String nom = inNomSub.getText().toString().trim();
+            String cidr = inCidrSub.getText().toString().trim();
+            if (nom.isEmpty() || cidr.isEmpty()) {
+                Toast.makeText(this, "Completa nombre y rango CIDR", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            RedManager.agregarSubred(this, nom, cidr);
+            inNomSub.setText("");
+            inCidrSub.setText("");
+            recargarSubs[0].run();
+            recargarIps.run();
+            Toast.makeText(this, "Subred creada: " + nom, Toast.LENGTH_SHORT).show();
+        });
+        formSub.addView(btnCrearSub);
+
+        LinearLayout.LayoutParams lpFSub = new LinearLayout.LayoutParams(-1, -2);
+        lpFSub.topMargin = dp(4);
+        vistasTabs[1].addView(formSub, lpFSub);
+
+        // --- PESTAÑA 2: PORT FORWARDING ---
+        vistasTabs[2] = new LinearLayout(this);
+        vistasTabs[2].setOrientation(LinearLayout.VERTICAL);
+
         android.widget.CheckBox cbHabilitado = new android.widget.CheckBox(this);
-        cbHabilitado.setText("Habilitar servicio de reenvío de puertos");
+        cbHabilitado.setText("Habilitar reenvío activo");
         cbHabilitado.setTextColor(TEXTO_CLARO);
         cbHabilitado.setTypeface(Typeface.MONOSPACE);
         cbHabilitado.setChecked(RedManager.esHabilitado(this));
-        cbHabilitado.setOnCheckedChangeListener((bv, isChecked) -> {
-            RedManager.setHabilitado(this, isChecked);
-        });
-        LinearLayout.LayoutParams lpCb = new LinearLayout.LayoutParams(-1, -2);
-        lpCb.topMargin = dp(8);
-        lpCb.bottomMargin = dp(4);
-        layout.addView(cbHabilitado, lpCb);
-
-        // Configuración de Subred Virtual
-        LinearLayout filaSubred = new LinearLayout(this);
-        filaSubred.setOrientation(LinearLayout.HORIZONTAL);
-        filaSubred.setGravity(Gravity.CENTER_VERTICAL);
-        TextView lblSubred = texto("Subred virtual: ", 12, true, ACCENTO_CIAN);
-        filaSubred.addView(lblSubred);
-
-        EditText inSubred = new EditText(this);
-        inSubred.setText(RedManager.obtenerSubred(this));
-        inSubred.setTextColor(TEXTO_CLARO);
-        inSubred.setTypeface(Typeface.MONOSPACE);
-        inSubred.setTextSize(12);
-        inSubred.setBackground(crearFondo(0xff16202c, BORDE_BOTON, dp(6), dp(1)));
-        inSubred.setPadding(dp(8), dp(5), dp(8), dp(5));
-        LinearLayout.LayoutParams lpInSub = new LinearLayout.LayoutParams(0, -2, 1.0f);
-        lpInSub.rightMargin = dp(6);
-        filaSubred.addView(inSubred, lpInSub);
-
-        Runnable[] recargarRef = new Runnable[1];
-
-        TextView btnGuardarSubred = crearBotonChip("GUARDAR", ACCENTO_CIAN, () -> {
-            String sub = inSubred.getText().toString().trim();
-            if (!sub.isEmpty()) {
-                RedManager.setSubred(this, sub);
-                if (recargarRef[0] != null) recargarRef[0].run();
-                Toast.makeText(this, "Subred: " + sub, Toast.LENGTH_SHORT).show();
-            }
-        });
-        filaSubred.addView(btnGuardarSubred);
-
-        LinearLayout.LayoutParams lpSubred = new LinearLayout.LayoutParams(-1, -2);
-        lpSubred.bottomMargin = dp(8);
-        layout.addView(filaSubred, lpSubred);
+        cbHabilitado.setOnCheckedChangeListener((bv, isChecked) -> RedManager.setHabilitado(this, isChecked));
+        vistasTabs[2].addView(cbHabilitado);
 
         ScrollView scrollReglas = new ScrollView(this);
         LinearLayout contReglas = new LinearLayout(this);
         contReglas.setOrientation(LinearLayout.VERTICAL);
         scrollReglas.addView(contReglas);
+        vistasTabs[2].addView(scrollReglas, new LinearLayout.LayoutParams(-1, dp(130)));
 
-        recargarRef[0] = () -> {
+        Runnable[] recargarReglas = new Runnable[1];
+        recargarReglas[0] = () -> {
             contReglas.removeAllViews();
             List<RedManager.Regla> reglas = RedManager.listarReglas(this);
             if (reglas.isEmpty()) {
-                contReglas.addView(texto("  No hay reglas activas. Agrega una abajo.", 11, false, TEXTO_MUTED));
+                contReglas.addView(texto("  No hay reglas de reenvío activas.", 11, false, TEXTO_MUTED));
             } else {
                 for (RedManager.Regla r : reglas) {
                     LinearLayout fila = new LinearLayout(this);
                     fila.setOrientation(LinearLayout.HORIZONTAL);
                     fila.setGravity(Gravity.CENTER_VERTICAL);
-                    fila.setPadding(dp(10), dp(8), dp(10), dp(8));
+                    fila.setPadding(dp(8), dp(6), dp(8), dp(6));
                     fila.setBackground(crearFondo(0xff16202c, BORDE_NORMAL, dp(6), dp(1)));
 
                     String ipInst = RedManager.ipParaInstancia(this, r.instanciaId);
-                    TextView info = texto(":" + r.puertoExterno + " ➜ " + r.instanciaId + " (" + ipInst + "):" + r.puertoInterno, 12, true, r.activa ? ACCENTO_VERDE : TEXTO_MUTED);
+                    TextView info = texto(":" + r.puertoExterno + " ➜ " + r.instanciaId + " (" + ipInst + "):" + r.puertoInterno, 11, true, r.activa ? ACCENTO_VERDE : TEXTO_MUTED);
                     fila.addView(info, new LinearLayout.LayoutParams(0, -2, 1.0f));
 
                     TextView btnDel = crearBotonChip("✕", ACCENTO_ROJO, () -> {
                         reglas.remove(r);
                         RedManager.guardarReglas(this, reglas);
                         RedManager.actualizar(this);
-                        recargarRef[0].run();
+                        recargarReglas[0].run();
                     });
                     fila.addView(btnDel);
 
                     LinearLayout.LayoutParams lpFila = new LinearLayout.LayoutParams(-1, -2);
-                    lpFila.bottomMargin = dp(6);
+                    lpFila.bottomMargin = dp(4);
                     contReglas.addView(fila, lpFila);
                 }
             }
         };
-        recargarRef[0].run();
 
-        LinearLayout.LayoutParams lpScroll = new LinearLayout.LayoutParams(-1, dp(130));
-        layout.addView(scrollReglas, lpScroll);
-
-        TextView titNueva = texto("❯ Nueva regla de reenvío:", 12, true, ACCENTO_CIAN);
-        LinearLayout.LayoutParams lpTitN = new LinearLayout.LayoutParams(-1, -2);
-        lpTitN.topMargin = dp(12);
-        layout.addView(titNueva, lpTitN);
-
-        LinearLayout form = new LinearLayout(this);
-        form.setOrientation(LinearLayout.HORIZONTAL);
-        form.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout formFwd = new LinearLayout(this);
+        formFwd.setOrientation(LinearLayout.HORIZONTAL);
+        formFwd.setGravity(Gravity.CENTER_VERTICAL);
 
         EditText inExt = new EditText(this);
-        inExt.setHint("Ext (8022)");
+        inExt.setHint("Ext(8022)");
         inExt.setHintTextColor(0xff556272);
         inExt.setTextColor(TEXTO_CLARO);
         inExt.setTypeface(Typeface.MONOSPACE);
         inExt.setTextSize(12);
         inExt.setInputType(InputType.TYPE_CLASS_NUMBER);
         inExt.setBackground(crearFondo(0xff16202c, BORDE_BOTON, dp(6), dp(1)));
-        inExt.setPadding(dp(8), dp(6), dp(8), dp(6));
-        form.addView(inExt, new LinearLayout.LayoutParams(dp(85), -2));
+        inExt.setPadding(dp(6), dp(6), dp(6), dp(6));
+        formFwd.addView(inExt, new LinearLayout.LayoutParams(dp(80), -2));
 
         TextView flecha = texto(" ➜ ", 12, true, TEXTO_MUTED);
-        form.addView(flecha);
+        formFwd.addView(flecha);
 
         List<SistemaLinux.Instancia> insts = SistemaLinux.listarInstancias(this);
         android.widget.Spinner spinInst = new android.widget.Spinner(this);
@@ -825,24 +1001,20 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         android.widget.ArrayAdapter<String> adapter = new android.widget.ArrayAdapter<>(
                 this, android.R.layout.simple_spinner_dropdown_item, nombresInst);
         spinInst.setAdapter(adapter);
-        form.addView(spinInst, new LinearLayout.LayoutParams(0, -2, 1.0f));
+        formFwd.addView(spinInst, new LinearLayout.LayoutParams(0, -2, 1.0f));
 
         EditText inInt = new EditText(this);
-        inInt.setHint("Int (22)");
+        inInt.setHint("Int(22)");
         inInt.setHintTextColor(0xff556272);
         inInt.setTextColor(TEXTO_CLARO);
         inInt.setTypeface(Typeface.MONOSPACE);
         inInt.setTextSize(12);
         inInt.setInputType(InputType.TYPE_CLASS_NUMBER);
         inInt.setBackground(crearFondo(0xff16202c, BORDE_BOTON, dp(6), dp(1)));
-        inInt.setPadding(dp(8), dp(6), dp(8), dp(6));
-        form.addView(inInt, new LinearLayout.LayoutParams(dp(75), -2));
+        inInt.setPadding(dp(6), dp(6), dp(6), dp(6));
+        formFwd.addView(inInt, new LinearLayout.LayoutParams(dp(70), -2));
 
-        LinearLayout.LayoutParams lpForm = new LinearLayout.LayoutParams(-1, -2);
-        lpForm.topMargin = dp(6);
-        layout.addView(form, lpForm);
-
-        TextView btnAdd = crearBotonChip("＋ AGREGAR REGLA", ACCENTO_VERDE, () -> {
+        TextView btnAddFwd = crearBotonChip("＋ AGREGAR", ACCENTO_VERDE, () -> {
             String sExt = inExt.getText().toString().trim();
             String sInt = inInt.getText().toString().trim();
             int idx = spinInst.getSelectedItemPosition();
@@ -860,15 +1032,34 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
                 RedManager.actualizar(this);
                 inExt.setText("");
                 inInt.setText("");
-                recargarRef[0].run();
-                Toast.makeText(this, "Regla agregada :" + pExt + " ➜ " + instId + ":" + pInt, Toast.LENGTH_SHORT).show();
+                recargarReglas[0].run();
+                Toast.makeText(this, "Regla: :" + pExt + " ➜ " + instId + ":" + pInt, Toast.LENGTH_SHORT).show();
             } catch (Exception ex) {
                 Toast.makeText(this, "Puerto inválido", Toast.LENGTH_SHORT).show();
             }
         });
-        LinearLayout.LayoutParams lpAdd = new LinearLayout.LayoutParams(-2, -2);
-        lpAdd.topMargin = dp(10);
-        layout.addView(btnAdd, lpAdd);
+        formFwd.addView(btnAddFwd);
+
+        LinearLayout.LayoutParams lpFFwd = new LinearLayout.LayoutParams(-1, -2);
+        lpFFwd.topMargin = dp(6);
+        vistasTabs[2].addView(formFwd, lpFFwd);
+
+        // Coordinador de visibilidad de pestañas
+        actualizarTabs[0] = () -> {
+            for (int i = 0; i < 3; i++) {
+                TextView tBtn = (TextView) barraTabs.getChildAt(i);
+                boolean activa = (i == tabActiva[0]);
+                tBtn.setBackground(crearFondo(activa ? 0xff162638 : 0xff101720, activa ? ACCENTO_CIAN : BORDE_BOTON, dp(6), dp(1)));
+                tBtn.setTextColor(activa ? ACCENTO_CIAN : TEXTO_MUTED);
+            }
+            contPestañas.removeAllViews();
+            contPestañas.addView(vistasTabs[tabActiva[0]], new LinearLayout.LayoutParams(-1, -1));
+            if (tabActiva[0] == 0) recargarIps.run();
+            else if (tabActiva[0] == 1) recargarSubs[0].run();
+            else if (tabActiva[0] == 2) recargarReglas[0].run();
+        };
+
+        actualizarTabs[0].run();
 
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setView(layout)

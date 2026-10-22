@@ -1,0 +1,352 @@
+diff -uNr a/sysdeps/unix/sysv/linux/aarch64/android-path.c b/sysdeps/unix/sysv/linux/aarch64/android-path.c
+--- a/sysdeps/unix/sysv/linux/aarch64/android-path.c	2026-10-22 17:18:15.316330144 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/android-path.c	2026-10-22 17:12:18.420176169 -0300
+@@ -36,6 +36,7 @@
+ #include <net/if_arp.h>
+ #include <linux/netlink.h>
+ #include <linux/rtnetlink.h>
++#include <netinet/in.h>
+ 
+ #define KEY_PREFIX "GLIBC_PREFIX="
+ #define KEY_LOADER "GLIBC_LOADER="
+@@ -1149,6 +1150,225 @@
+   return starts (a, b, la + 1);
+ }
+ 
++static int
++leer_virtual_ip (uint32_t *ip_out, uint8_t *prefixlen_out)
++{
++  *ip_out = 0;
++  *prefixlen_out = 24;
++  char vpath[1024];
++  if (plen + 16 >= sizeof (vpath))
++    return 0;
++  mcopy (vpath, PREFIX, plen);
++  mcopy (vpath + plen, "/etc/virtual-ip", 16);
++
++  long int fd = raw (__NR_openat, AT_FDCWD, (long int) vpath, O_RDONLY, 0, 0, 0);
++  if (fd < 0)
++    return 0;
++
++  char buf[64];
++  long int n = raw (__NR_read, fd, (long int) buf, sizeof (buf) - 1, 0, 0, 0);
++  raw (__NR_close, fd, 0, 0, 0, 0, 0);
++  if (n <= 0)
++    return 0;
++  buf[n] = '\0';
++
++  int oct[4] = { 0, 0, 0, 0 };
++  int oct_idx = 0;
++  int plen_val = 24;
++  int in_plen = 0;
++  for (int i = 0; i < n; i++)
++    {
++      char c = buf[i];
++      if (c >= '0' && c <= '9')
++	{
++	  if (!in_plen && oct_idx < 4)
++	    oct[oct_idx] = oct[oct_idx] * 10 + (c - '0');
++	  else if (in_plen)
++	    plen_val = plen_val * 10 + (c - '0');
++	}
++      else if (c == '.')
++	{
++	  if (!in_plen) oct_idx++;
++	}
++      else if (c == '/')
++	{
++	  in_plen = 1;
++	  plen_val = 0;
++	}
++      else if (c == ' ' || c == '\n' || c == '\r')
++	break;
++    }
++  if (oct_idx != 3)
++    return 0;
++
++  uint32_t ip = ((uint32_t) (oct[0] & 0xff))
++		| (((uint32_t) (oct[1] & 0xff)) << 8)
++		| (((uint32_t) (oct[2] & 0xff)) << 16)
++		| (((uint32_t) (oct[3] & 0xff)) << 24);
++
++  *ip_out = ip;
++  *prefixlen_out = (plen_val > 0 && plen_val <= 32) ? (uint8_t) plen_val : 24;
++  return 1;
++}
++
++static size_t
++armar_getaddr_sintetico (char *buf, size_t maxlen, const struct nlmsghdr *req_nlh)
++{
++  uint32_t seq = req_nlh->nlmsg_seq;
++  uint32_t pid = req_nlh->nlmsg_pid ? req_nlh->nlmsg_pid
++				    : (uint32_t) raw (__NR_getpid, 0, 0, 0, 0, 0, 0);
++
++  long int s = raw (__NR_socket, AF_INET, SOCK_DGRAM, 0, 0, 0, 0);
++  if (s < 0)
++    return 0;
++
++  char conf_buffer[2048];
++  struct ifconf ifc;
++  ifc.ifc_len = sizeof (conf_buffer);
++  ifc.ifc_buf = conf_buffer;
++
++  if (raw (__NR_ioctl, s, SIOCGIFCONF, (long int) &ifc, 0, 0, 0) < 0)
++    {
++      raw (__NR_close, s, 0, 0, 0, 0, 0);
++      return 0;
++    }
++
++  size_t out_len = 0;
++  int n_ifrs = ifc.ifc_len / sizeof (struct ifreq);
++  struct ifreq *ifrs = ifc.ifc_req;
++
++  for (int i = 0; i < n_ifrs; i++)
++    {
++      const char *name = ifrs[i].ifr_name;
++      struct sockaddr_in *sin = (struct sockaddr_in *) &ifrs[i].ifr_addr;
++      if (sin->sin_family != AF_INET)
++	continue;
++
++      struct ifreq ifr;
++      mzero (&ifr, sizeof ifr);
++      size_t nl = slen (name);
++      if (nl >= sizeof ifr.ifr_name)
++	nl = sizeof ifr.ifr_name - 1;
++      mcopy (ifr.ifr_name, name, nl);
++      ifr.ifr_name[nl] = '\0';
++
++      int idx = i + 1;
++      if (raw (__NR_ioctl, s, SIOCGIFINDEX, (long int) &ifr, 0, 0, 0) == 0)
++	idx = ifr.ifr_ifindex;
++
++      size_t namelen = slen (name) + 1;
++      size_t rta_addr_len = RTA_SPACE (sizeof (uint32_t));
++      size_t rta_local_len = RTA_SPACE (sizeof (uint32_t));
++      size_t rta_label_len = RTA_SPACE (namelen);
++      size_t msg_len = NLMSG_SPACE (sizeof (struct ifaddrmsg)) + rta_addr_len + rta_local_len + rta_label_len;
++
++      if (out_len + msg_len > maxlen)
++	break;
++
++      struct nlmsghdr *nlh = (struct nlmsghdr *) (buf + out_len);
++      nlh->nlmsg_len = msg_len;
++      nlh->nlmsg_type = RTM_NEWADDR;
++      nlh->nlmsg_flags = NLM_F_MULTI;
++      nlh->nlmsg_seq = seq;
++      nlh->nlmsg_pid = pid;
++
++      struct ifaddrmsg *ifa = (struct ifaddrmsg *) NLMSG_DATA (nlh);
++      ifa->ifa_family = AF_INET;
++      ifa->ifa_prefixlen = (str_igual (name, "lo")) ? 8 : 24;
++      ifa->ifa_flags = IFA_F_PERMANENT;
++      ifa->ifa_scope = (str_igual (name, "lo")) ? RT_SCOPE_HOST : RT_SCOPE_UNIVERSE;
++      ifa->ifa_index = idx;
++
++      char *rta_ptr = (char *) NLMSG_DATA (nlh) + NLMSG_ALIGN (sizeof (struct ifaddrmsg));
++
++      struct rtattr *rta_addr = (struct rtattr *) rta_ptr;
++      rta_addr->rta_type = IFA_ADDRESS;
++      rta_addr->rta_len = RTA_LENGTH (sizeof (uint32_t));
++      *(uint32_t *) RTA_DATA (rta_addr) = sin->sin_addr.s_addr;
++      rta_ptr += rta_addr_len;
++
++      struct rtattr *rta_local = (struct rtattr *) rta_ptr;
++      rta_local->rta_type = IFA_LOCAL;
++      rta_local->rta_len = RTA_LENGTH (sizeof (uint32_t));
++      *(uint32_t *) RTA_DATA (rta_local) = sin->sin_addr.s_addr;
++      rta_ptr += rta_local_len;
++
++      struct rtattr *rta_label = (struct rtattr *) rta_ptr;
++      rta_label->rta_type = IFA_LABEL;
++      rta_label->rta_len = RTA_LENGTH (namelen);
++      mcopy ((char *) RTA_DATA (rta_label), name, namelen);
++
++      out_len += NLMSG_ALIGN (msg_len);
++    }
++  raw (__NR_close, s, 0, 0, 0, 0, 0);
++
++  /* Si existe /etc/virtual-ip, agregar dirección para vnet0 (idx 99) */
++  uint32_t vip = 0;
++  uint8_t vlen = 24;
++  if (leer_virtual_ip (&vip, &vlen) && vip != 0)
++    {
++      const char *vname = "vnet0";
++      size_t vnamelen = 6;
++      size_t rta_addr_len = RTA_SPACE (sizeof (uint32_t));
++      size_t rta_local_len = RTA_SPACE (sizeof (uint32_t));
++      size_t rta_label_len = RTA_SPACE (vnamelen);
++      size_t msg_len = NLMSG_SPACE (sizeof (struct ifaddrmsg)) + rta_addr_len + rta_local_len + rta_label_len;
++
++      if (out_len + msg_len <= maxlen)
++	{
++	  struct nlmsghdr *nlh = (struct nlmsghdr *) (buf + out_len);
++	  nlh->nlmsg_len = msg_len;
++	  nlh->nlmsg_type = RTM_NEWADDR;
++	  nlh->nlmsg_flags = NLM_F_MULTI;
++	  nlh->nlmsg_seq = seq;
++	  nlh->nlmsg_pid = pid;
++
++	  struct ifaddrmsg *ifa = (struct ifaddrmsg *) NLMSG_DATA (nlh);
++	  ifa->ifa_family = AF_INET;
++	  ifa->ifa_prefixlen = vlen;
++	  ifa->ifa_flags = IFA_F_PERMANENT;
++	  ifa->ifa_scope = RT_SCOPE_UNIVERSE;
++	  ifa->ifa_index = 99;
++
++	  char *rta_ptr = (char *) NLMSG_DATA (nlh) + NLMSG_ALIGN (sizeof (struct ifaddrmsg));
++
++	  struct rtattr *rta_addr = (struct rtattr *) rta_ptr;
++	  rta_addr->rta_type = IFA_ADDRESS;
++	  rta_addr->rta_len = RTA_LENGTH (sizeof (uint32_t));
++	  *(uint32_t *) RTA_DATA (rta_addr) = vip;
++	  rta_ptr += rta_addr_len;
++
++	  struct rtattr *rta_local = (struct rtattr *) rta_ptr;
++	  rta_local->rta_type = IFA_LOCAL;
++	  rta_local->rta_len = RTA_LENGTH (sizeof (uint32_t));
++	  *(uint32_t *) RTA_DATA (rta_local) = vip;
++	  rta_ptr += rta_local_len;
++
++	  struct rtattr *rta_label = (struct rtattr *) rta_ptr;
++	  rta_label->rta_type = IFA_LABEL;
++	  rta_label->rta_len = RTA_LENGTH (vnamelen);
++	  mcopy ((char *) RTA_DATA (rta_label), vname, vnamelen);
++
++	  out_len += NLMSG_ALIGN (msg_len);
++	}
++    }
++
++  /* Cerrar con NLMSG_DONE */
++  if (out_len + NLMSG_SPACE (sizeof (int)) <= maxlen)
++    {
++      struct nlmsghdr *nlh = (struct nlmsghdr *) (buf + out_len);
++      nlh->nlmsg_len = NLMSG_LENGTH (sizeof (int));
++      nlh->nlmsg_type = NLMSG_DONE;
++      nlh->nlmsg_flags = 0;
++      nlh->nlmsg_seq = seq;
++      nlh->nlmsg_pid = pid;
++      *(int *) NLMSG_DATA (nlh) = 0;
++      out_len += NLMSG_SPACE (sizeof (int));
++    }
++
++  return out_len;
++}
++
+ static size_t
+ armar_getlink_sintetico (char *buf, size_t maxlen, const struct nlmsghdr *req_nlh)
+ {
+@@ -1298,6 +1518,50 @@
+     }
+   raw (__NR_close, s, 0, 0, 0, 0, 0);
+ 
++  /* Si existe /etc/virtual-ip, agregar vnet0 (idx 99) */
++  uint32_t vip = 0;
++  uint8_t vlen = 24;
++  if (leer_virtual_ip (&vip, &vlen) && vip != 0)
++    {
++      const char *vname = "vnet0";
++      size_t namelen = 6;
++      size_t rta_name_len = RTA_SPACE (namelen);
++      size_t rta_mtu_len = RTA_SPACE (sizeof (uint32_t));
++      size_t msg_len = NLMSG_SPACE (sizeof (struct ifinfomsg)) + rta_name_len + rta_mtu_len;
++
++      if (out_len + msg_len <= maxlen)
++	{
++	  struct nlmsghdr *nlh = (struct nlmsghdr *) (buf + out_len);
++	  nlh->nlmsg_len = msg_len;
++	  nlh->nlmsg_type = RTM_NEWLINK;
++	  nlh->nlmsg_flags = is_dump ? NLM_F_MULTI : 0;
++	  nlh->nlmsg_seq = seq;
++	  nlh->nlmsg_pid = pid;
++
++	  struct ifinfomsg *ifi = (struct ifinfomsg *) NLMSG_DATA (nlh);
++	  ifi->ifi_family = AF_UNSPEC;
++	  ifi->ifi_type = ARPHRD_ETHER;
++	  ifi->ifi_index = 99;
++	  ifi->ifi_flags = IFF_UP | IFF_BROADCAST | IFF_RUNNING;
++	  ifi->ifi_change = 0;
++
++	  char *rta_ptr = (char *) NLMSG_DATA (nlh) + NLMSG_ALIGN (sizeof (struct ifinfomsg));
++
++	  struct rtattr *rta_name = (struct rtattr *) rta_ptr;
++	  rta_name->rta_type = IFLA_IFNAME;
++	  rta_name->rta_len = RTA_LENGTH (namelen);
++	  mcopy ((char *) RTA_DATA (rta_name), vname, namelen);
++	  rta_ptr += rta_name_len;
++
++	  struct rtattr *rta_mtu = (struct rtattr *) rta_ptr;
++	  rta_mtu->rta_type = IFLA_MTU;
++	  rta_mtu->rta_len = RTA_LENGTH (sizeof (uint32_t));
++	  *(uint32_t *) RTA_DATA (rta_mtu) = 1500;
++
++	  out_len += NLMSG_ALIGN (msg_len);
++	}
++    }
++
+   if (is_dump)
+     {
+       if (out_len + NLMSG_SPACE (sizeof (int)) <= maxlen)
+@@ -1373,8 +1637,37 @@
+ 	      }
+ 	    return r;
+ 	  }
++	if (sa != NULL && sa->sa_family == AF_INET && a2 >= (long int) sizeof (struct sockaddr_in))
++	  {
++	    struct sockaddr_in sin_copy;
++	    mcopy ((char *) &sin_copy, (const char *) a1, sizeof (sin_copy));
++	    uint32_t vip = 0;
++	    uint8_t vlen = 0;
++	    if (leer_virtual_ip (&vip, &vlen) && sin_copy.sin_addr.s_addr == vip)
++	      {
++		sin_copy.sin_addr.s_addr = 0; /* INADDR_ANY: aceptar bind en todas las interfaces */
++		return raw (nr, a0, (long int) &sin_copy, a2, 0, 0, 0);
++	      }
++	  }
+ 	break;
+       }
++    case __NR_connect:
++      {
++	const struct sockaddr *sa = (const struct sockaddr *) a1;
++	if (sa != NULL && sa->sa_family == AF_INET && a2 >= (long int) sizeof (struct sockaddr_in))
++	  {
++	    struct sockaddr_in sin_copy;
++	    mcopy ((char *) &sin_copy, (const char *) a1, sizeof (sin_copy));
++	    uint32_t vip = 0;
++	    uint8_t vlen = 0;
++	    if (leer_virtual_ip (&vip, &vlen) && sin_copy.sin_addr.s_addr == vip)
++	      {
++		sin_copy.sin_addr.s_addr = 0x0100007f; /* 127.0.0.1 */
++		return raw (nr, a0, (long int) &sin_copy, a2, 0, 0, 0);
++	      }
++	  }
++	return raw (nr, a0, a1, a2, a3, a4, a5);
++      }
+     case __NR_getsockname:
+       {
+ 	long int r = raw (nr, a0, a1, a2, 0, 0, 0);
+@@ -1399,6 +1692,15 @@
+ 	      nl_lock_release ();
+ 	      return a2;
+ 	    }
++	  if (nlh->nlmsg_type == RTM_GETADDR)
++	    {
++	      nl_lock_acquire ();
++	      struct nl_synth_slot *sl = nl_get_slot (a0, 1);
++	      sl->len = armar_getaddr_sintetico (sl->buf, sizeof (sl->buf), nlh);
++	      sl->off = 0;
++	      nl_lock_release ();
++	      return a2;
++	    }
+ 	  if (nlh->nlmsg_type == RTM_GETNEIGH)
+ 	    {
+ 	      nl_lock_acquire ();
+@@ -1429,7 +1731,8 @@
+ 	      if (ib != NULL && il >= sizeof (struct nlmsghdr))
+ 		{
+ 		  const struct nlmsghdr *nlh = (const struct nlmsghdr *) ib;
+-		  if (nlh->nlmsg_type == RTM_GETLINK || nlh->nlmsg_type == RTM_GETNEIGH)
++		  if (nlh->nlmsg_type == RTM_GETLINK || nlh->nlmsg_type == RTM_GETNEIGH
++		      || nlh->nlmsg_type == RTM_GETADDR)
+ 		    return __android_path_syscall (__NR_sendto, a0, (long int) ib, il, a2, 0, 0);
+ 		}
+ 	    }

@@ -77,6 +77,9 @@ grep -q "^/bin/zsh$" /etc/shells 2>/dev/null || echo "/bin/zsh" >> /etc/shells
 # Normalizar permisos de directorios del sistema para evitar advertencias de pacman
 umask 022
 find /usr /etc /var /opt -maxdepth 3 -type d -exec chmod 755 {} + 2>/dev/null || true
+# Enlazar systemd unit dir a /etc/services.d para que pacman instale servicios en el supervisor
+mkdir -p /etc/services.d /usr/lib/systemd 2>/dev/null || true
+ln -sfn ../../../etc/services.d /usr/lib/systemd/system 2>/dev/null || true
 # El home con las configs de /etc/skel (sway, waybar, kitty, zsh...)
 mkdir -p /home/$N/.config
 cp -rn /etc/skel/. /home/$N/ 2>/dev/null || true

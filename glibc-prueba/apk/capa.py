@@ -48,6 +48,7 @@ ARCHIVOS = [
     ("sway/zsh/starship.toml", f"{H}/.config/starship/starship.toml", 0o644),
     ("sway/pipewire/10-android.conf", f"{H}/.config/pipewire/pipewire.conf.d/10-android.conf", 0o644),
     ("sway/dbus-sesion.sh", "etc/profile.d/dbus-sesion.sh", 0o644),
+    ("supervisor/supervisor.sh", "etc/profile.d/supervisor.sh", 0o644),
     ("android/android-abrir", "usr/local/bin/android-abrir", 0o755),
     ("android/xdg-open", "usr/local/bin/xdg-open", 0o755),
     ("android/reajustar-pantalla", "usr/local/bin/reajustar-pantalla", 0o755),
@@ -59,6 +60,10 @@ ARCHIVOS = [
     ("android/mimeapps.list", f"{H}/.config/mimeapps.list", 0o644),
     ("mesa-gl/con-gpu", "usr/local/bin/con-gpu", 0o755),
     ("mesa-gl/firefox", "usr/local/bin/firefox", 0o755),
+    ("supervisor/service-daemon", "usr/local/bin/service-daemon", 0o755),
+    ("supervisor/service", "usr/local/bin/service", 0o755),
+    ("supervisor/service", "usr/local/bin/sv", 0o755),
+    ("glibc/salida/usr/lib/libc.so.6", "usr/lib/libc.so.6", 0o755),
     ("trabajo/libudmabuf-shim.so", "usr/local/lib/libudmabuf-shim.so", 0o755),
     ("scripts/adb-conectar", "usr/local/bin/adb-conectar", 0o755),
     # escritorio elegido al instalar (escritorios/: uno por carpeta) y lo que arranca con todos

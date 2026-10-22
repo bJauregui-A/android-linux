@@ -6,11 +6,13 @@ Documento de contexto del proyecto. Resume la idea, las decisiones tomadas (y po
 
 Que el teléfono (Redmi 15 5G, HyperOS, **sin root**) sea a la vez Android y un **Linux real y totalmente modificable**: programas de Arch Linux ARM sin recompilar corriendo nativos (glibc propia dentro de una app normal, sin proot ni emulación), con un **escritorio Wayland mínimo y modificable, tipo Hyprland adaptado al celular**, y **aceleración por GPU** (Turnip en la Adreno 619). Sin perder lo de Android que importa (apps bancarias chilenas, Play Store, cámara, pagos) y todo reversible: es una app, se desinstala y el teléfono queda igual. Más adelante, si se puede, Steam.
 
-## Para retomar (estado al 2026-10-21)
+## Para retomar (estado al 2026-10-22)
 
 | Frente | Estado |
 |---|---|
-| glibc propia + pacman de Arch ARM | ✅ (en el Redmi, confirmado y funcionando hasta 0021: 0021 auditoría Netlink que retorna EPROTONOSUPPORT a libaudit/unix_chkpwd en socket(AF_NETLINK, SOCK_RAW, NETLINK_AUDIT) permitiendo desbloqueo y login PAM en Phosh, COSMIC y SSH; 0020 emulación Netlink Route `ip a` / `ip r` / `ip link` / `ip neigh` con `bind` simulado y `RTM_GETLINK` sintético vía SIOCGIFCONF + `getsockname` / `recvmsg` / `recvfrom`, 0019 `uname`/`gethostname` desde `/etc/hostname`, 0018 manejador de SIGSYS en pila propia por hilo, 0017 `/proc/bus/pci/devices` vacío, 0016 SIGSYS de filtros del programa a su manejador, 0015 capa seccomp propia, 0014 `sigall_set` sin SIGSYS, 0012 mprotect PROT_EXEC → copia anónima, 0008 SysV IPC, 0009 relanzar /proc/self/exe, 0010 set*id sin cambio, 0011 get_robust_list + sockets largos) |
+| glibc propia + pacman de Arch ARM | ✅ (en el Redmi, confirmado y funcionando hasta 0022: 0022 interfaz de red virtual `vnet0` desde `/etc/virtual-ip`, `armar_getaddr_sintetico` + mapeo automático de `bind()` a INADDR_ANY y `connect()` propio a loopback 127.0.0.1; 0021 auditoría Netlink con EPROTONOSUPPORT permitiendo login PAM; 0020 emulación Netlink Route `ip a`/`ip r`/`ip link`/`ip neigh` con `bind` simulado y `RTM_GETLINK` sintético vía SIOCGIFCONF; 0019 `uname`/`gethostname` desde `/etc/hostname`; 0018 manejador SIGSYS en pila propia por hilo; 0017 `/proc/bus/pci/devices` vacío; 0016 SIGSYS de filtros del programa; 0015 capa seccomp propia; 0014 `sigall_set` sin SIGSYS; 0012 mprotect PROT_EXEC → copia anónima; 0008 SysV IPC; 0009 relanzar /proc/self/exe; 0010 set*id; 0011 get_robust_list) |
+| Supervisor y servicios (`service` / `sv`) | ✅ demonio y CLI en C nativo (`service-daemon.c`, `service.c`, 67 KB aarch64, 0 dependencias Python/systemd); gestión de servicios (`start`/`stop`/`restart`/`status`/`enable`/`disable`/`logs`/`list`); enlace pacman `/usr/lib/systemd/system -> /etc/services.d` para compatibilidad transparente |
+| Red privada y subredes virtuales | ✅ gestor de subredes CIDR y asignación de IPs estáticas por instancia en la UI (`[ ⇄ RED ]` con 3 pestañas); persistencia en `red_config.xml` y `/etc/virtual-ip`; visible en `ip a` como `vnet0` sin requerir root ni VpnService; loopback 127.0.0.1 intacto para adb |
 | App única "Arch Linux" | ✅ abre el escritorio y arranca sway sola; terminal de rescate en el atajo del ícono |
 | Terminal | ✅ bash interactivo, htop, nano, `sudo pacman` (foot dentro de sway, o la de rescate) |
 | Wayland | ✅ anfitrión propio (`wl_subcompositor`, `wp_single_pixel_buffer_manager_v1`, `wp_viewporter`, `wp_presentation`, `zwp_pointer_constraints_v1`, `zwp_relative_pointer_manager_v1`, `zwp_linux_dmabuf_v1` v4 con feedback memfd, `xdg_wm_base` v6, `wl_seat` v9) + `libudmabuf-shim.so` (`/dev/udmabuf`, `/dev/dri/renderD128`, `libdrm` + `libgbm` reales sobre `/dev/dma_heap/system` / `/dev/kgsl-3d0`, y `EGLDevice` → Zink+Turnip) |
@@ -631,6 +633,10 @@ Antecedente útil para ver qué parches hacen falta: el proyecto **glibc-package
 | `sway/`, `scripts/subir-sway.sh`, `scripts/test-sway-config.sh` | Config de sway estilo HyDE (atajos, aspecto, waybar, fuzzel, kitty, bus D-Bus) y su instalación |
 | `scripts/test-medir-wm.sh` | RAM y CPU de sway / swayfx / Hyprland anidados |
 | `scripts/test-sway-vulkan.sh`, `scripts/test-cpu-sway.sh` | sway por GPU con foot y vkcube; CPU pixman contra GPU |
+| `supervisor/service-daemon.c`, `supervisor/service.c` | Supervisor ligero y CLI (`service` / `sv`) en C nativo para control de servicios (`start`/`stop`/`status`/`enable`/`disable`/`logs`/`list`) sobre `/etc/services.d` |
+| `supervisor/supervisor.sh` | Script para `/etc/profile.d/` que levanta en segundo plano el demonio supervisor al iniciar la shell |
+| `glibc/parches/0022-android-virtual-net.patch` | Emulación de red virtual privada: interfaz sintética `vnet0`, `RTM_GETADDR`, y redirección de `bind` (a INADDR_ANY) y `connect` (a 127.0.0.1) |
+| `app/src/main/java/.../RedManager.java` | Gestor de subredes virtuales CIDR, asignación de IPs fijas persistentes (`/etc/virtual-ip`) y reenvío de puertos TCP |
 
 `instalar-glibc.sh sdk36 archlinux` actualiza solo la glibc (APK + bibliotecas del prefijo) tras recompilar.
 

@@ -154,6 +154,14 @@ if [ "${ARCH_ANDROID_SCREEN_PROTOCOL:-}" = wayland ] \
     iniciar cliphist-imagen proceso wl-paste --type image --watch cliphist store
 fi
 
+# Auto-arranque del demonio supervisor para servicios gestionados
+if [ -x /usr/local/bin/service-daemon ]; then
+    SOCK="${XDG_RUNTIME_DIR:-/run}/supervisor.sock"
+    if [ ! -S "$SOCK" ] && [ ! -S /run/supervisor.sock ] && [ ! -S /tmp/supervisor.sock ]; then
+        /usr/local/bin/service-daemon >/dev/null 2>&1 &
+    fi
+fi
+
 # sshd en foreground para que el supervisor pueda detener exactamente su proceso.
 if [ -x /usr/bin/sshd ] && ! pgrep -x sshd >/dev/null 2>&1; then
     iniciar sshd ssh /usr/bin/sshd -D || true

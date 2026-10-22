@@ -17,6 +17,7 @@ Proyecto: Linux real (Arch ARM con glibc propia, sin root ni proot) dentro de un
 - Hablar de lo técnicamente posible; no revisar políticas de HyperOS ni licencias.
 - Todo reversible; no poner en riesgo las apps bancarias (por eso no hay root ni bootloader abierto).
 - Probar una libc nueva aislada antes de instalarla, y dejar respaldo (`libc.so.6.00NN`). No forzar cambios de render sin probarlos en una instancia aparte.
+- **Binarios y bibliotecas compiladas**: Siempre que se hagan cambios sobre los binarios o bibliotecas nativas de glibc (`libldp.so`, `libc.so.6`, shims, etc.), se deben volver a empaquetar e incorporar al APK (`jniLibs`, assets/capa) y sincronizar a las instancias del teléfono; nunca dejar el binario solo en `build/` o solo a medias en `jniLibs`.
 - No mandar teclas/toques mientras el usuario juega o usa el teléfono. Capturas con `grim` dentro de sway, nunca `screencap` con la app en segundo plano (captura chats privados).
 - Cerrar Steam en orden: `swaymsg exec "steam -shutdown"`.
 - Al terminar una sesión, actualizar `NOTAS.md` (y `PROYECTO.md` si cambia el estado) y hacer commit.

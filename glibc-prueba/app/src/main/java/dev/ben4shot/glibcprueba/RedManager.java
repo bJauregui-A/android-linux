@@ -33,7 +33,176 @@ public final class RedManager {
     private static final String PREF_REGLAS = "port_forward_reglas";
     private static final String PREF_HABILITADO = "port_forward_habilitado";
     private static final String PREF_SUBRED = "subred_virtual";
+    private static final String PREF_SUBREDES = "subredes_lista";
+    private static final String PREF_ASIGNACIONES = "subred_asignaciones";
     public static final String DEFAULT_SUBRED = "10.0.0.0/24";
+
+    public static class Subred {
+        public final String id;
+        public String nombre;
+        public String cidr;
+
+        public Subred(String id, String nombre, String cidr) {
+            this.id = id;
+            this.nombre = nombre;
+            this.cidr = cidr;
+        }
+
+        public JSONObject aJson() throws JSONException {
+            JSONObject o = new JSONObject();
+            o.put("id", id);
+            o.put("nombre", nombre);
+            o.put("cidr", cidr);
+            return o;
+        }
+
+        public static Subred deJson(JSONObject o) {
+            return new Subred(
+                    o.optString("id", "sub_" + System.currentTimeMillis()),
+                    o.optString("nombre", "Subred Principal"),
+                    o.optString("cidr", DEFAULT_SUBRED)
+            );
+        }
+    }
+
+    public static class AsignacionIp {
+        public final String instanciaId;
+        public String subredId;
+        public String ip;
+
+        public AsignacionIp(String instanciaId, String subredId, String ip) {
+            this.instanciaId = instanciaId;
+            this.subredId = subredId;
+            this.ip = ip;
+        }
+
+        public JSONObject aJson() throws JSONException {
+            JSONObject o = new JSONObject();
+            o.put("instanciaId", instanciaId);
+            o.put("subredId", subredId);
+            o.put("ip", ip);
+            return o;
+        }
+
+        public static AsignacionIp deJson(JSONObject o) {
+            return new AsignacionIp(
+                    o.optString("instanciaId", ""),
+                    o.optString("subredId", ""),
+                    o.optString("ip", "")
+            );
+        }
+    }
+
+    public static synchronized List<Subred> listarSubredes(Context c) {
+        SharedPreferences p = c.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+        String raw = p.getString(PREF_SUBREDES, null);
+        List<Subred> res = new ArrayList<>();
+        if (raw != null && !raw.trim().isEmpty()) {
+            try {
+                JSONArray arr = new JSONArray(raw);
+                for (int i = 0; i < arr.length(); i++) {
+                    res.add(Subred.deJson(arr.getJSONObject(i)));
+                }
+            } catch (JSONException e) {
+                Log.w(TAG, "error leyendo subredes json", e);
+            }
+        }
+        if (res.isEmpty()) {
+            String legado = obtenerSubred(c);
+            Subred def = new Subred("sub_default", "Subred Principal", legado);
+            res.add(def);
+            guardarSubredes(c, res);
+        }
+        return res;
+    }
+
+    public static synchronized void guardarSubredes(Context c, List<Subred> lista) {
+        JSONArray arr = new JSONArray();
+        for (Subred s : lista) {
+            try {
+                arr.put(s.aJson());
+            } catch (JSONException ignorada) { }
+        }
+        c.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putString(PREF_SUBREDES, arr.toString())
+                .apply();
+    }
+
+    public static synchronized Subred agregarSubred(Context c, String nombre, String cidr) {
+        List<Subred> list = listarSubredes(c);
+        Subred s = new Subred("sub_" + System.currentTimeMillis(), nombre, cidr.trim());
+        list.add(s);
+        guardarSubredes(c, list);
+        return s;
+    }
+
+    public static synchronized void eliminarSubred(Context c, String id) {
+        List<Subred> list = listarSubredes(c);
+        if (list.size() <= 1) return; // Mantener al menos una
+        list.removeIf(s -> s.id.equals(id));
+        guardarSubredes(c, list);
+    }
+
+    public static synchronized Map<String, AsignacionIp> listarAsignaciones(Context c) {
+        SharedPreferences p = c.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+        String raw = p.getString(PREF_ASIGNACIONES, null);
+        Map<String, AsignacionIp> res = new ConcurrentHashMap<>();
+        if (raw != null && !raw.trim().isEmpty()) {
+            try {
+                JSONArray arr = new JSONArray(raw);
+                for (int i = 0; i < arr.length(); i++) {
+                    AsignacionIp asig = AsignacionIp.deJson(arr.getJSONObject(i));
+                    if (!asig.instanciaId.isEmpty()) {
+                        res.put(asig.instanciaId, asig);
+                    }
+                }
+            } catch (JSONException e) {
+                Log.w(TAG, "error leyendo asignaciones json", e);
+            }
+        }
+        return res;
+    }
+
+    public static synchronized void guardarAsignaciones(Context c, Map<String, AsignacionIp> map) {
+        JSONArray arr = new JSONArray();
+        for (AsignacionIp asig : map.values()) {
+            try {
+                arr.put(asig.aJson());
+            } catch (JSONException ignorada) { }
+        }
+        c.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putString(PREF_ASIGNACIONES, arr.toString())
+                .apply();
+    }
+
+    public static synchronized void asignarIp(Context c, String instanciaId, String subredId, String ip) {
+        Map<String, AsignacionIp> map = listarAsignaciones(c);
+        AsignacionIp asig = new AsignacionIp(instanciaId, subredId, ip.trim());
+        map.put(instanciaId, asig);
+        guardarAsignaciones(c, map);
+
+        // Escribir en etc/virtual-ip dentro de la instancia
+        escribirVirtualIp(c, instanciaId, ip.trim());
+    }
+
+    public static void escribirVirtualIp(Context c, String instanciaId, String ipCompleta) {
+        try {
+            java.io.File raiz = SistemaLinux.raiz(c, instanciaId);
+            if (raiz != null && raiz.isDirectory()) {
+                java.io.File dirEtc = new java.io.File(raiz, "etc");
+                dirEtc.mkdirs();
+                java.io.File vip = new java.io.File(dirEtc, "virtual-ip");
+                try (java.io.FileWriter fw = new java.io.FileWriter(vip, false)) {
+                    fw.write(ipCompleta + "\n");
+                }
+                Log.i(TAG, "Escrito " + vip.getAbsolutePath() + ": " + ipCompleta);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Error escribiendo etc/virtual-ip para " + instanciaId, e);
+        }
+    }
 
     public static String obtenerSubred(Context c) {
         return c.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -49,6 +218,13 @@ public final class RedManager {
     }
 
     public static String ipParaInstancia(Context c, String instanciaId) {
+        Map<String, AsignacionIp> asigs = listarAsignaciones(c);
+        AsignacionIp asig = asigs.get(instanciaId);
+        if (asig != null && asig.ip != null && !asig.ip.trim().isEmpty()) {
+            return asig.ip.trim();
+        }
+
+        // Sugerir IP determinista basada en la subred
         String sub = obtenerSubred(c);
         String prefix = sub.contains("/") ? sub.substring(0, sub.lastIndexOf('.')) : "10.0.0";
         if ("gateway".equals(instanciaId) || "host".equals(instanciaId)) {

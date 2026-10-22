@@ -81,6 +81,9 @@ if [ ! -e "$E/extraido" ]; then
     touch "$E/extraido"
     # Normalizar permisos de directorios base a 755 para evitar warnings de pacman
     find "$P/usr" "$P/etc" "$P/var" "$P/opt" -type d -exec chmod 755 {} + 2>/dev/null || true
+    # Enlazar systemd unit dir a /etc/services.d para que pacman instale servicios en el supervisor
+    mkdir -p "$P/etc/services.d" "$P/usr/lib/systemd" 2>/dev/null || true
+    ln -sfn ../../../etc/services.d "$P/usr/lib/systemd/system" 2>/dev/null || true
     printf '\e[1;38;5;111m└────────────────────────────────────────────────────────────┘\e[0m\n'
 fi
 
