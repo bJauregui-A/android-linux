@@ -501,13 +501,20 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
 7. **Eliminada actividad de prueba obsoleta `MainActivity`:**
    - Retirada de [AndroidManifest.xml](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/AndroidManifest.xml) para evitar aperturas accidentales con fondo blanco por comandos ADB.
 
+8. **Verificación en el dispositivo:**
+   - Compilada e instalada la APK en el Redmi 15 5G (`adb install -r`, datos conservados).
+   - Comprobado por el usuario: concurrencia multi-sesión funcionando con persistencia independiente de archivos, la fila de botones sube automáticamente sobre el teclado virtual y la terminal se redimensiona correctamente en vivo (incluyendo `nano`).
+
 **Siguiente sesión (65ª):**
-1. **Actualización del APK en el teléfono (`adb install -r`):**
-   - Instalar la versión compilada para reflejar todos los cambios de navegación, redibujado de teclado, notificación individual y tarjetas limpias conservando las instancias activas.
-2. **Punto 3.3: Soporte para ejecución de binarios estáticos (`execve_x` en `android-path.c`).**
-3. **Distribuciones adicionales (Debian / Ubuntu arm64).**
-4. **Proxy de puerto 22 en segundo plano vía ADB local (`adb-conectar`).**
+1. **Configuración de proxy en puerto 22 real de Wi-Fi:**
+   - Implementar y poner a prueba el script o daemon en espacio `shell` (UID 2000, con `CAP_NET_BIND_SERVICE`) vía `adb-conectar` para escuchar en `0.0.0.0:22` y redirigir el tráfico SSH directamente a la instancia seleccionada o configurada en la UI de Red.
+2. **Pruebas avanzadas de la subred virtual y reenvío de puertos:**
+   - Probar en vivo las reglas de Port Forwarding desde la UI `[ ⇄ RED ]` (ej. mapear un puerto como el 8080 hacia una instancia y acceder desde el navegador de Android o desde otro dispositivo en la red local).
+3. **Punto 3.3: Soporte para ejecución de binarios estáticos (`execve_x` en `android-path.c`):**
+   - Soporte para binarios estáticos (`ldconfig`, `busybox`, herramientas compiladas estáticamente sin `PT_INTERP`) bajo W^X de Android mediante cargador en espacio de usuario.
+4. **Distribuciones adicionales (Punto 4: Debian y Ubuntu ARM64):**
+   - Creación de adaptadores (`AdaptadorDebianArm64.java`), bootstrap de rootfs y recetas.
 5. **Estado y notas operativas del teléfono:**
    - Dispositivo: Redmi 15 5G (`spring`, Snapdragon 4 Gen 2, serial `dab6b001`).
-   - Instancias activas verificadas en concurrencia: dos instancias de consola funcionando independientemente en segundo plano.
+   - Instancias activas verificadas en concurrencia: dos instancias de consola funcionando independientemente en segundo plano con archivos y procesos aislados.
    - Reconexión de depuración inalámbrica local en el teléfono si se reinicia o pierde Wi-Fi: script `adb-conectar` (`~/.local/bin/adb-conectar`).
