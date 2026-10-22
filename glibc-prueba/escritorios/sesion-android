@@ -264,9 +264,16 @@ cambiar_escritorio() {
 
 cerrar_sesion() {
     cerrando=1
-    # Da tiempo a que Steam cierre ordenadamente y los puentes suelten la sesión antes del WM.
     detener_servicios
-    kill -TERM -- "-$hijo" 2>/dev/null
+    if [ -n "${hijo:-}" ]; then
+        kill -TERM -- "-$hijo" 2>/dev/null || true
+        for _ in $(seq 8); do
+            kill -0 "$hijo" 2>/dev/null || break
+            sleep 0.1
+        done
+        kill -KILL -- "-$hijo" 2>/dev/null || true
+    fi
+    exit 0
 }
 
 trap cerrar_sesion TERM HUP INT

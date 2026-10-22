@@ -367,6 +367,7 @@ public class WaylandActivity extends Activity {
                     finish();
                 })
                 .setNegativeButton("✕ Cerrar sesión", (d, w) -> {
+                    Wayland.ventana(null, 0, 0, 0, 0);
                     startService(new Intent(this, TerminalService.class).setAction(TerminalService.CERRAR_SESION));
                     finish();
                 })

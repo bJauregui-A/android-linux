@@ -105,7 +105,11 @@ public class TerminalService extends Service implements TerminalSessionClient {
         Log.i(TAG, "cerrando sesión completa");
         cerrarEscritorio();
         if (sesion != null) {
-            sesion.finishIfRunning();
+            try {
+                sesion.finishIfRunning();
+            } catch (Exception e) {
+                Log.w(TAG, "error al finalizar sesión de terminal", e);
+            }
             sesion = null;
         }
         instanciaActivaId = null;
@@ -115,13 +119,44 @@ public class TerminalService extends Service implements TerminalSessionClient {
     synchronized void cerrarEscritorio() {
         if (escritorio != null) {
             try {
-                escritorio.destroy();
+                escritorio.destroyForcibly();
             } catch (Exception e) {
-                Log.e(TAG, "error al destruir proceso de escritorio", e);
+                try {
+                    escritorio.destroy();
+                } catch (Exception ignorada) { }
             }
             escritorio = null;
         }
+        AdaptadorInstalacion adp = SistemaLinux.adaptadorSeleccionado(this);
+        if (adp != null) {
+            limpiarProcesosLinux(adp.raiz(this));
+        }
         instanciaActivaId = null;
+    }
+
+    private void limpiarProcesosLinux(File raiz) {
+        if (raiz == null) return;
+        try {
+            int miPid = android.os.Process.myPid();
+            String path = raiz.getAbsolutePath();
+            String[] cmd = new String[]{
+                "/system/bin/sh", "-c",
+                "for p in /proc/[0-9]*; do " +
+                "  pid=${p#/proc/}; " +
+                "  if [ \"$pid\" != \"$$\" ] && [ \"$pid\" != \"" + miPid + "\" ]; then " +
+                "    cmd=$(cat $p/cmdline 2>/dev/null | tr '\\0' ' '); " +
+                "    case \"$cmd\" in " +
+                "      *\"" + path + "\"*|*sesion-android*|*sway*|*hyprland*|*kwin*|*waybar*|*autostart-android*|*pipewire*|*wireplumber*) " +
+                "        kill -9 $pid 2>/dev/null ;; " +
+                "    esac; " +
+                "  fi; " +
+                "done; " +
+                "rm -f " + path + "/tmp/arch-android-display " + path + "/run/user/*/wayland-[1-9]* " + path + "/run/user/*/sway-ipc.*.sock 2>/dev/null"
+            };
+            Runtime.getRuntime().exec(cmd).waitFor();
+        } catch (Exception e) {
+            Log.w(TAG, "limpieza procesos", e);
+        }
     }
 
     @Override

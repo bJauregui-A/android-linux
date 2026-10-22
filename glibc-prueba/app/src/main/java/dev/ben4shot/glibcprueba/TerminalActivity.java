@@ -2,6 +2,7 @@ package dev.ben4shot.glibcprueba;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -92,12 +93,12 @@ public class TerminalActivity extends Activity implements TerminalViewClient {
     private LinearLayout filaTeclas() {
         LinearLayout fila = new LinearLayout(this);
         fila.setBackgroundColor(0xff1a1a1a);
-        String[] teclas = {"⌨", "ESC", "TAB", "CTRL", "ALT", "-", "/", "|", "~", "←", "↓", "↑", "→"};
+        String[] teclas = {"⌨", "ESC", "TAB", "CTRL", "ALT", "-", "/", "|", "~", "←", "↓", "↑", "→", "SALIR"};
         for (String t : teclas) {
             TextView b = new TextView(this);
             b.setText(t);
-            b.setTextColor(Color.WHITE);
-            b.setTypeface(Typeface.MONOSPACE);
+            b.setTextColor(t.equals("SALIR") ? 0xffff6b6b : Color.WHITE);
+            b.setTypeface(Typeface.MONOSPACE, t.equals("SALIR") ? Typeface.BOLD : Typeface.NORMAL);
             b.setGravity(Gravity.CENTER);
             b.setPadding(0, 24, 0, 24);
             b.setOnClickListener(v -> tecla(t));
@@ -114,6 +115,9 @@ public class TerminalActivity extends Activity implements TerminalViewClient {
                 vista.requestFocus();
                 getSystemService(InputMethodManager.class).showSoftInput(vista, 0);
                 return;
+            case "SALIR":
+                mostrarMenuSalida();
+                return;
             case "CTRL": ctrl = !ctrl; marcar(); return;
             case "ALT": alt = !alt; marcar(); return;
             case "ESC": codigo(KeyEvent.KEYCODE_ESCAPE); return;
@@ -124,6 +128,32 @@ public class TerminalActivity extends Activity implements TerminalViewClient {
             case "→": codigo(KeyEvent.KEYCODE_DPAD_RIGHT); return;
             default: vista.inputCodePoint(t.codePointAt(0), false, false);
         }
+    }
+
+    private void mostrarMenuSalida() {
+        SistemaLinux.Instancia inst = SistemaLinux.instanciaSeleccionada(this);
+        String nombre = inst != null ? inst.nombre : "Linux";
+        new AlertDialog.Builder(this)
+                .setTitle("✦ Terminal (" + nombre + ")")
+                .setMessage("¿Deseas salir manteniendo la sesión en segundo plano, o cerrar la sesión por completo?")
+                .setPositiveButton("Salir (mantener en fondo)", (d, w) -> {
+                    finish();
+                })
+                .setNegativeButton("✕ Cerrar sesión", (d, w) -> {
+                    startService(new Intent(this, TerminalService.class).setAction(TerminalService.CERRAR_SESION));
+                    finish();
+                })
+                .setNeutralButton("Cancelar", null)
+                .show();
+    }
+
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
+            mostrarMenuSalida();
+            return true;
+        }
+        return super.onKeyDown(keyCode, event);
     }
 
     private void codigo(int keyCode) {
