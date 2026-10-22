@@ -647,6 +647,17 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
   - Reempaquetados `base.tgz` y `capa.tgz` en `trabajo/assets-sdk36/` con `apk/armar.sh sdk36`.
   - APK `sdk36Debug` compilada e instalada en el dispositivo vía `adb install -r`.
   - Actualizada `libc.so.6` en las instancias `server1-25913` y `client-16767`.
+- **Diagnóstico y corrección de Port Forwarding y servicios web (Nginx/Apache):**
+  - **Servicios web:** Se verificó que Apache y Nginx quedaron instalados correctamente vía pacman en `server1`. El error `EADDRINUSE` en Apache se debió a colisión de puerto con Nginx (`Listen 80`).
+  - **Corrección de Port Forwarding hacia entornos aislados:**
+    - En [RedManager.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/RedManager.java): se corrigió `procesarConexion()` para que resuelva la IP virtual asignada a la instancia destino (`10.0.0.X` -> `127.0.0.X`) en lugar de conectar ciegamente a `127.0.0.1`, evitando `ECONNREFUSED`.
+    - Se convirtieron ambos flujos de reenviado (`cliente -> destino` y `destino -> cliente`) en tareas asíncronas independientes sobre el `poolPipes`, desbloqueando el tráfico HTTP en tiempo real.
+    - En [SistemaActivity.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/SistemaActivity.java): llamada a `RedManager.actualizar(this)` en `onCreate` para garantizar que los puertos guardados queden en escucha activa al abrir la app.
+  - **Pruebas en vivo en el Redmi 15 5G:**
+    - `curl -I http://10.0.0.2/` desde `client` (`10.0.0.3`): `HTTP 200 OK` (Nginx respondiendo a través de la red virtual).
+    - `curl -I http://127.0.0.1:8000/` en el teléfono: `HTTP 200 OK` (Port Forwarding 8000 -> 80 de `server1` plenamente funcional).
+    - Navegadores Edge y Brave cargando exitosamente `http://127.0.0.1:8000/`.
+    - Agregada la app a la lista blanca de ahorro de batería (`cmd deviceidle whitelist +dev.ben4shot.glibcprueba.sdk36`) para evitar congelamiento de sockets y CPU throttling en segundo plano.
 
 **Siguiente sesión (69ª):**
 1. **Validación en vivo de creación de entornos en el Redmi 15 5G:**
@@ -654,6 +665,7 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
    - Confirmar que la nueva instancia arranque con `99: vnet0` y responda a `ping` inmediatamente.
 2. **Validación de la interfaz de Red y subredes virtuales (`[ ⇄ RED ]`):**
    - Probar la creación de subredes CIDR adicionales en `⑂ SUBREDES` y las reglas de port-forwarding en `⇄ REENVÍO PUERTOS`.
+   - Probar acceso desde otros dispositivos en la misma LAN WiFi usando la IP real del teléfono (`wlan2`).
 3. **Validación del Supervisor de servicios nativo en C (`service` / `sv`):**
    - Comprobar el autoarranque del demonio `service-daemon` al abrir sesión interactiva o de escritorio.
    - Probar gestión de servicios con `service <nombre> start/stop/status/logs/list`.
