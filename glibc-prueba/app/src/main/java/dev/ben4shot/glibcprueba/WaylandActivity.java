@@ -429,10 +429,27 @@ public class WaylandActivity extends Activity {
         botonAlternar = fab;
         contenedor.addView(fab);
 
-        // 2. Barra flotante tipo "Pill" (arrastrable por toda la pantalla)
+        // 2. Barra flotante tipo "Pill" (arrastrable libremente por toda la pantalla en X y Y)
         LinearLayout marcoBarra = new LinearLayout(this) {
             private float downX, downY;
-            private boolean interceptando;
+            private float initX, initY;
+            private boolean arrastrando;
+
+            private void moverA(float rawX, float rawY) {
+                float dx = rawX - downX;
+                float dy = rawY - downY;
+                float nx = initX + dx;
+                float ny = initY + dy;
+                View p = (View) getParent();
+                if (p != null) {
+                    float maxX = Math.max(0, p.getWidth() - getWidth());
+                    float maxY = Math.max(0, p.getHeight() - getHeight());
+                    nx = Math.max(0, Math.min(maxX, nx));
+                    ny = Math.max(dp(20), Math.min(maxY - dp(6), ny));
+                }
+                setX(nx);
+                setY(ny);
+            }
 
             @Override
             public boolean onInterceptTouchEvent(MotionEvent ev) {
@@ -440,23 +457,58 @@ public class WaylandActivity extends Activity {
                     case MotionEvent.ACTION_DOWN:
                         downX = ev.getRawX();
                         downY = ev.getRawY();
-                        interceptando = false;
+                        initX = getX();
+                        initY = getY();
+                        arrastrando = false;
                         break;
+
                     case MotionEvent.ACTION_MOVE:
-                        float dx = Math.abs(ev.getRawX() - downX);
-                        float dy = Math.abs(ev.getRawY() - downY);
-                        // Deslizar verticalmente sobre las teclas o el fondo arrastra toda la barra por la pantalla
-                        if (!interceptando && dy > dp(6) && dy > dx * 0.7f) {
-                            interceptando = true;
+                        float dx = ev.getRawX() - downX;
+                        float dy = ev.getRawY() - downY;
+                        float absDx = Math.abs(dx);
+                        float absDy = Math.abs(dy);
+                        // Si el movimiento vertical supera 6dp, interceptamos para arrastrar la barra
+                        if (!arrastrando && absDy > dp(6) && absDy > absDx * 0.5f) {
+                            arrastrando = true;
                             return true;
                         }
                         break;
+
                     case MotionEvent.ACTION_UP:
                     case MotionEvent.ACTION_CANCEL:
-                        interceptando = false;
+                        arrastrando = false;
                         break;
                 }
                 return super.onInterceptTouchEvent(ev);
+            }
+
+            @Override
+            public boolean onTouchEvent(MotionEvent ev) {
+                switch (ev.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        downX = ev.getRawX();
+                        downY = ev.getRawY();
+                        initX = getX();
+                        initY = getY();
+                        arrastrando = false;
+                        return true;
+
+                    case MotionEvent.ACTION_MOVE:
+                        float dist = (float) Math.hypot(ev.getRawX() - downX, ev.getRawY() - downY);
+                        if (!arrastrando && dist > dp(3)) {
+                            arrastrando = true;
+                        }
+                        if (arrastrando) {
+                            moverA(ev.getRawX(), ev.getRawY());
+                        }
+                        return true;
+
+                    case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL:
+                        arrastrando = false;
+                        return true;
+                }
+                return super.onTouchEvent(ev);
             }
         };
         marcoBarra.setOrientation(LinearLayout.HORIZONTAL);
@@ -465,7 +517,7 @@ public class WaylandActivity extends Activity {
         marcoBarra.setElevation(dp(8));
         marcoBarra.setPadding(dp(5), dp(4), dp(5), dp(4));
 
-        int anchoBarra = Math.min(getResources().getDisplayMetrics().widthPixels - dp(24), dp(420));
+        int anchoBarra = Math.min((int) (getResources().getDisplayMetrics().widthPixels * 0.88f), dp(360));
         FrameLayout.LayoutParams lpMarco = new FrameLayout.LayoutParams(
                 anchoBarra, FrameLayout.LayoutParams.WRAP_CONTENT);
         lpMarco.gravity = Gravity.TOP | Gravity.START;
@@ -484,15 +536,19 @@ public class WaylandActivity extends Activity {
         // Manija de arrastre a la izquierda
         TextView handle = new TextView(this);
         handle.setText("⠿");
-        handle.setTextSize(14);
+        handle.setTextSize(16);
         handle.setTextColor(0xff94a3b8);
         handle.setGravity(Gravity.CENTER);
-        handle.setPadding(dp(8), dp(7), dp(8), dp(7));
-        handle.setBackground(crearFondo(0xff16202c, 0x22ffffff, dp(8), dp(1)));
+        handle.setPadding(dp(12), dp(8), dp(12), dp(8));
+        handle.setBackground(crearFondo(0xff16202c, 0x33ffffff, dp(8), dp(1)));
         LinearLayout.LayoutParams lpH = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         lpH.rightMargin = dp(4);
         marcoBarra.addView(handle, lpH);
+        handle.setOnTouchListener((v, ev) -> {
+            marcoBarra.onTouchEvent(ev);
+            return true;
+        });
 
         // Centro: Scroll horizontal con las teclas
         HorizontalScrollView scroll = new HorizontalScrollView(this);
@@ -553,52 +609,6 @@ public class WaylandActivity extends Activity {
         LinearLayout.LayoutParams lpMin = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         marcoBarra.addView(btnMin, lpMin);
-
-        // Arrastre libre para mover la barra flotante a cualquier parte de la pantalla (X y Y)
-        View.OnTouchListener arrastreBarra = new View.OnTouchListener() {
-            private float startX, startY, initX, initY;
-            private boolean moviendo;
-
-            @Override
-            public boolean onTouch(View v, MotionEvent e) {
-                switch (e.getActionMasked()) {
-                    case MotionEvent.ACTION_DOWN:
-                        startX = e.getRawX();
-                        startY = e.getRawY();
-                        initX = marcoBarra.getX();
-                        initY = marcoBarra.getY();
-                        moviendo = false;
-                        return true;
-
-                    case MotionEvent.ACTION_MOVE:
-                        float diff = (float) Math.hypot(e.getRawX() - startX, e.getRawY() - startY);
-                        if (!moviendo && diff > dp(4)) {
-                            moviendo = true;
-                        }
-                        if (moviendo) {
-                            float nx = initX + (e.getRawX() - startX);
-                            float ny = initY + (e.getRawY() - startY);
-                            View p = (View) marcoBarra.getParent();
-                            if (p != null) {
-                                float maxX = Math.max(0, p.getWidth() - marcoBarra.getWidth());
-                                float maxY = Math.max(0, p.getHeight() - marcoBarra.getHeight());
-                                nx = Math.max(0, Math.min(maxX, nx));
-                                ny = Math.max(dp(20), Math.min(maxY - dp(6), ny));
-                            }
-                            marcoBarra.setX(nx);
-                            marcoBarra.setY(ny);
-                        }
-                        return true;
-
-                    case MotionEvent.ACTION_UP:
-                    case MotionEvent.ACTION_CANCEL:
-                        return moviendo;
-                }
-                return false;
-            }
-        };
-        handle.setOnTouchListener(arrastreBarra);
-        marcoBarra.setOnTouchListener(arrastreBarra);
 
         barraTeclas = marcoBarra;
         contenedor.addView(marcoBarra);
