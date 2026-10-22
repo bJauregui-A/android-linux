@@ -361,7 +361,10 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
    - Limpiados los directorios huérfanos residuales en `files/instancias/`.
 4. **Limpieza de botones especiales (`TerminalActivity.java`, `SistemaActivity.java`):**
    - Eliminados los botones `-`, `/`, `|` y `~` de la barra inferior de teclas virtuales en la terminal de rescate y en la consola de inicio, dejando una fila más espaciosa y limpia con los modificadores y flechas de navegación.
-5. **Compilación y despliegue:**
+5. **Eliminación definitiva de `files/archlinux` y unificación en `instancias/` (`AdaptadorArchArm64.java`, `SistemaLinux.java`):**
+   - Eliminada la carpeta residual histórica `files/archlinux` del almacenamiento del teléfono.
+   - Actualizados los adaptadores y modelos para que todas las rutas por defecto apunten estrictamente a `instancias/arch-principal`, centralizando el 100% de los entornos en `files/instancias/`.
+6. **Compilación y despliegue:**
    - Regenerada `capa.tgz` con `python3 apk/capa.py`, compilada APK `sdk36Debug` e instalada con éxito en el Redmi 15 5G (`adb -s dab6b001 install -r`).
 
 **Siguiente sesión (59ª):**

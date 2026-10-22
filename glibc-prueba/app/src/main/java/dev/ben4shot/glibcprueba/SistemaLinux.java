@@ -120,7 +120,7 @@ final class SistemaLinux {
         }
         // Primera ejecución limpia
         Instancia principal = new Instancia("arch-principal", "Arch Linux (Principal)",
-                ARCH, "archlinux", System.currentTimeMillis());
+                ARCH, "instancias/arch-principal", System.currentTimeMillis());
         lista.add(principal);
         guardarInstancias(c, lista);
         p.edit().putString(PREF_ACTIVA, principal.id).apply();

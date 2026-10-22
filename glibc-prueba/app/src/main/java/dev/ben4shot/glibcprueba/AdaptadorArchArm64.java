@@ -14,11 +14,11 @@ final class AdaptadorArchArm64 implements AdaptadorInstalacion {
     private static final String TAG = "TERMINAL";
 
     public AdaptadorArchArm64() {
-        this("archlinux");
+        this("instancias/arch-principal");
     }
 
     public AdaptadorArchArm64(String prefijo) {
-        this.prefijo = prefijo != null && !prefijo.isEmpty() ? prefijo : "archlinux";
+        this.prefijo = prefijo != null && !prefijo.isEmpty() ? prefijo : "instancias/arch-principal";
     }
 
     @Override public String id() { return SistemaLinux.ARCH; }
