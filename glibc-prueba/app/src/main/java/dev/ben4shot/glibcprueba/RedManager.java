@@ -202,6 +202,81 @@ public final class RedManager {
         } catch (Exception e) {
             Log.w(TAG, "Error escribiendo etc/virtual-ip para " + instanciaId, e);
         }
+        actualizarHosts(c);
+    }
+
+    public static void registrarIpActiva(Context c, String instanciaId) {
+        try {
+            String ip = ipParaInstancia(c, instanciaId);
+            if (ip.contains("/")) ip = ip.substring(0, ip.indexOf('/'));
+            java.io.File dir = new java.io.File(c.getFilesDir(), "ips");
+            dir.mkdirs();
+            java.io.File f = new java.io.File(dir, ip.trim());
+            f.createNewFile();
+            actualizarHosts(c);
+        } catch (Exception ignored) { }
+    }
+
+    public static void desregistrarIpActiva(Context c, String instanciaId) {
+        try {
+            String ip = ipParaInstancia(c, instanciaId);
+            if (ip.contains("/")) ip = ip.substring(0, ip.indexOf('/'));
+            java.io.File dir = new java.io.File(c.getFilesDir(), "ips");
+            java.io.File f = new java.io.File(dir, ip.trim());
+            f.delete();
+            actualizarHosts(c);
+        } catch (Exception ignored) { }
+    }
+
+    public static void sincronizarIpsActivas(Context c, Iterable<String> instanciasActivas) {
+        try {
+            java.io.File dir = new java.io.File(c.getFilesDir(), "ips");
+            dir.mkdirs();
+            java.io.File[] files = dir.listFiles();
+            if (files != null) {
+                for (java.io.File f : files) f.delete();
+            }
+            if (instanciasActivas != null) {
+                for (String id : instanciasActivas) {
+                    String ip = ipParaInstancia(c, id);
+                    if (ip.contains("/")) ip = ip.substring(0, ip.indexOf('/'));
+                    new java.io.File(dir, ip.trim()).createNewFile();
+                }
+            }
+            actualizarHosts(c);
+        } catch (Exception ignored) { }
+    }
+
+    public static void actualizarHosts(Context c) {
+        try {
+            Map<String, AsignacionIp> asigs = listarAsignaciones(c);
+            StringBuilder sb = new StringBuilder();
+            sb.append("127.0.0.1\tlocalhost\n");
+            sb.append("::1\tlocalhost\n");
+            sb.append("10.0.0.1\tgateway host\n");
+            for (AsignacionIp asig : asigs.values()) {
+                String ip = asig.ip;
+                if (ip != null && !ip.trim().isEmpty()) {
+                    if (ip.contains("/")) ip = ip.substring(0, ip.indexOf('/'));
+                    sb.append(ip.trim()).append("\t").append(asig.instanciaId).append("\n");
+                }
+            }
+            String content = sb.toString();
+
+            List<SistemaLinux.Instancia> list = SistemaLinux.listarInstancias(c);
+            for (SistemaLinux.Instancia inst : list) {
+                java.io.File raiz = SistemaLinux.raiz(c, inst.id);
+                if (raiz != null && raiz.isDirectory()) {
+                    java.io.File etc = new java.io.File(raiz, "etc");
+                    if (etc.isDirectory()) {
+                        java.io.File hosts = new java.io.File(etc, "hosts");
+                        try (java.io.FileWriter fw = new java.io.FileWriter(hosts, false)) {
+                            fw.write(content);
+                        } catch (Exception ignored) { }
+                    }
+                }
+            }
+        } catch (Exception ignored) { }
     }
 
     public static String obtenerSubred(Context c) {

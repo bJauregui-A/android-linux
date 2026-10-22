@@ -1,6 +1,6 @@
 diff -uNr -x '*.orig' -x '*.rej' a/sysdeps/unix/sysv/linux/aarch64/android-path.c b/sysdeps/unix/sysv/linux/aarch64/android-path.c
---- a/sysdeps/unix/sysv/linux/aarch64/android-path.c	2026-10-22 18:56:38.636859850 -0300
-+++ b/sysdeps/unix/sysv/linux/aarch64/android-path.c	2026-10-22 18:54:05.962726400 -0300
+--- a/sysdeps/unix/sysv/linux/aarch64/android-path.c	2026-10-22 19:26:52.089645301 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/android-path.c	2026-10-22 19:23:57.831277698 -0300
 @@ -36,6 +36,7 @@
  #include <net/if_arp.h>
  #include <linux/netlink.h>
@@ -17,7 +17,7 @@ diff -uNr -x '*.orig' -x '*.rej' a/sysdeps/unix/sysv/linux/aarch64/android-path.
    __NR_rt_sigprocmask, __NR_rt_sigaction
  };
  
-@@ -1149,6 +1151,227 @@
+@@ -1149,6 +1151,329 @@
    return starts (a, b, la + 1);
  }
  
@@ -82,6 +82,108 @@ diff -uNr -x '*.orig' -x '*.rej' a/sysdeps/unix/sysv/linux/aarch64/android-path.
 +  *ip_out = ip;
 +  *prefixlen_out = (plen_val > 0 && plen_val <= 32) ? (uint8_t) plen_val : 24;
 +  return 1;
++}
++
++static char *
++sfind (char *haystack, size_t hlen, const char *needle, size_t nlen)
++{
++  if (nlen > hlen)
++    return NULL;
++  for (size_t i = 0; i <= hlen - nlen; i++)
++    {
++      if (starts (haystack + i, needle, nlen))
++        return haystack + i;
++    }
++  return NULL;
++}
++
++static int
++ip_en_subred (uint32_t ip, uint32_t net_ip, uint8_t prefixlen)
++{
++  if (prefixlen == 0 || prefixlen > 32)
++    return 0;
++  const unsigned char *a = (const unsigned char *) &ip;
++  const unsigned char *b = (const unsigned char *) &net_ip;
++  int bytes = prefixlen / 8;
++  for (int i = 0; i < bytes; i++)
++    {
++      if (a[i] != b[i])
++	return 0;
++    }
++  int rem_bits = prefixlen % 8;
++  if (rem_bits > 0)
++    {
++      unsigned char mask = (unsigned char) (~((1 << (8 - rem_bits)) - 1));
++      if ((a[bytes] & mask) != (b[bytes] & mask))
++	return 0;
++    }
++  return 1;
++}
++
++static int
++ip_activa (uint32_t ip, uint32_t my_vip)
++{
++  if (ip == my_vip)
++    return 1;
++
++  char ip_str[32];
++  const unsigned char *b = (const unsigned char *) &ip;
++  char *p = ip_str;
++  p = utoa (p, b[0]); *p++ = '.';
++  p = utoa (p, b[1]); *p++ = '.';
++  p = utoa (p, b[2]); *p++ = '.';
++  p = utoa (p, b[3]); *p = '\0';
++  size_t iplen = p - ip_str;
++
++  char path[512];
++  if (plen + 32 >= sizeof (path))
++    return 0;
++  mcopy (path, PREFIX, plen);
++  path[plen] = '\0';
++
++  char *inst = sfind (path, plen, "/instancias/", 12);
++  if (inst != NULL)
++    {
++      mcopy (inst, "/ips/", 5);
++      mcopy (inst + 5, ip_str, iplen + 1);
++    }
++  else
++    {
++      char *f = sfind (path, plen, "/files/", 7);
++      if (f != NULL)
++        {
++          mcopy (f + 7, "ips/", 4);
++          mcopy (f + 11, ip_str, iplen + 1);
++        }
++      else
++        return 0;
++    }
++
++  long int r = raw (__NR_faccessat, AT_FDCWD, (long int) path, F_OK, 0, 0, 0);
++  return r == 0;
++}
++
++static inline uint32_t
++vip_a_loopback (uint32_t vip)
++{
++  uint32_t lb = vip;
++  ((unsigned char *) &lb)[0] = 127;
++  return lb;
++}
++
++static inline uint32_t
++loopback_a_vip (uint32_t lb, uint32_t my_vip)
++{
++  uint32_t vip = lb;
++  ((unsigned char *) &vip)[0] = ((unsigned char *) &my_vip)[0];
++  return vip;
++}
++
++static inline int
++es_loopback_virtual (uint32_t lb)
++{
++  const unsigned char *b = (const unsigned char *) &lb;
++  return (b[0] == 127 && !(b[1] == 0 && b[2] == 0 && b[3] == 1));
 +}
 +
 +static size_t
@@ -245,7 +347,7 @@ diff -uNr -x '*.orig' -x '*.rej' a/sysdeps/unix/sysv/linux/aarch64/android-path.
  static size_t
  armar_getlink_sintetico (char *buf, size_t maxlen, const struct nlmsghdr *req_nlh)
  {
-@@ -1298,6 +1521,50 @@
+@@ -1298,6 +1623,50 @@
      }
    raw (__NR_close, s, 0, 0, 0, 0, 0);
  
@@ -296,7 +398,7 @@ diff -uNr -x '*.orig' -x '*.rej' a/sysdeps/unix/sysv/linux/aarch64/android-path.
    if (is_dump)
      {
        if (out_len + NLMSG_SPACE (sizeof (int)) <= maxlen)
-@@ -1339,6 +1606,8 @@
+@@ -1339,6 +1708,8 @@
    switch (nr)
      {
      case __NR_close:
@@ -305,7 +407,7 @@ diff -uNr -x '*.orig' -x '*.rej' a/sysdeps/unix/sysv/linux/aarch64/android-path.
        netlink_marcar (a0, 0);
        uevent_marcar (a0, 0);
        nl_slot_limpiar (a0);
-@@ -1373,6 +1642,39 @@
+@@ -1373,16 +1744,70 @@
  	      }
  	    return r;
  	  }
@@ -313,12 +415,15 @@ diff -uNr -x '*.orig' -x '*.rej' a/sysdeps/unix/sysv/linux/aarch64/android-path.
 +	  {
 +	    struct sockaddr_in sin_copy;
 +	    mcopy ((char *) &sin_copy, (const char *) a1, sizeof (sin_copy));
-+	    uint32_t vip = 0;
++	    uint32_t my_vip = 0;
 +	    uint8_t vlen = 0;
-+	    if (leer_virtual_ip (&vip, &vlen) && sin_copy.sin_addr.s_addr == vip)
++	    if (leer_virtual_ip (&my_vip, &vlen) && my_vip != 0)
 +	      {
-+		sin_copy.sin_addr.s_addr = 0; /* INADDR_ANY: aceptar bind en todas las interfaces */
-+		return raw (nr, a0, (long int) &sin_copy, a2, 0, 0, 0);
++		if (sin_copy.sin_addr.s_addr == my_vip || sin_copy.sin_addr.s_addr == 0)
++		  {
++		    sin_copy.sin_addr.s_addr = vip_a_loopback (my_vip);
++		    return raw (nr, a0, (long int) &sin_copy, a2, 0, 0, 0);
++		  }
 +	      }
 +	  }
 +	break;
@@ -332,12 +437,16 @@ diff -uNr -x '*.orig' -x '*.rej' a/sysdeps/unix/sysv/linux/aarch64/android-path.
 +	      {
 +		struct sockaddr_in sin_copy;
 +		mcopy ((char *) &sin_copy, (const char *) a1, sizeof (sin_copy));
-+		uint32_t vip = 0;
++		uint32_t my_vip = 0;
 +		uint8_t vlen = 0;
-+		if (leer_virtual_ip (&vip, &vlen) && sin_copy.sin_addr.s_addr == vip)
++		if (leer_virtual_ip (&my_vip, &vlen) && my_vip != 0)
 +		  {
-+		    sin_copy.sin_addr.s_addr = 0x0100007f; /* 127.0.0.1 */
-+		    return raw (nr, a0, (long int) &sin_copy, a2, 0, 0, 0);
++		    if (ip_en_subred (sin_copy.sin_addr.s_addr, my_vip, vlen) &&
++			ip_activa (sin_copy.sin_addr.s_addr, my_vip))
++		      {
++			sin_copy.sin_addr.s_addr = vip_a_loopback (sin_copy.sin_addr.s_addr);
++			return raw (nr, a0, (long int) &sin_copy, a2, 0, 0, 0);
++		      }
 +		  }
 +	      }
 +	    return raw (nr, a0, a1, a2, a3, a4, a5);
@@ -345,7 +454,35 @@ diff -uNr -x '*.orig' -x '*.rej' a/sysdeps/unix/sysv/linux/aarch64/android-path.
  	break;
        }
      case __NR_getsockname:
-@@ -1399,6 +1701,15 @@
+       {
+ 	long int r = raw (nr, a0, a1, a2, 0, 0, 0);
+-	if (r == 0 && a1 != 0 && netlink_es (a0))
++	if (r == 0 && a1 != 0)
+ 	  {
+-	    struct sockaddr_nl *snl = (struct sockaddr_nl *) a1;
+-	    if (snl->nl_family == AF_NETLINK && snl->nl_pid == 0)
+-	      snl->nl_pid = (uint32_t) raw (__NR_getpid, 0, 0, 0, 0, 0, 0);
++	    if (netlink_es (a0))
++	      {
++		struct sockaddr_nl *snl = (struct sockaddr_nl *) a1;
++		if (snl->nl_family == AF_NETLINK && snl->nl_pid == 0)
++		  snl->nl_pid = (uint32_t) raw (__NR_getpid, 0, 0, 0, 0, 0, 0);
++	      }
++	    else if (a2 != 0 && *(socklen_t *) a2 >= sizeof (struct sockaddr_in))
++	      {
++		struct sockaddr_in *sin = (struct sockaddr_in *) a1;
++		if (sin->sin_family == AF_INET && es_loopback_virtual (sin->sin_addr.s_addr))
++		  {
++		    uint32_t my_vip = 0;
++		    uint8_t vlen = 0;
++		    if (leer_virtual_ip (&my_vip, &vlen) && my_vip != 0)
++		      sin->sin_addr.s_addr = loopback_a_vip (sin->sin_addr.s_addr, my_vip);
++		  }
++	      }
+ 	  }
+ 	return r;
+       }
+@@ -1399,6 +1824,15 @@
  	      nl_lock_release ();
  	      return a2;
  	    }
@@ -361,7 +498,7 @@ diff -uNr -x '*.orig' -x '*.rej' a/sysdeps/unix/sysv/linux/aarch64/android-path.
  	  if (nlh->nlmsg_type == RTM_GETNEIGH)
  	    {
  	      nl_lock_acquire ();
-@@ -1417,6 +1728,25 @@
+@@ -1417,6 +1851,29 @@
  	      return a2;
  	    }
  	}
@@ -372,22 +509,26 @@ diff -uNr -x '*.orig' -x '*.rej' a/sysdeps/unix/sysv/linux/aarch64/android-path.
 +	    {
 +	      struct sockaddr_in sin_copy;
 +	      mcopy ((char *) &sin_copy, (const char *) a4, sizeof (sin_copy));
-+	      uint32_t vip = 0;
++	      uint32_t my_vip = 0;
 +	      uint8_t vlen = 0;
-+	      if (leer_virtual_ip (&vip, &vlen) && sin_copy.sin_addr.s_addr == vip)
++	      if (leer_virtual_ip (&my_vip, &vlen) && my_vip != 0)
 +		{
-+		  vip_redir_fd = (int) a0;
-+		  sin_copy.sin_addr.s_addr = 0x0100007f; /* 127.0.0.1 */
-+		  return raw (nr, a0, a1, a2, a3, (long int) &sin_copy, a5);
++		  if (ip_en_subred (sin_copy.sin_addr.s_addr, my_vip, vlen) &&
++		      ip_activa (sin_copy.sin_addr.s_addr, my_vip))
++		    {
++		      vip_redir_fd = (int) a0;
++		      sin_copy.sin_addr.s_addr = vip_a_loopback (sin_copy.sin_addr.s_addr);
++		      return raw (nr, a0, a1, a2, a3, (long int) &sin_copy, a5);
++		    }
++		  else if ((int) a0 == vip_redir_fd)
++		    vip_redir_fd = -1;
 +		}
-+	      else if ((int) a0 == vip_redir_fd)
-+		vip_redir_fd = -1;
 +	    }
 +	}
        return raw (nr, a0, a1, a2, a3, a4, a5);
      case __NR_sendmsg:
        if (netlink_es (a0) && a1 != 0)
-@@ -1429,7 +1759,8 @@
+@@ -1429,11 +1886,40 @@
  	      if (ib != NULL && il >= sizeof (struct nlmsghdr))
  		{
  		  const struct nlmsghdr *nlh = (const struct nlmsghdr *) ib;
@@ -397,7 +538,39 @@ diff -uNr -x '*.orig' -x '*.rej' a/sysdeps/unix/sysv/linux/aarch64/android-path.
  		    return __android_path_syscall (__NR_sendto, a0, (long int) ib, il, a2, 0, 0);
  		}
  	    }
-@@ -1471,7 +1802,23 @@
+ 	}
++      if (a1 != 0)
++	{
++	  struct msghdr *mh = (struct msghdr *) a1;
++	  if (mh->msg_name != NULL && (size_t) mh->msg_namelen >= sizeof (struct sockaddr_in))
++	    {
++	      struct sockaddr_in *sin = (struct sockaddr_in *) mh->msg_name;
++	      if (sin->sin_family == AF_INET)
++		{
++		  uint32_t my_vip = 0;
++		  uint8_t vlen = 0;
++		  if (leer_virtual_ip (&my_vip, &vlen) && my_vip != 0)
++		    {
++		      if (ip_en_subred (sin->sin_addr.s_addr, my_vip, vlen) &&
++			  ip_activa (sin->sin_addr.s_addr, my_vip))
++			{
++			  uint32_t orig_ip = sin->sin_addr.s_addr;
++			  vip_redir_fd = (int) a0;
++			  sin->sin_addr.s_addr = vip_a_loopback (orig_ip);
++			  long int r = raw (nr, a0, a1, a2, a3, a4, a5);
++			  sin->sin_addr.s_addr = orig_ip;
++			  return r;
++			}
++		      else if ((int) a0 == vip_redir_fd)
++			vip_redir_fd = -1;
++		    }
++		}
++	    }
++	}
+       return raw (nr, a0, a1, a2, a3, a4, a5);
+     case __NR_recvmsg:
+       {
+@@ -1471,7 +1957,23 @@
  	    return total;
  	  }
  	nl_lock_release ();
@@ -409,12 +582,12 @@ diff -uNr -x '*.orig' -x '*.rej' a/sysdeps/unix/sysv/linux/aarch64/android-path.
 +	    if (mh->msg_name != NULL && (size_t) mh->msg_namelen >= sizeof (struct sockaddr_in))
 +	      {
 +		struct sockaddr_in *sin = (struct sockaddr_in *) mh->msg_name;
-+		if (sin->sin_family == AF_INET && sin->sin_addr.s_addr == 0x0100007f)
++		if (sin->sin_family == AF_INET && es_loopback_virtual (sin->sin_addr.s_addr))
 +		  {
-+		    uint32_t vip = 0;
++		    uint32_t my_vip = 0;
 +		    uint8_t vlen = 0;
-+		    if (leer_virtual_ip (&vip, &vlen) && vip != 0)
-+		      sin->sin_addr.s_addr = vip;
++		    if (leer_virtual_ip (&my_vip, &vlen) && my_vip != 0)
++		      sin->sin_addr.s_addr = loopback_a_vip (sin->sin_addr.s_addr, my_vip);
 +		  }
 +	      }
 +	  }
@@ -422,7 +595,7 @@ diff -uNr -x '*.orig' -x '*.rej' a/sysdeps/unix/sysv/linux/aarch64/android-path.
        }
      case __NR_recvfrom:
        {
-@@ -1502,8 +1849,27 @@
+@@ -1502,8 +2004,27 @@
  	    return cp;
  	  }
  	nl_lock_release ();
@@ -431,12 +604,12 @@ diff -uNr -x '*.orig' -x '*.rej' a/sysdeps/unix/sysv/linux/aarch64/android-path.
 +	if (ret >= 0 && a4 != 0 && a5 != 0 && *(socklen_t *) a5 >= sizeof (struct sockaddr_in) && (int) a0 == vip_redir_fd)
 +	  {
 +	    struct sockaddr_in *sin = (struct sockaddr_in *) a4;
-+	    if (sin->sin_family == AF_INET && sin->sin_addr.s_addr == 0x0100007f)
++	    if (sin->sin_family == AF_INET && es_loopback_virtual (sin->sin_addr.s_addr))
 +	      {
-+		uint32_t vip = 0;
++		uint32_t my_vip = 0;
 +		uint8_t vlen = 0;
-+		if (leer_virtual_ip (&vip, &vlen) && vip != 0)
-+		  sin->sin_addr.s_addr = vip;
++		if (leer_virtual_ip (&my_vip, &vlen) && my_vip != 0)
++		  sin->sin_addr.s_addr = loopback_a_vip (sin->sin_addr.s_addr, my_vip);
 +	      }
 +	  }
 +	return ret;
@@ -486,7 +659,7 @@ diff -uNr -x '*.orig' -x '*.rej' a/sysdeps/unix/sysv/linux/aarch64/prctl.c b/sys
 +libc_hidden_def (__prctl)
 +weak_alias (__prctl, prctl)
 diff -uNr -x '*.orig' -x '*.rej' a/sysdeps/unix/sysv/linux/aarch64/sysdep.h b/sysdeps/unix/sysv/linux/aarch64/sysdep.h
---- a/sysdeps/unix/sysv/linux/aarch64/sysdep.h	2026-10-22 18:56:38.635312561 -0300
+--- a/sysdeps/unix/sysv/linux/aarch64/sysdep.h	2026-10-22 19:26:52.086392364 -0300
 +++ b/sysdeps/unix/sysv/linux/aarch64/sysdep.h	2026-10-22 18:20:03.619631803 -0300
 @@ -214,6 +214,7 @@
      case __NR_execveat: case __NR_ioctl: case __NR_socket:

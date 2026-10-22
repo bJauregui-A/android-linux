@@ -152,6 +152,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
         }
         actualizarNotificacion();
         RedManager.actualizar(this);
+        RedManager.sincronizarIpsActivas(this, sesiones.keySet());
         return START_NOT_STICKY;
     }
 
@@ -242,6 +243,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
     public synchronized void cerrarInstancia(String id) {
         if (id == null) return;
         Log.i(TAG, "Cerrando instancia: " + id);
+        RedManager.desregistrarIpActiva(this, id);
         SesionInstancia s = sesiones.remove(id);
         if (s != null) {
             s.instalando = false;
@@ -730,6 +732,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
         try {
             String vip = RedManager.ipParaInstancia(this, instalacion.id());
             RedManager.escribirVirtualIp(this, instalacion.id(), vip);
+            RedManager.registrarIpActiva(this, instalacion.id());
         } catch (Exception ignorada) { }
         Wayland.iniciarPara(this, instalacion.id());
         Abrir.iniciar(this);
@@ -830,6 +833,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
             } else {
                 dueña.sesionTerminal = null;
                 if (!dueña.estaViva()) {
+                    RedManager.desregistrarIpActiva(this, dueña.id);
                     sesiones.remove(dueña.id);
                 }
             }

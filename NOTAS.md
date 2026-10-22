@@ -619,12 +619,34 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
   - **Pruebas en vivo en el Redmi 15 5G:**
     - `ping -c 2 127.0.0.1`: 2 paquetes transmitidos, 2 recibidos, 0% packet loss, RTT ~0.5 ms (sin advertencias).
     - `ping -c 2 10.0.0.2`: 2 paquetes transmitidos, 2 recibidos, 0% packet loss, RTT ~0.5 ms (sin advertencias de diferente dirección).
+- **Enrutamiento y comunicación inter-instancias completo (`server` <--> `client`):**
+  - **Problema detectado:** Al tener dos entornos corriendo (`server1` en `10.0.0.2` y `client` en `10.0.0.3`), el ping entre ellos daba 100% packet loss porque cada instancia solo reconocía su propia IP local y mandaba las IPs remotas de la subred al kernel de Android sin desviar.
+  - **Descubrimiento clave del kernel Linux/Android:** El bloque completo `127.0.0.0/8` está habilitado y operativo en Android. Mapear cada IP virtual `10.0.0.X` a `127.0.0.X` permite:
+    1. Aislamiento total de puertos: cada instancia puede hacer `bind()` al mismo puerto (ej. 80, 22, 8080) en su loopback virtual (`127.0.0.X`) sin colisión `EADDRINUSE`.
+    2. Mantener `127.0.0.1` 100% reservado e intacto para el celular real y ADB.
+    3. Respuestas ICMP nativas del kernel para cada dirección `127.0.0.X`.
+  - **Implementación en glibc y app:**
+    - En [RedManager.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/RedManager.java): registro dinámico de instancias vivas en `/data/user/0/.../files/ips/<ip>` y sincronización de `/etc/hosts` en todas las instancias.
+    - En [TerminalService.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/TerminalService.java): altas y bajas de sesión registran/eliminan la IP en `files/ips/`.
+    - En [android-path.c](file:///media/ben4shot/E/Develop/Android/glibc-prueba/glibc/glibc-2.43/sysdeps/unix/sysv/linux/aarch64/android-path.c):
+      - `ip_en_subred`: verifica si la IP destino pertenece a la subred virtual.
+      - `ip_activa`: valida si la IP destino corresponde a una instancia viva verificando `files/ips/<ip>`.
+      - `bind`: si se enlaza a la IP propia o a `INADDR_ANY`, redirige a `127.0.0.X`.
+      - `connect`: si el destino es una IP virtual activa, conecta a `127.0.0.X`.
+      - `sendto` / `sendmsg`: redirige ICMP y UDP de IPs virtuales activas a `127.0.0.X`.
+      - `recvmsg` / `recvfrom`: reescribe la dirección origen `127.0.0.X` de vuelta a `10.0.0.X` si proviene de un loopback virtual (ignora `127.0.0.1`).
+  - **Pruebas en vivo en el Redmi 15 5G:**
+    - `client (10.0.0.3) -> server1 (10.0.0.2)`: ping 0% packet loss, RTT 0.7 ms.
+    - `server1 (10.0.0.2) -> client (10.0.0.3)`: ping 0% packet loss, RTT 0.7 ms.
+    - `client -> 10.0.0.99 (inexistente)`: 100% loss (sin respuesta, comportamiento real).
+    - `client -> 127.0.0.1`: responde loopback real del teléfono.
+    - `client -> server1:9999`: petición HTTP con `curl -I http://10.0.0.2:9999/` devolvió `HTTP/1.0 200 OK`.
 - **Empaquetado y sincronización completa:**
   - Recompilada glibc (`salida/usr/lib/libc.so.6`).
   - Actualizado `app/src/main/jniLibs/arm64-v8a/libldp.so`.
   - Reempaquetados `base.tgz` y `capa.tgz` en `trabajo/assets-sdk36/` con `apk/armar.sh sdk36`.
   - APK `sdk36Debug` compilada e instalada en el dispositivo vía `adb install -r`.
-  - Actualizada `libc.so.6` en la instancia `server-42677` dejando respaldo en `libc.so.6.0022`.
+  - Actualizada `libc.so.6` en las instancias `server1-25913` y `client-16767`.
 
 **Siguiente sesión (69ª):**
 1. **Validación en vivo de creación de entornos en el Redmi 15 5G:**
