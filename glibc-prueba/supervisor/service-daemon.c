@@ -17,6 +17,7 @@
 #define MAX_SERVICES 128
 #define LINE_MAX_LEN 1024
 #define SERVICES_DIR "/etc/services.d"
+#define SYSTEM_UNITS_DIR "/usr/lib/systemd/system"
 #define LOGS_DIR "/var/log/supervisor"
 #define STATE_DIR "/var/lib/supervisor"
 #define ENABLED_FILE "/var/lib/supervisor/enabled.txt"
@@ -86,6 +87,19 @@ static int es_habilitado(const char *name) {
 }
 
 static void set_habilitado(const char *name, int enable) {
+    char target[512], linkpath[512];
+    snprintf(linkpath, sizeof(linkpath), "%s/%s.service", SERVICES_DIR, name);
+    if (enable) {
+        snprintf(target, sizeof(target), "%s/%s.service", SYSTEM_UNITS_DIR, name);
+        if (access(target, R_OK) == 0 && access(linkpath, F_OK) != 0) {
+            symlink(target, linkpath);
+        }
+    } else {
+        if (access(linkpath, F_OK) == 0) {
+            unlink(linkpath);
+        }
+    }
+
     mkdir(STATE_DIR, 0755);
     char tmp[256];
     snprintf(tmp, sizeof(tmp), "%s.tmp", ENABLED_FILE);
@@ -127,16 +141,17 @@ static int parsear_unidad(const char *name, Service *srv) {
     strncpy(srv->description, name, sizeof(srv->description) - 1);
 
     char filepath[512];
-    snprintf(filepath, sizeof(filepath), "%s/%s", SERVICES_DIR, name);
-    if (access(filepath, R_OK) != 0) {
-        snprintf(filepath, sizeof(filepath), "%s/%s.service", SERVICES_DIR, name);
-        if (access(filepath, R_OK) != 0) {
-            snprintf(filepath, sizeof(filepath), "%s/%s.conf", SERVICES_DIR, name);
-            if (access(filepath, R_OK) != 0) {
-                return -1;
-            }
-        }
+    int encontrado = 0;
+    const char *dirs[] = { SERVICES_DIR, SYSTEM_UNITS_DIR, NULL };
+    for (int i = 0; dirs[i] != NULL && !encontrado; i++) {
+        snprintf(filepath, sizeof(filepath), "%s/%s", dirs[i], name);
+        if (access(filepath, R_OK) == 0) { encontrado = 1; break; }
+        snprintf(filepath, sizeof(filepath), "%s/%s.service", dirs[i], name);
+        if (access(filepath, R_OK) == 0) { encontrado = 1; break; }
+        snprintf(filepath, sizeof(filepath), "%s/%s.conf", dirs[i], name);
+        if (access(filepath, R_OK) == 0) { encontrado = 1; break; }
     }
+    if (!encontrado) return -1;
 
     FILE *f = fopen(filepath, "r");
     if (!f) return -1;
@@ -374,18 +389,22 @@ static void manejar_cliente(int client_fd) {
                      running ? s->pid : 0, uptime, s->restart_count, enab, s->description);
         }
     } else if (strcasecmp(cmd, "LIST") == 0) {
-        DIR *d = opendir(SERVICES_DIR);
-        if (d) {
-            struct dirent *de;
-            while ((de = readdir(d))) {
-                if (de->d_name[0] == '.') continue;
-                char nom[64];
-                strncpy(nom, de->d_name, sizeof(nom) - 1);
-                char *dot = strrchr(nom, '.');
-                if (dot && (strcmp(dot, ".service") == 0 || strcmp(dot, ".conf") == 0)) *dot = '\0';
-                buscar_o_crear(nom);
+        const char *dirs[] = { SERVICES_DIR, SYSTEM_UNITS_DIR, NULL };
+        for (int j = 0; dirs[j] != NULL; j++) {
+            DIR *d = opendir(dirs[j]);
+            if (d) {
+                struct dirent *de;
+                while ((de = readdir(d))) {
+                    if (de->d_name[0] == '.') continue;
+                    char nom[64];
+                    strncpy(nom, de->d_name, sizeof(nom) - 1);
+                    nom[sizeof(nom) - 1] = '\0';
+                    char *dot = strrchr(nom, '.');
+                    if (dot && (strcmp(dot, ".service") == 0 || strcmp(dot, ".conf") == 0)) *dot = '\0';
+                    buscar_o_crear(nom);
+                }
+                closedir(d);
             }
-            closedir(d);
         }
 
         size_t off = 0;
