@@ -93,6 +93,12 @@ public class TerminalActivity extends Activity implements TerminalViewClient {
         super.onDestroy();
     }
 
+    private boolean estaEnCreacion() {
+        if (servicio != null && servicio.estaInstalando()) return true;
+        AdaptadorInstalacion adp = SistemaLinux.adaptadorSeleccionado(this);
+        return adp != null && !adp.instalada(this);
+    }
+
     private View filaTeclas() {
         HorizontalScrollView scroll = new HorizontalScrollView(this);
         scroll.setFillViewport(false);
@@ -104,7 +110,10 @@ public class TerminalActivity extends Activity implements TerminalViewClient {
         fila.setGravity(Gravity.CENTER_VERTICAL);
         fila.setPadding(dp(6), dp(5), dp(6), dp(5));
 
-        String[] teclas = {"⌨", "ESC", "TAB", "CTRL", "ALT", "←", "↓", "↑", "→", "SALIR"};
+        boolean enCreacion = estaEnCreacion();
+        String botonAccion = enCreacion ? "CANCELAR" : "SALIR";
+
+        String[] teclas = {"⌨", "ESC", "TAB", "CTRL", "ALT", "←", "↓", "↑", "→", botonAccion};
         for (String t : teclas) {
             TextView b = new TextView(this);
             b.setText(t);
@@ -114,7 +123,7 @@ public class TerminalActivity extends Activity implements TerminalViewClient {
             b.setTextSize(12);
             b.setPadding(dp(12), dp(7), dp(12), dp(7));
 
-            if (t.equals("SALIR")) {
+            if (t.equals("SALIR") || t.equals("CANCELAR")) {
                 b.setTextColor(0xffff6b6b);
                 b.setBackground(crearFondo(0xff2a1616, 0x66ff6b6b, dp(8), dp(1)));
             } else {
@@ -142,6 +151,9 @@ public class TerminalActivity extends Activity implements TerminalViewClient {
                 vista.requestFocus();
                 getSystemService(InputMethodManager.class).showSoftInput(vista, 0);
                 return;
+            case "CANCELAR":
+                mostrarMenuCancelar();
+                return;
             case "SALIR":
                 mostrarMenuSalida();
                 return;
@@ -155,6 +167,31 @@ public class TerminalActivity extends Activity implements TerminalViewClient {
             case "→": codigo(KeyEvent.KEYCODE_DPAD_RIGHT); return;
             default: vista.inputCodePoint(t.codePointAt(0), false, false);
         }
+    }
+
+    private void mostrarMenuCancelar() {
+        SistemaLinux.Instancia inst = SistemaLinux.instanciaSeleccionada(this);
+        String nombre = inst != null ? inst.nombre : "entorno";
+        new AlertDialog.Builder(this)
+                .setTitle("✦ Cancelar creación")
+                .setMessage("¿Deseas cancelar la creación de '" + nombre + "'?\n\nSe cerrará la instalación, se eliminará el entorno y se borrarán todos los archivos creados.")
+                .setPositiveButton("Sí, cancelar y borrar", (d, w) -> {
+                    cancelarYBorrarInstancia(inst);
+                })
+                .setNegativeButton("Continuar instalando", null)
+                .show();
+    }
+
+    private void cancelarYBorrarInstancia(SistemaLinux.Instancia inst) {
+        if (servicio != null) {
+            servicio.cerrarTodo();
+        } else {
+            startService(new Intent(this, TerminalService.class).setAction(TerminalService.CERRAR_SESION));
+        }
+        if (inst != null) {
+            SistemaLinux.eliminarInstancia(this, inst.id);
+        }
+        finish();
     }
 
     private void mostrarMenuSalida() {
@@ -175,9 +212,18 @@ public class TerminalActivity extends Activity implements TerminalViewClient {
     }
 
     @Override
+    public void onBackPressed() {
+        if (estaEnCreacion()) {
+            mostrarMenuCancelar();
+        } else {
+            mostrarMenuSalida();
+        }
+    }
+
+    @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_BACK) {
-            mostrarMenuSalida();
+            onBackPressed();
             return true;
         }
         return super.onKeyDown(keyCode, event);

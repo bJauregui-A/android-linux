@@ -103,6 +103,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
 
     public void cerrarTodo() {
         Log.i(TAG, "cerrando sesión completa");
+        instalando = false;
         cerrarEscritorio();
         if (sesion != null) {
             try {
@@ -201,11 +202,17 @@ public class TerminalService extends Service implements TerminalSessionClient {
         stopSelf();
     }
 
+    public boolean estaInstalando() {
+        return instalando;
+    }
+
     // Shell de la instalación seleccionada a través de su cargador; el cwd es la ruta real
     // (el pty lo abre libtermux.so, que es bionic), el resto ya va dentro del prefijo.
     private TerminalSession crearSesion() {
         AdaptadorInstalacion instalacion = SistemaLinux.adaptadorSeleccionado(this);
         File prefijo = instalacion.raiz(this);
+        SistemaLinux.Instancia inst = SistemaLinux.instanciaSeleccionada(this);
+        instanciaActivaId = inst != null ? inst.id : "arch-principal";
         if (!instalacion.instalada(this) && instalacion.instaladorDisponible(this)) {
             new File(prefijo, "etc").mkdirs();
             List<String> env = entorno(instalacion, prefijo);

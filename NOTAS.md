@@ -440,6 +440,14 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
      - Regenerado `trabajo/assets-sdk36/capa.tgz` mediante `python3 apk/capa.py --prefix ... --compilados ...` incluyendo `sin-entorno/`, `proveedores/ninguno/` y el nuevo `orden` de 15 opciones.
      - Compilada la APK `sdk36Debug` con Gradle (`BUILD SUCCESSFUL`) e instalada en el Redmi con `adb install -r` (Success; datos e instancias conservados).
      - Actualizados los archivos de recetas y `primer-arranque.sh` en las instancias pendientes creadas en el teléfono (`server-81205` y `server-36543`) para que muestren "Sin Entorno" de inmediato.
+2. **Botón [ CANCELAR ] y cancelación limpia durante la creación de instancias:**
+   - En [TerminalActivity.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/TerminalActivity.java): si la instancia actual está en fase de creación/instalación (`!adp.instalada(this)` o `estaInstalando()`), el botón de la barra inferior cambia dinámicamente de `SALIR` a `[ CANCELAR ]`.
+   - Al presionar `[ CANCELAR ]` o el botón/gesto de atrás (`KEYCODE_BACK` / `onBackPressed`): se despliega un diálogo de confirmación ("✦ Cancelar creación"). Al confirmar ("Sí, cancelar y borrar"):
+     1. Detiene limpiamente el proceso de instalación y los procesos hijos en [TerminalService.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/TerminalService.java) (`cerrarTodo()` con `instalando = false`).
+     2. Elimina la instancia de la lista JSON mediante `SistemaLinux.eliminarInstancia(...)` (dejando de aparecer inmediatamente en el selector de la app).
+     3. Purga y borra en segundo plano todos los archivos creados en `files/instancias/<id>`.
+     4. Cierra la actividad volviendo al menú principal de [SistemaActivity.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/SistemaActivity.java).
+   - APK recompilada e instalada en el Redmi (`adb install -r`).
 
 **Siguiente sesión (63ª):**
 1. **Punto 3.3: Soporte para ejecución de binarios estáticos (`execve_x` en `android-path.c`):**
