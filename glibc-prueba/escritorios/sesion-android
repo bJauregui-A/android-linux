@@ -301,6 +301,10 @@ for i in $(seq $((TIEMPO_READY * 4))); do
             done
             [ -n "$encontrado" ] && break
             ;;
+        inmediato)
+            printf '%s\n' "headless" > "$XDG_RUNTIME_DIR/$MARCADOR_PANTALLA"
+            break
+            ;;
     esac
     kill -0 "$hijo" 2>/dev/null || break
     sleep 0.25

@@ -489,7 +489,19 @@ public class TerminalService extends Service implements TerminalSessionClient {
             if (SistemaLinux.adaptadorSeleccionado(this).instalada(this)) {
                 if (vista != null && vista.getContext() instanceof android.app.Activity)
                     ((android.app.Activity) vista.getContext()).finish();
-                startActivity(new Intent(this, WaylandActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                File fEsc = new File(SistemaLinux.raizSeleccionada(this), "var/lib/arch-android/escritorio");
+                boolean esSinEntorno = false;
+                try {
+                    if (fEsc.exists()) {
+                        String e = java.nio.file.Files.readString(fEsc.toPath()).trim();
+                        if ("sin-entorno".equals(e)) esSinEntorno = true;
+                    }
+                } catch (Exception ignorada) { }
+                if (esSinEntorno) {
+                    startActivity(new Intent(this, TerminalActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                } else {
+                    startActivity(new Intent(this, WaylandActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                }
                 return;
             }
         }

@@ -1,0 +1,6 @@
+#!/usr/bin/bash
+# Sesión sin entorno gráfico (solo servicios en segundo plano y consola)
+echo "Sesión sin entorno gráfico iniciada"
+while true; do
+    sleep 3600
+done

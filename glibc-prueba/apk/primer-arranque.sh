@@ -214,6 +214,7 @@ TEXTOS=("SSH: Servidor seguro en el puerto 8022"
         "Utilidades: htop, grim, unzip, wget"
         "AUR: yay y paru (ayudantes de paquetes)")
 MARCA=(1 1 1 0 0 0 0 1)
+[ "$ESC" = "sin-entorno" ] && MARCA=(1 0 1 0 0 0 1 1)
 
 paquetes_de_grupo() {
     local g=$1
@@ -470,15 +471,20 @@ grupos="escritorio $(tr '\n' ' ' < $E/opcionales)"
 
 # Recoger paquetes específicos para pacman y para AUR
 PACMAN_A_INSTALAR=()
-# Base mínima de escritorio (gráficos, compositor, utilidades esenciales)
-if [ -f "$D/paquetes-escritorio.txt" ]; then
-    PACMAN_A_INSTALAR+=($(sed 's/#.*//' "$D/paquetes-escritorio.txt"))
-elif [ -f "$(dirname "$0")/paquetes-escritorio.txt" ]; then
-    PACMAN_A_INSTALAR+=($(sed 's/#.*//' "$(dirname "$0")/paquetes-escritorio.txt"))
-fi
-# Paquetes específicos del entorno seleccionado
-if [ -f "$ED/$ESC/paquetes.txt" ]; then
-    PACMAN_A_INSTALAR+=($(sed 's/#.*//' "$ED/$ESC/paquetes.txt"))
+if [ "$ESC" = "sin-entorno" ]; then
+    # Modo sin entorno: base de consola sin paquetes gráficos
+    PACMAN_A_INSTALAR+=("base" "python" "nano" "jq" "zsh" "starship" "openssh" "htop" "tmux" "curl" "wget")
+else
+    # Base mínima de escritorio (gráficos, compositor, utilidades esenciales)
+    if [ -f "$D/paquetes-escritorio.txt" ]; then
+        PACMAN_A_INSTALAR+=($(sed 's/#.*//' "$D/paquetes-escritorio.txt"))
+    elif [ -f "$(dirname "$0")/paquetes-escritorio.txt" ]; then
+        PACMAN_A_INSTALAR+=($(sed 's/#.*//' "$(dirname "$0")/paquetes-escritorio.txt"))
+    fi
+    # Paquetes específicos del entorno seleccionado
+    if [ -f "$ED/$ESC/paquetes.txt" ]; then
+        PACMAN_A_INSTALAR+=($(sed 's/#.*//' "$ED/$ESC/paquetes.txt"))
+    fi
 fi
 AUR_A_INSTALAR=()
 

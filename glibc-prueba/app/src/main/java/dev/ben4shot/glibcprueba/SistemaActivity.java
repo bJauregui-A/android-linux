@@ -19,6 +19,8 @@ import android.view.View;
 import android.view.WindowInsets;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
+import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
@@ -172,23 +174,38 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         vistaTerminal.onScreenUpdated();
     }
 
-    private LinearLayout filaTeclas() {
+    private View filaTeclas() {
+        HorizontalScrollView scroll = new HorizontalScrollView(this);
+        scroll.setFillViewport(false);
+        scroll.setHorizontalScrollBarEnabled(false);
+        scroll.setBackgroundColor(0xff101721);
+
         LinearLayout fila = new LinearLayout(this);
-        fila.setBackgroundColor(0xff121820);
+        fila.setOrientation(LinearLayout.HORIZONTAL);
+        fila.setGravity(Gravity.CENTER_VERTICAL);
+        fila.setPadding(dp(4), dp(4), dp(4), dp(4));
+
         String[] teclas = {"⌨", "ESC", "TAB", "CTRL", "ALT", "←", "↓", "↑", "→"};
         for (String t : teclas) {
             TextView b = new TextView(this);
             b.setText(t);
+            b.setSingleLine(true);
             b.setTextColor(TEXTO_CLARO);
-            b.setTypeface(Typeface.MONOSPACE);
+            b.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+            b.setTextSize(12);
             b.setGravity(Gravity.CENTER);
-            b.setPadding(0, dp(8), 0, dp(8));
+            b.setPadding(dp(12), dp(6), dp(12), dp(6));
+            b.setBackground(crearFondo(0xff16202c, 0x22ffffff, dp(6), dp(1)));
             b.setOnClickListener(v -> tecla(t));
             if (t.equals("CTRL")) botonCtrl = b;
             if (t.equals("ALT")) botonAlt = b;
-            fila.addView(b, new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+            lp.rightMargin = dp(4);
+            fila.addView(b, lp);
         }
-        return fila;
+        scroll.addView(fila, new FrameLayout.LayoutParams(-2, -2));
+        return scroll;
     }
 
     private void tecla(String t) {
@@ -217,8 +234,12 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
     }
 
     private void marcarModificadores() {
-        if (botonCtrl != null) botonCtrl.setBackgroundColor(ctrl ? 0xff3d6aa5 : 0);
-        if (botonAlt != null) botonAlt.setBackgroundColor(alt ? 0xff3d6aa5 : 0);
+        if (botonCtrl != null) {
+            botonCtrl.setBackground(crearFondo(ctrl ? 0xff0284c7 : 0xff16202c, ctrl ? 0xff38bdf8 : 0x22ffffff, dp(6), dp(1)));
+        }
+        if (botonAlt != null) {
+            botonAlt.setBackground(crearFondo(alt ? 0xff0284c7 : 0xff16202c, alt ? 0xff38bdf8 : 0x22ffffff, dp(6), dp(1)));
+        }
     }
 
     private void actualizarLista() {
@@ -274,6 +295,25 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         lpInst.leftMargin = dp(8);
         header.addView(tagInst, lpInst);
 
+        File fEsc = new File(SistemaLinux.raiz(this, inst.id), "var/lib/arch-android/escritorio");
+        String idEsc = "";
+        try {
+            if (fEsc.exists()) {
+                try (java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader(fEsc))) {
+                    idEsc = br.readLine();
+                    if (idEsc != null) idEsc = idEsc.trim();
+                }
+            }
+        } catch (Exception ignorada) { }
+        boolean esSinEntorno = "sin-entorno".equals(idEsc);
+
+        if (esSinEntorno) {
+            TextView tagTipo = textoBadge("SIN ENTORNO", ACCENTO_AMBAR);
+            LinearLayout.LayoutParams lpTipo = new LinearLayout.LayoutParams(-2, -2);
+            lpTipo.leftMargin = dp(8);
+            header.addView(tagTipo, lpTipo);
+        }
+
         boolean corriendo = TerminalService.tieneSesionActiva() && inst.id.equals(TerminalService.instanciaActivaId());
         if (corriendo) {
             TextView tagCorriendo = textoBadge("● EN EJECUCIÓN", ACCENTO_VERDE);
@@ -302,20 +342,28 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         lpAcc.topMargin = dp(8);
         acciones.setLayoutParams(lpAcc);
 
-        // Botón INICIAR ESCRITORIO o VOLVER si ya está corriendo
-        String textoBoton = corriendo ? "▶ VOLVER" : "▶ ESCRITORIO";
-        TextView btnIniciar = crearBotonChip(textoBoton, ACCENTO_VERDE, () -> {
-            activarYEjecutar(inst.id, true);
-        });
-        acciones.addView(btnIniciar);
+        if (esSinEntorno) {
+            String textoBoton = corriendo ? "▶ CONSOLA (ACTIVA)" : "▶ CONSOLA";
+            TextView btnConsola = crearBotonChip(textoBoton, ACCENTO_VERDE, () -> {
+                activarYEjecutar(inst.id, false);
+            });
+            acciones.addView(btnConsola);
+        } else {
+            // Botón INICIAR ESCRITORIO o VOLVER si ya está corriendo
+            String textoBoton = corriendo ? "▶ VOLVER" : "▶ ESCRITORIO";
+            TextView btnIniciar = crearBotonChip(textoBoton, ACCENTO_VERDE, () -> {
+                activarYEjecutar(inst.id, true);
+            });
+            acciones.addView(btnIniciar);
 
-        acciones.addView(espacioHorizontal(dp(8)));
+            acciones.addView(espacioHorizontal(dp(8)));
 
-        // Botón TERMINAL
-        TextView btnTerminal = crearBotonChip(">_ TERMINAL", ACCENTO_AZUL, () -> {
-            activarYEjecutar(inst.id, false);
-        });
-        acciones.addView(btnTerminal);
+            // Botón TERMINAL
+            TextView btnTerminal = crearBotonChip(">_ TERMINAL", ACCENTO_AZUL, () -> {
+                activarYEjecutar(inst.id, false);
+            });
+            acciones.addView(btnTerminal);
+        }
 
         // Botón ELIMINAR
         acciones.addView(espacioHorizontal(dp(8)));
@@ -332,6 +380,8 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
             if (!activa) {
                 SistemaLinux.seleccionarInstancia(this, inst.id);
                 actualizarLista();
+            } else {
+                activarYEjecutar(inst.id, !esSinEntorno);
             }
         });
 
@@ -341,6 +391,13 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
     private void activarYEjecutar(String id, boolean escritorio) {
         SistemaLinux.seleccionarInstancia(this, id);
         if (escritorio) {
+            File fEsc = new File(SistemaLinux.raiz(this, id), "var/lib/arch-android/escritorio");
+            try {
+                if (fEsc.exists() && "sin-entorno".equals(java.nio.file.Files.readString(fEsc.toPath()).trim())) {
+                    startActivity(new Intent(this, TerminalActivity.class));
+                    return;
+                }
+            } catch (Exception ignorada) { }
             startActivity(new Intent(this, WaylandActivity.class));
         } else {
             startActivity(new Intent(this, TerminalActivity.class));

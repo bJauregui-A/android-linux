@@ -17,6 +17,10 @@ if [ "$1" = --esperar ]; then
                     fi
                 fi
                 ;;
+            inmediato)
+                listo=1
+                break
+                ;;
             *) echo "comprobación de readiness no soportada: ${ARCH_ANDROID_READY_CHECK:-vacía}"; exit 78 ;;
         esac
         sleep 0.5

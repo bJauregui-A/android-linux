@@ -8,6 +8,7 @@ import android.content.pm.ShortcutManager;
 import android.graphics.drawable.Icon;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -19,6 +20,7 @@ import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
+import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
@@ -28,6 +30,7 @@ import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -50,7 +53,9 @@ public class WaylandActivity extends Activity {
     private SurfaceView vista;
     private TextView botonCtrl, botonAlt, botonSuper;
     private boolean ctrl, alt, sup;
-    private LinearLayout barraTeclas;
+    private View contenedorControles;
+    private View barraTeclas;
+    private View botonAlternar;
     private int altoIme = 0;
 
     // Gesto en curso
@@ -122,6 +127,15 @@ public class WaylandActivity extends Activity {
             finish();
             return;
         }
+        // Si el entorno seleccionado es sin-entorno, redirigir directamente a la terminal interactiva
+        java.io.File fEsc = new java.io.File(SistemaLinux.raizSeleccionada(this), "var/lib/arch-android/escritorio");
+        try {
+            if (fEsc.exists() && "sin-entorno".equals(java.nio.file.Files.readString(fEsc.toPath()).trim())) {
+                startActivity(new Intent(this, TerminalActivity.class));
+                finish();
+                return;
+            }
+        } catch (Exception ignorada) { }
         Wayland.iniciar(this);
         // El escritorio elegido arranca solo si aún no está corriendo.
         startForegroundService(new Intent(this, TerminalService.class).setAction(TerminalService.INICIAR_ESCRITORIO));
@@ -182,16 +196,19 @@ public class WaylandActivity extends Activity {
         raiz.addView(vista, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
-        barraTeclas = filaTeclas();
-        FrameLayout.LayoutParams paramsBarra = new FrameLayout.LayoutParams(
+        contenedorControles = crearControlesFlotantes();
+        FrameLayout.LayoutParams paramsControles = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT);
-        paramsBarra.gravity = Gravity.BOTTOM;
-        raiz.addView(barraTeclas, paramsBarra);
+        paramsControles.gravity = Gravity.BOTTOM;
+        raiz.addView(contenedorControles, paramsControles);
 
         raiz.setOnApplyWindowInsetsListener((v, insets) -> {
             android.graphics.Insets ime = insets.getInsets(WindowInsets.Type.ime());
             altoIme = ime.bottom;
-            barraTeclas.setTranslationY(-altoIme);
+            contenedorControles.setTranslationY(-altoIme);
+            if (altoIme > 0) {
+                mostrarBarra(true);
+            }
             return WindowInsets.CONSUMED;
         });
         setContentView(raiz);
@@ -336,26 +353,100 @@ public class WaylandActivity extends Activity {
         return s / e.getPointerCount();
     }
 
-    // --- fila de teclas ---
+    // --- controles flotantes y fila de teclas ---
 
-    private LinearLayout filaTeclas() {
+    private View crearControlesFlotantes() {
+        FrameLayout contenedor = new FrameLayout(this);
+        contenedor.setClipChildren(false);
+        contenedor.setClipToPadding(false);
+
+        // 1. Botón flotante discreto (FAB) para reabrir la barra cuando está minimizada
+        TextView fab = new TextView(this);
+        fab.setText("⌨");
+        fab.setTextSize(18);
+        fab.setTextColor(Color.WHITE);
+        fab.setGravity(Gravity.CENTER);
+        fab.setBackground(crearFondo(0xbb0f172a, 0x6638bdf8, dp(20), dp(1)));
+        fab.setElevation(dp(6));
+        fab.setClickable(true);
+        FrameLayout.LayoutParams lpFab = new FrameLayout.LayoutParams(dp(40), dp(40));
+        lpFab.gravity = Gravity.BOTTOM | Gravity.END;
+        lpFab.rightMargin = dp(16);
+        lpFab.bottomMargin = dp(16);
+        fab.setLayoutParams(lpFab);
+        fab.setVisibility(View.GONE);
+        fab.setOnClickListener(v -> mostrarBarra(true));
+        botonAlternar = fab;
+        contenedor.addView(fab);
+
+        // 2. Barra flotante tipo "Pill"
+        FrameLayout marcoBarra = new FrameLayout(this);
+        marcoBarra.setBackground(crearFondo(0xee0f172a, 0x4438bdf8, dp(16), dp(1)));
+        marcoBarra.setElevation(dp(8));
+        marcoBarra.setPadding(dp(6), dp(5), dp(6), dp(5));
+        FrameLayout.LayoutParams lpMarco = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
+        lpMarco.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+        lpMarco.bottomMargin = dp(12);
+        lpMarco.leftMargin = dp(10);
+        lpMarco.rightMargin = dp(10);
+        marcoBarra.setLayoutParams(lpMarco);
+
+        HorizontalScrollView scroll = new HorizontalScrollView(this);
+        scroll.setFillViewport(false);
+        scroll.setHorizontalScrollBarEnabled(false);
+        scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+
         LinearLayout fila = new LinearLayout(this);
-        fila.setBackgroundColor(0xff1a1a1a);
-        String[] teclas = {"⌨", "⛶", "ESC", "TAB", "CTRL", "ALT", "SUPER", "←", "↓", "↑", "→", "SALIR"};
+        fila.setOrientation(LinearLayout.HORIZONTAL);
+        fila.setGravity(Gravity.CENTER_VERTICAL);
+
+        String[] teclas = {"⌨", "⛶", "ESC", "TAB", "CTRL", "ALT", "SUPER", "←", "↓", "↑", "→", "SALIR", "▼"};
         for (String t : teclas) {
             TextView b = new TextView(this);
             b.setText(t);
-            b.setTextColor(t.equals("SALIR") ? 0xffff6b6b : Color.WHITE);
-            b.setTypeface(Typeface.MONOSPACE, t.equals("SALIR") ? Typeface.BOLD : Typeface.NORMAL);
+            b.setSingleLine(true);
             b.setGravity(Gravity.CENTER);
-            b.setPadding(0, 24, 0, 24);
-            b.setOnClickListener(v -> botonFila(t));
+            b.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+            b.setTextSize(12);
+            b.setPadding(dp(12), dp(7), dp(12), dp(7));
+
+            if (t.equals("SALIR")) {
+                b.setTextColor(0xffff6b6b);
+                b.setBackground(crearFondo(0xff2a1616, 0x66ff6b6b, dp(8), dp(1)));
+            } else if (t.equals("▼")) {
+                b.setTextColor(0xff94a3b8);
+                b.setBackground(crearFondo(0xff16202c, 0x33ffffff, dp(8), dp(1)));
+            } else {
+                b.setTextColor(0xfff8fafc);
+                b.setBackground(crearFondo(0xff1e293b, 0x22ffffff, dp(8), dp(1)));
+            }
+
             if (t.equals("CTRL")) botonCtrl = b;
             if (t.equals("ALT")) botonAlt = b;
             if (t.equals("SUPER")) botonSuper = b;
-            fila.addView(b, new LinearLayout.LayoutParams(0, -2, 1));
+
+            b.setOnClickListener(v -> botonFila(t));
+
+            LinearLayout.LayoutParams lpBtn = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            lpBtn.rightMargin = dp(4);
+            fila.addView(b, lpBtn);
         }
-        return fila;
+
+        scroll.addView(fila, new FrameLayout.LayoutParams(-2, -2));
+        marcoBarra.addView(scroll, new FrameLayout.LayoutParams(-2, -2));
+        barraTeclas = marcoBarra;
+        contenedor.addView(marcoBarra);
+
+        return contenedor;
+    }
+
+    private void mostrarBarra(boolean mostrar) {
+        if (barraTeclas != null && botonAlternar != null) {
+            barraTeclas.setVisibility(mostrar ? View.VISIBLE : View.GONE);
+            botonAlternar.setVisibility(mostrar ? View.GONE : View.VISIBLE);
+        }
     }
 
     private void botonFila(String t) {
@@ -369,6 +460,9 @@ public class WaylandActivity extends Activity {
                 return;
             case "SALIR":
                 mostrarMenuSalida();
+                return;
+            case "▼":
+                mostrarBarra(false);
                 return;
             case "CTRL": ctrl = !ctrl; Wayland.tecla(CTRL, ctrl); marcar(); return;
             case "ALT": alt = !alt; Wayland.tecla(ALT, alt); marcar(); return;
@@ -413,7 +507,7 @@ public class WaylandActivity extends Activity {
             int alto = altoPadre;
             FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) vista.getLayoutParams();
             if (altoIme > 0) {
-                int barraH = barraTeclas != null ? barraTeclas.getHeight() : 0;
+                int barraH = (barraTeclas != null && barraTeclas.getVisibility() == View.VISIBLE) ? barraTeclas.getHeight() : 0;
                 alto = Math.max(200, altoPadre - altoIme - barraH);
                 if (lp.height != alto) {
                     lp.height = alto;
@@ -438,9 +532,27 @@ public class WaylandActivity extends Activity {
     }
 
     private void marcar() {
-        botonCtrl.setBackgroundColor(ctrl ? 0xff3d6aa5 : 0);
-        botonAlt.setBackgroundColor(alt ? 0xff3d6aa5 : 0);
-        botonSuper.setBackgroundColor(sup ? 0xff3d6aa5 : 0);
+        if (botonCtrl != null) {
+            botonCtrl.setBackground(crearFondo(ctrl ? 0xff0284c7 : 0xff1e293b, ctrl ? 0xff38bdf8 : 0x22ffffff, dp(8), dp(1)));
+        }
+        if (botonAlt != null) {
+            botonAlt.setBackground(crearFondo(alt ? 0xff0284c7 : 0xff1e293b, alt ? 0xff38bdf8 : 0x22ffffff, dp(8), dp(1)));
+        }
+        if (botonSuper != null) {
+            botonSuper.setBackground(crearFondo(sup ? 0xff0284c7 : 0xff1e293b, sup ? 0xff38bdf8 : 0x22ffffff, dp(8), dp(1)));
+        }
+    }
+
+    private GradientDrawable crearFondo(int colorFondo, int colorBorde, int radio, int grosorBorde) {
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(colorFondo);
+        g.setCornerRadius(radio);
+        if (grosorBorde > 0) g.setStroke(grosorBorde, colorBorde);
+        return g;
+    }
+
+    private int dp(int v) {
+        return (int) (v * getResources().getDisplayMetrics().density + 0.5f);
     }
 
     // Los modificadores de la fila valen para una sola tecla, como en la terminal.

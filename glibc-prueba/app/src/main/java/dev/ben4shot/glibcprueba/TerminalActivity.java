@@ -9,6 +9,7 @@ import android.content.Intent;
 import android.content.ServiceConnection;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.util.Log;
@@ -19,6 +20,8 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.inputmethod.InputMethodManager;
+import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -90,23 +93,47 @@ public class TerminalActivity extends Activity implements TerminalViewClient {
         super.onDestroy();
     }
 
-    private LinearLayout filaTeclas() {
+    private View filaTeclas() {
+        HorizontalScrollView scroll = new HorizontalScrollView(this);
+        scroll.setFillViewport(false);
+        scroll.setHorizontalScrollBarEnabled(false);
+        scroll.setBackgroundColor(0xff0d1420);
+
         LinearLayout fila = new LinearLayout(this);
-        fila.setBackgroundColor(0xff1a1a1a);
+        fila.setOrientation(LinearLayout.HORIZONTAL);
+        fila.setGravity(Gravity.CENTER_VERTICAL);
+        fila.setPadding(dp(6), dp(5), dp(6), dp(5));
+
         String[] teclas = {"⌨", "ESC", "TAB", "CTRL", "ALT", "←", "↓", "↑", "→", "SALIR"};
         for (String t : teclas) {
             TextView b = new TextView(this);
             b.setText(t);
-            b.setTextColor(t.equals("SALIR") ? 0xffff6b6b : Color.WHITE);
-            b.setTypeface(Typeface.MONOSPACE, t.equals("SALIR") ? Typeface.BOLD : Typeface.NORMAL);
+            b.setSingleLine(true);
             b.setGravity(Gravity.CENTER);
-            b.setPadding(0, 24, 0, 24);
-            b.setOnClickListener(v -> tecla(t));
+            b.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+            b.setTextSize(12);
+            b.setPadding(dp(12), dp(7), dp(12), dp(7));
+
+            if (t.equals("SALIR")) {
+                b.setTextColor(0xffff6b6b);
+                b.setBackground(crearFondo(0xff2a1616, 0x66ff6b6b, dp(8), dp(1)));
+            } else {
+                b.setTextColor(0xfff8fafc);
+                b.setBackground(crearFondo(0xff1e293b, 0x22ffffff, dp(8), dp(1)));
+            }
+
             if (t.equals("CTRL")) botonCtrl = b;
             if (t.equals("ALT")) botonAlt = b;
-            fila.addView(b, new LinearLayout.LayoutParams(0, -2, 1));
+
+            b.setOnClickListener(v -> tecla(t));
+
+            LinearLayout.LayoutParams lpBtn = new LinearLayout.LayoutParams(-2, -2);
+            lpBtn.rightMargin = dp(4);
+            fila.addView(b, lpBtn);
         }
-        return fila;
+
+        scroll.addView(fila, new FrameLayout.LayoutParams(-2, -2));
+        return scroll;
     }
 
     private void tecla(String t) {
@@ -161,8 +188,24 @@ public class TerminalActivity extends Activity implements TerminalViewClient {
     }
 
     private void marcar() {
-        botonCtrl.setBackgroundColor(ctrl ? 0xff3d6aa5 : 0);
-        botonAlt.setBackgroundColor(alt ? 0xff3d6aa5 : 0);
+        if (botonCtrl != null) {
+            botonCtrl.setBackground(crearFondo(ctrl ? 0xff0284c7 : 0xff1e293b, ctrl ? 0xff38bdf8 : 0x22ffffff, dp(8), dp(1)));
+        }
+        if (botonAlt != null) {
+            botonAlt.setBackground(crearFondo(alt ? 0xff0284c7 : 0xff1e293b, alt ? 0xff38bdf8 : 0x22ffffff, dp(8), dp(1)));
+        }
+    }
+
+    private GradientDrawable crearFondo(int colorFondo, int colorBorde, int radio, int grosorBorde) {
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(colorFondo);
+        g.setCornerRadius(radio);
+        if (grosorBorde > 0) g.setStroke(grosorBorde, colorBorde);
+        return g;
+    }
+
+    private int dp(int v) {
+        return (int) (v * getResources().getDisplayMetrics().density + 0.5f);
     }
 
     // Enter con la sesión terminada cierra la terminal (y el servicio si no queda sway).
