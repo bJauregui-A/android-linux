@@ -198,16 +198,20 @@ public class WaylandActivity extends Activity {
 
         contenedorControles = crearControlesFlotantes();
         FrameLayout.LayoutParams paramsControles = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT);
-        paramsControles.gravity = Gravity.BOTTOM;
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT);
         raiz.addView(contenedorControles, paramsControles);
 
         raiz.setOnApplyWindowInsetsListener((v, insets) -> {
             android.graphics.Insets ime = insets.getInsets(WindowInsets.Type.ime());
             altoIme = ime.bottom;
-            contenedorControles.setTranslationY(-altoIme);
             if (altoIme > 0) {
                 mostrarBarra(true);
+                if (barraTeclas != null && barraTeclas.getVisibility() == View.VISIBLE) {
+                    float limiteY = v.getHeight() - altoIme - barraTeclas.getHeight() - dp(8);
+                    if (barraTeclas.getY() > limiteY) {
+                        barraTeclas.setY(limiteY);
+                    }
+                }
             }
             return WindowInsets.CONSUMED;
         });
@@ -356,7 +360,13 @@ public class WaylandActivity extends Activity {
     // --- controles flotantes y fila de teclas ---
 
     private View crearControlesFlotantes() {
-        FrameLayout contenedor = new FrameLayout(this);
+        FrameLayout contenedor = new FrameLayout(this) {
+            @Override
+            public boolean onTouchEvent(MotionEvent event) {
+                // Toques que no sean sobre la barra o el botón FAB pasan libremente a Wayland
+                return false;
+            }
+        };
         contenedor.setClipChildren(false);
         contenedor.setClipToPadding(false);
 
@@ -407,7 +417,7 @@ public class WaylandActivity extends Activity {
                             View p = (View) fab.getParent();
                             if (p != null) {
                                 float maxX = Math.max(0, p.getWidth() - fab.getWidth());
-                                float maxY = Math.max(0, p.getHeight() - fab.getHeight());
+                                float maxY = Math.max(0, p.getHeight() - fab.getHeight() - altoIme);
                                 nx = Math.max(0, Math.min(maxX, nx));
                                 ny = Math.max(dp(20), Math.min(maxY - dp(6), ny));
                             }
@@ -443,7 +453,7 @@ public class WaylandActivity extends Activity {
                 View p = (View) getParent();
                 if (p != null) {
                     float maxX = Math.max(0, p.getWidth() - getWidth());
-                    float maxY = Math.max(0, p.getHeight() - getHeight());
+                    float maxY = Math.max(0, p.getHeight() - getHeight() - altoIme);
                     nx = Math.max(0, Math.min(maxX, nx));
                     ny = Math.max(dp(20), Math.min(maxY - dp(6), ny));
                 }
