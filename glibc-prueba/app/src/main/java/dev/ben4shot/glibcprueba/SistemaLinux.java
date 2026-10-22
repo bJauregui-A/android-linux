@@ -104,26 +104,25 @@ final class SistemaLinux {
         SharedPreferences p = preferencias(c);
         String raw = p.getString(PREF_INSTANCIAS, null);
         List<Instancia> lista = new ArrayList<>();
-        if (raw != null && !raw.trim().isEmpty()) {
-            try {
-                JSONArray arr = new JSONArray(raw);
-                for (int i = 0; i < arr.length(); i++) {
-                    lista.add(Instancia.deJson(arr.getJSONObject(i)));
+        if (raw != null) {
+            if (!raw.trim().isEmpty()) {
+                try {
+                    JSONArray arr = new JSONArray(raw);
+                    for (int i = 0; i < arr.length(); i++) {
+                        lista.add(Instancia.deJson(arr.getJSONObject(i)));
+                    }
+                } catch (JSONException e) {
+                    Log.e(TAG, "error leyendo instancias json", e);
                 }
-            } catch (JSONException e) {
-                Log.e(TAG, "error leyendo instancias json", e);
             }
+            return lista;
         }
-        if (lista.isEmpty()) {
-            // Instancia principal histórica: preserva files/archlinux intacto
-            Instancia principal = new Instancia("arch-principal", "Arch Linux (Principal)",
-                    ARCH, "archlinux", System.currentTimeMillis());
-            lista.add(principal);
-            guardarInstancias(c, lista);
-            if (!p.contains(PREF_ACTIVA)) {
-                p.edit().putString(PREF_ACTIVA, principal.id).apply();
-            }
-        }
+        // Primera ejecución limpia
+        Instancia principal = new Instancia("arch-principal", "Arch Linux (Principal)",
+                ARCH, "archlinux", System.currentTimeMillis());
+        lista.add(principal);
+        guardarInstancias(c, lista);
+        p.edit().putString(PREF_ACTIVA, principal.id).apply();
         return lista;
     }
 
@@ -146,6 +145,7 @@ final class SistemaLinux {
 
     static synchronized Instancia instanciaSeleccionada(Context c) {
         List<Instancia> lista = listarInstancias(c);
+        if (lista.isEmpty()) return null;
         String idActivo = preferencias(c).getString(PREF_ACTIVA, null);
         if (idActivo != null) {
             for (Instancia i : lista) {
@@ -192,7 +192,6 @@ final class SistemaLinux {
 
     static synchronized boolean eliminarInstancia(Context c, String id) {
         List<Instancia> lista = listarInstancias(c);
-        if (lista.size() <= 1) return false; // no borrar la última que queda
         Instancia objetivo = null;
         for (Instancia i : lista) {
             if (i.id.equals(id)) {
@@ -201,15 +200,17 @@ final class SistemaLinux {
             }
         }
         if (objetivo == null) return false;
-        // Si no es el prefijo histórico raíz, eliminamos sus archivos recursivamente
-        if (!"archlinux".equals(objetivo.rutaRelativa)) {
-            File dir = new File(c.getFilesDir(), objetivo.rutaRelativa);
-            borrarRecursivo(dir);
-        }
+        // Eliminar archivos del entorno en segundo plano para no bloquear el hilo de interfaz (evita ANR)
+        File dir = new File(c.getFilesDir(), objetivo.rutaRelativa);
+        new Thread(() -> borrarRecursivo(dir), "borrar-instancia").start();
         lista.remove(objetivo);
         guardarInstancias(c, lista);
         if (id.equals(preferencias(c).getString(PREF_ACTIVA, ""))) {
-            seleccionarInstancia(c, lista.get(0).id);
+            if (!lista.isEmpty()) {
+                seleccionarInstancia(c, lista.get(0).id);
+            } else {
+                preferencias(c).edit().remove(PREF_ACTIVA).remove(PREF_SISTEMA).apply();
+            }
         }
         return true;
     }
@@ -243,7 +244,8 @@ final class SistemaLinux {
     }
 
     static String seleccionado(Context c) {
-        return instanciaSeleccionada(c).id;
+        Instancia inst = instanciaSeleccionada(c);
+        return inst != null ? inst.id : "arch-principal";
     }
 
     static void seleccionar(Context c, String id) {
@@ -284,7 +286,9 @@ final class SistemaLinux {
     }
 
     static AdaptadorInstalacion adaptadorSeleccionado(Context c) {
-        return adaptador(instanciaSeleccionada(c));
+        Instancia inst = instanciaSeleccionada(c);
+        if (inst == null) return new AdaptadorArchArm64();
+        return adaptador(inst);
     }
 
     private static SharedPreferences preferencias(Context c) {

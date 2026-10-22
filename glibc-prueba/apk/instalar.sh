@@ -10,21 +10,21 @@ E=$P/var/lib/arch-android
 LOG=$P/tmp/instalacion-extraccion.log
 mkdir -p "$P/tmp"
 
-# Limpiar pantalla y mostrar banner estilo AI CLI
+# Limpiar pantalla y mostrar banner
 printf '\033[2J\033[H'
-printf '\e[1;38;5;141m╭────────────────────────────────────────────────────────────╮\e[0m\n'
-printf '\e[1;38;5;141m│\e[0m  \e[1;38;5;81m✦ ANTIGRAVITY\e[0m \e[38;5;245m•\e[0m \e[1;38;5;48mINSTALADOR DE ARCH LINUX ARM\e[0m              \e[1;38;5;141m│\e[0m\n'
+printf '\e[1;38;5;141m┌────────────────────────────────────────────────────────────┐\e[0m\n'
+printf '\e[1;38;5;141m│\e[0m  \e[1;38;5;51mINSTALADOR DE ARCH LINUX ARM\e[0m                             \e[1;38;5;141m│\e[0m\n'
 printf '\e[1;38;5;141m│\e[0m  \e[38;5;250mExtracción del sistema base y capa acelerada por GPU\e[0m     \e[1;38;5;141m│\e[0m\n'
-printf '\e[1;38;5;141m╰────────────────────────────────────────────────────────────╯\e[0m\n'
+printf '\e[1;38;5;141m└────────────────────────────────────────────────────────────┘\e[0m\n'
 
 # Comprobar espacio antes de escribir cientos de MB
 LIBRES=$(df -Pk "$P" | awk 'END {print $4}')
 case "$LIBRES" in ''|*[!0-9]*) LIBRES=0;; esac
 LIBRES_MIB=$((LIBRES / 1024))
 
-printf '\n\e[1;38;5;111m╭─ ✦ [1/2] Verificación de Almacenamiento ───────────────────╮\e[0m\n'
+printf '\n\e[1;38;5;111m┌─ [1/2] Verificación de Almacenamiento ─────────────────────┐\e[0m\n'
 printf '\e[1;38;5;111m│\e[0m  Espacio libre disponible: \e[1;38;5;48m%d MiB\e[0m (Recomendado: 3072 MiB)\n' "$LIBRES_MIB"
-printf '\e[1;38;5;111m╰────────────────────────────────────────────────────────────╯\e[0m\n'
+printf '\e[1;38;5;111m└────────────────────────────────────────────────────────────┘\e[0m\n'
 
 if [ "$LIBRES" -lt 3145728 ]; then
     printf '\e[1;38;5;214mHay menos de 3 GiB libres. ¿Continuar de todos modos? [s/N]: \e[0m'
@@ -47,11 +47,11 @@ extraer() { # extraer <offset> <largo> <qué>
 mkdir -p "$E"
 touch "$E/instalando"
 if [ ! -e "$E/extraido" ]; then
-    printf '\n\e[1;38;5;111m╭─ ✦ [2/2] Extracción de Capas y Binarios Nativos ───────────╮\e[0m\n'
+    printf '\n\e[1;38;5;111m┌─ [2/2] Extracción de Capas y Binarios Nativos ─────────────┐\e[0m\n'
     extraer "$BASE_OFF" "$BASE_LEN" "Arch Linux ARM base (pacman + glibc propia)"
     extraer "$CAPA_OFF" "$CAPA_LEN" "Capa GPU (Turnip, Zink, Mesa, wlroots, configs)"
     touch "$E/extraido"
-    printf '\e[1;38;5;111m╰────────────────────────────────────────────────────────────╯\e[0m\n'
+    printf '\e[1;38;5;111m└────────────────────────────────────────────────────────────┘\e[0m\n'
 fi
 
 # DNS de Android (el tar trae uno de respaldo)

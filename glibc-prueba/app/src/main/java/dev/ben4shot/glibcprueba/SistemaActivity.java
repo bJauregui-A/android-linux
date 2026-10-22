@@ -228,9 +228,18 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         List<SistemaLinux.Instancia> instancias = SistemaLinux.listarInstancias(this);
         SistemaLinux.Instancia activa = SistemaLinux.instanciaSeleccionada(this);
 
+        if (instancias.isEmpty()) {
+            TextView vacio = texto("  No hay entornos creados. Toca '＋ CREAR' para instalar uno nuevo.", 12, false, TEXTO_MUTED);
+            LinearLayout.LayoutParams lpV = new LinearLayout.LayoutParams(-1, -2);
+            lpV.topMargin = dp(8);
+            lpV.bottomMargin = dp(8);
+            contenedorInstancias.addView(vacio, lpV);
+            return;
+        }
+
         for (int i = 0; i < instancias.size(); i++) {
             SistemaLinux.Instancia inst = instancias.get(i);
-            boolean esActiva = inst.id.equals(activa.id);
+            boolean esActiva = activa != null && inst.id.equals(activa.id);
             AdaptadorInstalacion adp = SistemaLinux.adaptador(this, inst);
             boolean instalada = adp.instalada(this);
 
@@ -299,15 +308,12 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         });
         acciones.addView(btnTerminal);
 
-        // Botón ELIMINAR (solo si hay más de 1 instancia)
-        List<SistemaLinux.Instancia> todas = SistemaLinux.listarInstancias(this);
-        if (todas.size() > 1 && !"archlinux".equals(inst.rutaRelativa)) {
-            acciones.addView(espacioHorizontal(dp(8)));
-            TextView btnBorrar = crearBotonChip("✕ BORRAR", ACCENTO_ROJO, () -> {
-                confirmarEliminar(inst);
-            });
-            acciones.addView(btnBorrar);
-        }
+        // Botón ELIMINAR
+        acciones.addView(espacioHorizontal(dp(8)));
+        TextView btnBorrar = crearBotonChip("✕ BORRAR", ACCENTO_ROJO, () -> {
+            confirmarEliminar(inst);
+        });
+        acciones.addView(btnBorrar);
 
         card.addView(acciones);
 

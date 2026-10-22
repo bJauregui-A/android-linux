@@ -6,9 +6,9 @@
 D=/usr/local/share/arch-android
 E=/var/lib/arch-android
 
-# Funciones de estilo AI CLI
+# Funciones de estilo
 paso() {
-    printf '\n\e[1;38;5;81m╭─ ✦ %s\e[0m\n' "$*"
+    printf '\n\e[1;38;5;81m┌─ %s\e[0m\n' "$*"
 }
 falla() {
     printf '\n\e[1;38;5;196m✖ Error: %s\e[0m\n' "$*"
@@ -17,17 +17,17 @@ falla() {
 }
 lista() { for g; do sed 's/#.*//' "$D/paquetes-$g.txt"; done | tr -s ' \n' '  '; }
 
-# Banner interactivo de inicio
+# Banner de inicio
 printf '\033[2J\033[H'
-printf '\e[1;38;5;141m╭────────────────────────────────────────────────────────────╮\e[0m\n'
-printf '\e[1;38;5;141m│\e[0m  \e[1;38;5;81m✦ ANTIGRAVITY\e[0m \e[38;5;245m•\e[0m \e[1;38;5;48mCONFIGURACIÓN INICIAL DEL ENTORNO\e[0m       \e[1;38;5;141m│\e[0m\n'
-printf '\e[1;38;5;141m│\e[0m  \e[38;5;250mAsistente interactivo de personalización e instalación CLI\e[0m \e[1;38;5;141m│\e[0m\n'
-printf '\e[1;38;5;141m╰────────────────────────────────────────────────────────────╯\e[0m\n'
+printf '\e[1;38;5;141m┌────────────────────────────────────────────────────────────┐\e[0m\n'
+printf '\e[1;38;5;141m│\e[0m  \e[1;38;5;51mCONFIGURACIÓN INICIAL DEL ENTORNO\e[0m                         \e[1;38;5;141m│\e[0m\n'
+printf '\e[1;38;5;141m│\e[0m  \e[38;5;250mAsistente interactivo de personalización e instalación\e[0m    \e[1;38;5;141m│\e[0m\n'
+printf '\e[1;38;5;141m└────────────────────────────────────────────────────────────┘\e[0m\n'
 
 # Usuario y nombre del dispositivo (una vez; quedan en $E/usuario y /etc/hostname, que la app
 # y la glibc leen: TerminalService.usuario(), uname/gethostname desde la 0019)
 if [ ! -s $E/usuario ]; then
-    printf '\n\e[1;38;5;111m╭─ ✦ [1/4] Identidad del Sistema y Usuario ──────────────────╮\e[0m\n'
+    printf '\n\e[1;38;5;111m┌─ [1/4] Identidad del Sistema y Usuario ────────────────────┐\e[0m\n'
     while :; do
         printf '\e[1;38;5;111m│\e[0m  \e[1;38;5;48m❯\e[0m Nombre de usuario (letras minúsculas, números, - y _) [user]: '
         read -r N
@@ -48,7 +48,7 @@ if [ ! -s /etc/hostname ]; then
         printf '\e[1;38;5;111m│\e[0m  \e[38;5;214m✖ Inválido: solo letras, números y guiones (sin espacios)\e[0m\n'
     done
     echo "$H" > /etc/hostname
-    printf '\e[1;38;5;111m╰────────────────────────────────────────────────────────────╯\e[0m\n'
+    printf '\e[1;38;5;111m└────────────────────────────────────────────────────────────┘\e[0m\n'
 fi
 U=$(id -u); G=$(id -g)
 grep -q "^$N:" /etc/passwd || echo "$N:x:$U:$G:$N:/home/$N:/usr/bin/zsh" >> /etc/passwd
@@ -65,7 +65,7 @@ rmdir /home/user 2>/dev/null
 contrasena_definida() { grep -q "^$N:[^!*:][^:]*:" /etc/shadow 2>/dev/null; }
 pedir_contrasena() {
     local p1 p2 h
-    printf '\n\e[1;38;5;111m╭─ ✦ [2/4] Seguridad y Autenticación ────────────────────────╮\e[0m\n'
+    printf '\n\e[1;38;5;111m┌─ [2/4] Seguridad y Autenticación ──────────────────────────┐\e[0m\n'
     printf '\e[1;38;5;111m│\e[0m  Configura la contraseña de \e[1;38;5;48m%s\e[0m (sudo, SSH, pantalla de bloqueo):\n' "$N"
     while :; do
         printf '\e[1;38;5;111m│\e[0m  \e[1;38;5;48m❯\e[0m Nueva contraseña: '
@@ -87,7 +87,7 @@ pedir_contrasena() {
     fi
     chmod 600 /etc/shadow
     printf '\e[1;38;5;111m│\e[0m  \e[1;38;5;48m✔ Contraseña guardada correctamente\e[0m\n'
-    printf '\e[1;38;5;111m╰────────────────────────────────────────────────────────────╯\e[0m\n'
+    printf '\e[1;38;5;111m└────────────────────────────────────────────────────────────┘\e[0m\n'
 }
 if [ "$1" = --contrasena ]; then
     pedir_contrasena || falla "no se pudo guardar la contraseña"
@@ -104,8 +104,9 @@ if [ ! -e $E/base-lista ]; then
         ver=$(sed -n "/^%VERSION%/{n;p}" $d/desc)
         (cd / && GLIBC_FAKEROOT=1 HOME=/root bash -c ". $d/install; declare -F post_install >/dev/null && post_install $ver" > /dev/null 2>&1)
     done
-    paso "Configurando llavero de pacman"
+    paso "Configurando llavero de pacman y certificados SSL"
     sudo pacman-key --init > /dev/null 2>&1 && sudo pacman-key --populate archlinuxarm || falla "falló pacman-key"
+    sudo update-ca-trust > /dev/null 2>&1 || true
     touch $E/base-lista
 fi
 
@@ -115,8 +116,8 @@ fi
 ED=$D/escritorios
 if [ ! -s $E/escritorio ]; then
     mapfile -t IDS < <(grep -v '^#' $ED/orden)
-    printf '\n\e[1;38;5;111m╭────────────────────────────────────────────────────────────╮\e[0m\n'
-    printf '\e[1;38;5;111m│\e[0m  \e[1;38;5;81m✦ [3/4] Selección de Entorno de Escritorio\e[0m                \e[1;38;5;111m│\e[0m\n'
+    printf '\n\e[1;38;5;111m┌────────────────────────────────────────────────────────────┐\e[0m\n'
+    printf '\e[1;38;5;111m│\e[0m  \e[1;38;5;81m[3/4] Selección de Entorno de Escritorio\e[0m                  \e[1;38;5;111m│\e[0m\n'
     printf '\e[1;38;5;111m│\e[0m  \e[38;5;245m14 entornos validados con GPU Adreno (Turnip + Zink)\e[0m       \e[1;38;5;111m│\e[0m\n'
     printf '\e[1;38;5;111m├────────────────────────────────────────────────────────────┤\e[0m\n'
     for i in "${!IDS[@]}"; do
@@ -126,10 +127,11 @@ if [ ! -s $E/escritorio ]; then
          else
              e=$'\e[38;5;214m○ experimental\e[0m'
          fi
-         printf '\e[1;38;5;111m│\e[0m  [%2d] \e[1;38;5;15m%-12s\e[0m %-18s \e[38;5;248m%-20s\e[0m\e[1;38;5;111m│\e[0m\n' \
+         # Nombres destacados con color cian brillante
+         printf '\e[1;38;5;111m│\e[0m  \e[1;38;5;81m[%2d]\e[0m \e[1;38;5;51m%-14s\e[0m %-18s \e[38;5;248m%-18s\e[0m\e[1;38;5;111m│\e[0m\n' \
              $((i + 1)) "$NOMBRE" "$e" "($TAMANO)")
     done
-    printf '\e[1;38;5;111m╰────────────────────────────────────────────────────────────╯\e[0m\n'
+    printf '\e[1;38;5;111m└────────────────────────────────────────────────────────────┘\e[0m\n'
     while :; do
         printf '\e[1;38;5;48m❯\e[0m Selecciona un número [1-%d, por defecto 1 = sway]: ' "${#IDS[@]}"
         read -r r
@@ -164,21 +166,24 @@ configurar_escritorio() {
 paso "Aplicando configuración de $ESC para $SISTEMA_LINUX"
 configurar_escritorio "$ESC" || falla "no se pudo aplicar la receta de $ESC"
 
-GRUPOS=(ssh audio firefox juegos desarrollo adb utilidades)
+GRUPOS=(ssh audio firefox desarrollo adb utilidades)
 TEXTOS=("SSH: Servidor seguro en el puerto 8022 (~5 MB)"
         "Audio: PipeWire → Altavoz Android vía AudioTrack (~25 MB)"
         "Firefox con aceleración GPU WebRender (~250 MB)"
-        "Juegos: Steam ARM64, Proton directo, Lutris (~1 GB)"
         "Desarrollo: gcc, meson, git, gdb, strace (~400 MB)"
         "ADB local sin PC: depuración inalámbrica (~10 MB)"
         "Utilidades: htop, grim (capturas), unzip, wget (~5 MB)")
-MARCA=(1 1 0 0 0 0 0)
+MARCA=(1 1 0 0 0 0)
 
 if [ ! -e $E/opcionales ]; then
-    while :; do
-        printf '\n\e[1;38;5;111m╭────────────────────────────────────────────────────────────╮\e[0m\n'
-        printf '\e[1;38;5;111m│\e[0m  \e[1;38;5;81m✦ [4/4] Módulos y Paquetes Opcionales\e[0m                     \e[1;38;5;111m│\e[0m\n'
-        printf '\e[1;38;5;111m│\e[0m  \e[38;5;245m(El escritorio base, terminal kitty, zsh y GPU van siempre)\e[0m\e[1;38;5;111m│\e[0m\n'
+    idx_actual=0
+    num_opciones=${#GRUPOS[@]}
+
+    dibujar_menu_opcionales() {
+        printf '\033[2J\033[H'
+        printf '\e[1;38;5;111m┌────────────────────────────────────────────────────────────┐\e[0m\n'
+        printf '\e[1;38;5;111m│\e[0m  \e[1;38;5;81m[4/4] Módulos y Paquetes Opcionales\e[0m                       \e[1;38;5;111m│\e[0m\n'
+        printf '\e[1;38;5;111m│\e[0m  \e[38;5;245mUsa ↑/↓ para moverte, Enter/Espacio para marcar o enviar\e[0m  \e[1;38;5;111m│\e[0m\n'
         printf '\e[1;38;5;111m├────────────────────────────────────────────────────────────┤\e[0m\n'
         for i in "${!GRUPOS[@]}"; do
             if [ "${MARCA[$i]}" = 1 ]; then
@@ -186,40 +191,66 @@ if [ ! -e $E/opcionales ]; then
             else
                 chk=$'\e[38;5;245m[ ]\e[0m'
             fi
-            printf '\e[1;38;5;111m│\e[0m  %s %d  %-51s\e[1;38;5;111m│\e[0m\n' "$chk" $((i + 1)) "${TEXTOS[$i]}"
-        done
-        printf '\e[1;38;5;111m╰────────────────────────────────────────────────────────────╯\e[0m\n'
-        printf '\e[1;38;5;48m❯\e[0m Números a marcar/desmarcar (ej: 3 4, 3-5); Enter continúa: '
-        read -r r
-        r=${r//[$'\r']/}
-        [ -z "${r// /}" ] && break
-        malos=
-        for n in ${r//[,;]/ }; do
-            if [[ $n =~ ^([0-9]+)-([0-9]+)$ ]]; then
-                a=${BASH_REMATCH[1]} b=${BASH_REMATCH[2]}
-            elif [[ $n =~ ^[0-9]+$ ]]; then
-                a=$n b=$n
+            if [ "$i" -eq "$idx_actual" ]; then
+                printf '\e[1;38;5;111m│\e[0m \e[1;38;5;51m❯\e[0m %s \e[1;38;5;15m%-54s\e[0m\e[1;38;5;111m│\e[0m\n' "$chk" "${TEXTOS[$i]}"
             else
-                malos+=" $n"; continue
+                printf '\e[1;38;5;111m│\e[0m   %s \e[38;5;250m%-54s\e[0m\e[1;38;5;111m│\e[0m\n' "$chk" "${TEXTOS[$i]}"
             fi
-            for ((k = a; k <= b; k++)); do
-                if [ $k -ge 1 ] && [ $k -le ${#GRUPOS[@]} ]; then
-                    MARCA[k - 1]=$((1 - MARCA[k - 1]))
-                else
-                    malos+=" $k"
-                fi
-            done
         done
-        [ -n "$malos" ] && printf '\e[38;5;214m✖ No se entendió:%s\e[0m\n' "$malos"
+        printf '\e[1;38;5;111m├────────────────────────────────────────────────────────────┤\e[0m\n'
+        if [ "$idx_actual" -eq "$num_opciones" ]; then
+            printf '\e[1;38;5;111m│\e[0m \e[1;38;5;51m❯\e[0m  \e[1;38;5;48m[ ✔ ENVIAR Y CONTINUAR (SUBMIT) ]\e[0m                        \e[1;38;5;111m│\e[0m\n'
+        else
+            printf '\e[1;38;5;111m│\e[0m    \e[38;5;245m[   Enviar y continuar (Submit)   ]\e[0m                        \e[1;38;5;111m│\e[0m\n'
+        fi
+        printf '\e[1;38;5;111m└────────────────────────────────────────────────────────────┘\e[0m\n'
+    }
+
+    while :; do
+        dibujar_menu_opcionales
+        IFS= read -rsn1 tecla
+        if [ "$tecla" = $'\e' ]; then
+            read -rsn2 -t 0.1 resto || true
+            case "$resto" in
+                '[A'|'OA')
+                    if [ $idx_actual -gt 0 ]; then
+                        ((idx_actual--))
+                    fi
+                    ;;
+                '[B'|'OB')
+                    if [ $idx_actual -lt "$num_opciones" ]; then
+                        ((idx_actual++))
+                    fi
+                    ;;
+            esac
+        elif [ "$tecla" = "" ] || [ "$tecla" = $'\n' ] || [ "$tecla" = $'\r' ]; then
+            if [ "$idx_actual" -eq "$num_opciones" ]; then
+                break
+            else
+                MARCA[idx_actual]=$((1 - MARCA[idx_actual]))
+            fi
+        elif [ "$tecla" = " " ]; then
+            if [ "$idx_actual" -eq "$num_opciones" ]; then
+                break
+            else
+                MARCA[idx_actual]=$((1 - MARCA[idx_actual]))
+            fi
+        elif [ "$tecla" = "s" ] || [ "$tecla" = "S" ]; then
+            break
+        elif [[ "$tecla" =~ ^[1-6]$ ]]; then
+            val=$((tecla - 1))
+            MARCA[val]=$((1 - MARCA[val]))
+        fi
     done
+
     for i in "${!GRUPOS[@]}"; do [ "${MARCA[$i]}" = 1 ] && echo "${GRUPOS[$i]}"; done > $E/opcionales
 fi
 elegido() { grep -qx "$1" $E/opcionales; }
 grupos="escritorio $(tr '\n' ' ' < $E/opcionales)"
 
-printf '\n\e[1;38;5;81m╭─ ✦ Descarga e instalación de paquetes pacman ─────────────╮\e[0m\n'
+printf '\n\e[1;38;5;81m┌─ Descarga e instalación de paquetes pacman ────────────────┐\e[0m\n'
 printf '\e[1;38;5;81m│\e[0m  Módulos: \e[1;38;5;48m%s\e[0m | Escritorio: \e[1;38;5;48m%s\e[0m\n' "$grupos" "$ESC"
-printf '\e[1;38;5;81m╰────────────────────────────────────────────────────────────╯\e[0m\n'
+printf '\e[1;38;5;81m└────────────────────────────────────────────────────────────┘\e[0m\n'
 
 for i in 1 2 3; do
     sudo pacman -Syu --needed --noconfirm $(lista $grupos) $(sed 's/#.*//' $ED/$ESC/paquetes.txt) && break
@@ -238,24 +269,18 @@ FF=/usr/lib/firefox/browser/defaults/preferences
     sed 's|/usr/lib/firefox/firefox|/usr/local/bin/firefox|' /usr/share/applications/firefox.desktop \
         > ~/.local/share/applications/firefox.desktop
 
-if elegido juegos && [ ! -e $E/juegos-listos ]; then
-    paso "Instalando componentes de juegos (Steam / Proton / Lutris)"
-    bash $D/juegos.sh || falla "falló la instalación de los juegos"
-    touch $E/juegos-listos
-fi
-
 if [ -e $E/instalado ]; then
-    printf '\n\e[1;38;5;48m╭────────────────────────────────────────────────────────────╮\e[0m\n'
-    printf '\e[1;38;5;48m│\e[0m  \e[1;38;5;81m✦ AJUSTES GUARDADOS CORRECTAMENTE\e[0m                         \e[1;38;5;48m│\e[0m\n'
+    printf '\n\e[1;38;5;48m┌────────────────────────────────────────────────────────────┐\e[0m\n'
+    printf '\e[1;38;5;48m│\e[0m  \e[1;38;5;81mAJUSTES GUARDADOS CORRECTAMENTE\e[0m                           \e[1;38;5;48m│\e[0m\n'
     printf '\e[1;38;5;48m│\e[0m  \e[38;5;250mEl nuevo entorno se abrirá al reiniciar la sesión.\e[0m         \e[1;38;5;48m│\e[0m\n'
-    printf '\e[1;38;5;48m╰────────────────────────────────────────────────────────────╯\e[0m\n'
+    printf '\e[1;38;5;48m└────────────────────────────────────────────────────────────┘\e[0m\n'
     exit 0
 fi
 touch $E/instalado
 rm -f $E/instalando
 
-printf '\n\e[1;38;5;48m╭────────────────────────────────────────────────────────────╮\e[0m\n'
-printf '\e[1;38;5;48m│\e[0m  \e[1;38;5;81m✦ INSTALACIÓN COMPLETADA CON ÉXITO\e[0m                        \e[1;38;5;48m│\e[0m\n'
+printf '\n\e[1;38;5;48m┌────────────────────────────────────────────────────────────┐\e[0m\n'
+printf '\e[1;38;5;48m│\e[0m  \e[1;38;5;81mINSTALACIÓN COMPLETADA CON ÉXITO\e[0m                          \e[1;38;5;48m│\e[0m\n'
 printf '\e[1;38;5;48m│\e[0m  \e[38;5;250mIniciando el entorno de escritorio en la pantalla...\e[0m       \e[1;38;5;48m│\e[0m\n'
-printf '\e[1;38;5;48m╰────────────────────────────────────────────────────────────╯\e[0m\n'
+printf '\e[1;38;5;48m└────────────────────────────────────────────────────────────┘\e[0m\n'
 sleep 2
