@@ -209,9 +209,11 @@ public class WaylandActivity extends Activity {
             if (altoIme > 0) {
                 mostrarBarra(true);
                 if (barraTeclas != null && barraTeclas.getVisibility() == View.VISIBLE) {
-                    float limiteY = v.getHeight() - altoIme - barraTeclas.getHeight() - dp(8);
-                    if (barraTeclas.getY() > limiteY) {
-                        barraTeclas.setY(limiteY);
+                    int limiteY = v.getHeight() - altoIme - barraTeclas.getHeight() - dp(8);
+                    if (barraTeclas.getTop() > limiteY) {
+                        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) barraTeclas.getLayoutParams();
+                        lp.topMargin = Math.max(dp(20), limiteY);
+                        barraTeclas.setLayoutParams(lp);
                     }
                 }
             }
@@ -388,13 +390,18 @@ public class WaylandActivity extends Activity {
         fab.post(() -> {
             View p = (View) fab.getParent();
             if (p != null) {
-                fab.setX(p.getWidth() - dp(40 + 16));
-                fab.setY(p.getHeight() - dp(40 + 20));
+                int initFabX = p.getWidth() - dp(40 + 16);
+                int initFabY = p.getHeight() - dp(40 + 20);
+                FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) fab.getLayoutParams();
+                lp.leftMargin = initFabX;
+                lp.topMargin = initFabY;
+                fab.setLayoutParams(lp);
             }
         });
 
         View.OnTouchListener arrastreFab = new View.OnTouchListener() {
-            private float startX, startY, initX, initY;
+            private float startX, startY;
+            private int initLeft, initTop;
             private boolean moviendo;
 
             @Override
@@ -403,8 +410,8 @@ public class WaylandActivity extends Activity {
                     case MotionEvent.ACTION_DOWN:
                         startX = e.getRawX();
                         startY = e.getRawY();
-                        initX = fab.getX();
-                        initY = fab.getY();
+                        initLeft = fab.getLeft();
+                        initTop = fab.getTop();
                         moviendo = false;
                         return true;
 
@@ -414,17 +421,20 @@ public class WaylandActivity extends Activity {
                             moviendo = true;
                         }
                         if (moviendo) {
-                            float nx = initX + (e.getRawX() - startX);
-                            float ny = initY + (e.getRawY() - startY);
+                            int nx = (int) (initLeft + (e.getRawX() - startX));
+                            int ny = (int) (initTop + (e.getRawY() - startY));
                             View p = (View) fab.getParent();
                             if (p != null) {
-                                float maxX = Math.max(0, p.getWidth() - fab.getWidth());
-                                float maxY = Math.max(0, p.getHeight() - fab.getHeight() - altoIme);
+                                int maxX = Math.max(0, p.getWidth() - fab.getWidth());
+                                int maxY = Math.max(0, p.getHeight() - fab.getHeight() - altoIme);
                                 nx = Math.max(0, Math.min(maxX, nx));
                                 ny = Math.max(dp(20), Math.min(maxY - dp(6), ny));
                             }
-                            fab.setX(nx);
-                            fab.setY(ny);
+                            fab.layout(nx, ny, nx + fab.getWidth(), ny + fab.getHeight());
+                            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) fab.getLayoutParams();
+                            lp.leftMargin = nx;
+                            lp.topMargin = ny;
+                            fab.setLayoutParams(lp);
                         }
                         return true;
 
@@ -441,26 +451,27 @@ public class WaylandActivity extends Activity {
         botonAlternar = fab;
         contenedor.addView(fab);
 
-        // 2. Barra flotante tipo "Pill" (arrastrable libremente por toda la pantalla en X y Y)
+        // 2. Barra flotante tipo "Pill" (arrastrable libremente por toda la pantalla en X y Y sin cortes)
         LinearLayout marcoBarra = new LinearLayout(this) {
             private float downX, downY;
-            private float initX, initY;
+            private int initLeft, initTop;
             private boolean arrastrando;
 
             private void moverA(float rawX, float rawY) {
-                float dx = rawX - downX;
-                float dy = rawY - downY;
-                float nx = initX + dx;
-                float ny = initY + dy;
+                int nx = (int) (initLeft + (rawX - downX));
+                int ny = (int) (initTop + (rawY - downY));
                 View p = (View) getParent();
                 if (p != null) {
-                    float maxX = Math.max(0, p.getWidth() - getWidth());
-                    float maxY = Math.max(0, p.getHeight() - getHeight() - altoIme);
+                    int maxX = Math.max(0, p.getWidth() - getWidth());
+                    int maxY = Math.max(0, p.getHeight() - getHeight() - altoIme);
                     nx = Math.max(0, Math.min(maxX, nx));
                     ny = Math.max(dp(20), Math.min(maxY - dp(6), ny));
                 }
-                setX(nx);
-                setY(ny);
+                layout(nx, ny, nx + getWidth(), ny + getHeight());
+                FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) getLayoutParams();
+                lp.leftMargin = nx;
+                lp.topMargin = ny;
+                setLayoutParams(lp);
             }
 
             @Override
@@ -469,8 +480,8 @@ public class WaylandActivity extends Activity {
                     case MotionEvent.ACTION_DOWN:
                         downX = ev.getRawX();
                         downY = ev.getRawY();
-                        initX = getX();
-                        initY = getY();
+                        initLeft = getLeft();
+                        initTop = getTop();
                         arrastrando = false;
                         break;
 
@@ -479,7 +490,6 @@ public class WaylandActivity extends Activity {
                         float dy = ev.getRawY() - downY;
                         float absDx = Math.abs(dx);
                         float absDy = Math.abs(dy);
-                        // Si el movimiento vertical supera 6dp, interceptamos para arrastrar la barra
                         if (!arrastrando && absDy > dp(6) && absDy > absDx * 0.5f) {
                             arrastrando = true;
                             return true;
@@ -500,8 +510,8 @@ public class WaylandActivity extends Activity {
                     case MotionEvent.ACTION_DOWN:
                         downX = ev.getRawX();
                         downY = ev.getRawY();
-                        initX = getX();
-                        initY = getY();
+                        initLeft = getLeft();
+                        initTop = getTop();
                         arrastrando = false;
                         return true;
 
@@ -538,10 +548,12 @@ public class WaylandActivity extends Activity {
         marcoBarra.post(() -> {
             View p = (View) marcoBarra.getParent();
             if (p != null) {
-                float initX = Math.max(0, (p.getWidth() - marcoBarra.getWidth()) / 2f);
-                float initY = Math.max(0, p.getHeight() - marcoBarra.getHeight() - dp(18));
-                marcoBarra.setX(initX);
-                marcoBarra.setY(initY);
+                int initX = Math.max(0, (p.getWidth() - marcoBarra.getWidth()) / 2);
+                int initY = Math.max(0, p.getHeight() - marcoBarra.getHeight() - dp(18));
+                FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) marcoBarra.getLayoutParams();
+                lp.leftMargin = initX;
+                lp.topMargin = initY;
+                marcoBarra.setLayoutParams(lp);
             }
         });
 
@@ -572,7 +584,7 @@ public class WaylandActivity extends Activity {
         fila.setOrientation(LinearLayout.HORIZONTAL);
         fila.setGravity(Gravity.CENTER_VERTICAL);
 
-        String[] teclas = {"⌨", "ESC", "TAB", "CTRL", "ALT", "SUPER", "←", "↓", "↑", "→", "SALIR"};
+        String[] teclas = {"⌨", "⛶", "ESC", "TAB", "CTRL", "ALT", "SUPER", "←", "↓", "↑", "→", "SALIR"};
         for (String t : teclas) {
             TextView b = new TextView(this);
             b.setText(t);
@@ -629,9 +641,47 @@ public class WaylandActivity extends Activity {
     }
 
     private void mostrarBarra(boolean mostrar) {
-        if (barraTeclas != null && botonAlternar != null) {
-            barraTeclas.setVisibility(mostrar ? View.VISIBLE : View.GONE);
-            botonAlternar.setVisibility(mostrar ? View.GONE : View.VISIBLE);
+        if (barraTeclas == null || botonAlternar == null) return;
+        if (mostrar) {
+            // Se abre exactamente en la posición donde está el botón FAB
+            View p = (View) barraTeclas.getParent();
+            int pW = p != null ? p.getWidth() : getResources().getDisplayMetrics().widthPixels;
+            int pH = p != null ? p.getHeight() : getResources().getDisplayMetrics().heightPixels;
+            int fabL = botonAlternar.getLeft();
+            int fabT = botonAlternar.getTop();
+            int barraW = barraTeclas.getWidth() > 0 ? barraTeclas.getWidth() : dp(340);
+            int barraH = barraTeclas.getHeight() > 0 ? barraTeclas.getHeight() : dp(48);
+
+            int nx = Math.max(0, Math.min(pW - barraW, fabL + botonAlternar.getWidth() - barraW));
+            int ny = Math.max(dp(20), Math.min(pH - barraH - altoIme, fabT));
+
+            FrameLayout.LayoutParams lpB = (FrameLayout.LayoutParams) barraTeclas.getLayoutParams();
+            lpB.leftMargin = nx;
+            lpB.topMargin = ny;
+            barraTeclas.setLayoutParams(lpB);
+
+            barraTeclas.setVisibility(View.VISIBLE);
+            botonAlternar.setVisibility(View.GONE);
+        } else {
+            // Se minimiza exactamente en la misma posición (en el extremo derecho de la barra donde está ▼)
+            View p = (View) botonAlternar.getParent();
+            int pW = p != null ? p.getWidth() : getResources().getDisplayMetrics().widthPixels;
+            int pH = p != null ? p.getHeight() : getResources().getDisplayMetrics().heightPixels;
+            int bL = barraTeclas.getLeft();
+            int bT = barraTeclas.getTop();
+            int bW = barraTeclas.getWidth();
+            int bH = barraTeclas.getHeight();
+
+            int fabX = Math.max(0, Math.min(pW - botonAlternar.getWidth(), bL + bW - botonAlternar.getWidth()));
+            int fabY = Math.max(dp(20), Math.min(pH - botonAlternar.getHeight() - altoIme, bT + Math.max(0, (bH - botonAlternar.getHeight()) / 2)));
+
+            FrameLayout.LayoutParams lpF = (FrameLayout.LayoutParams) botonAlternar.getLayoutParams();
+            lpF.leftMargin = fabX;
+            lpF.topMargin = fabY;
+            botonAlternar.setLayoutParams(lpF);
+
+            barraTeclas.setVisibility(View.GONE);
+            botonAlternar.setVisibility(View.VISIBLE);
         }
     }
 
