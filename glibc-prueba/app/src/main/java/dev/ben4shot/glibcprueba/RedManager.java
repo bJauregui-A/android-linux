@@ -20,6 +20,9 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 // Gestor de red local y reenvío de puertos (Port Forwarding):
 // Permite que puertos externos del teléfono (ej: 8022, 8080) se redirijan dinámicamente
@@ -136,10 +139,10 @@ public final class RedManager {
                 Log.w(TAG, "error leyendo reglas json", e);
             }
         } else {
-            // Regla inicial sugerida: puerto 8022 al primer entorno disponible
+            // Regla inicial sugerida desactivada por defecto para no competir con sshd directo en 8022
             SistemaLinux.Instancia sel = SistemaLinux.instanciaSeleccionada(c);
             String targetId = sel != null ? sel.id : "arch-principal";
-            Regla def = new Regla("ssh-default", 8022, targetId, 22, true);
+            Regla def = new Regla("ssh-default", 2222, targetId, 22, false);
             res.add(def);
             guardarReglas(c, res);
         }
@@ -174,7 +177,11 @@ public final class RedManager {
 
     public static synchronized void actualizar(Context c) {
         if (poolPipes == null || poolPipes.isShutdown()) {
-            poolPipes = Executors.newCachedThreadPool();
+            poolPipes = new ThreadPoolExecutor(
+                    2, 16, 60L, TimeUnit.SECONDS,
+                    new SynchronousQueue<>(),
+                    new ThreadPoolExecutor.DiscardPolicy()
+            );
         }
         boolean generalHabilitado = esHabilitado(c);
         List<Regla> reglas = listarReglas(c);
@@ -212,6 +219,11 @@ public final class RedManager {
     }
 
     private static void iniciarServidorParaRegla(Regla r) {
+        int destinoPort = (r.puertoInterno == 22 ? 8022 : r.puertoInterno);
+        if (r.puertoExterno == destinoPort) {
+            Log.w(TAG, "Regla omitida para evitar bucle infinito: puerto externo (" + r.puertoExterno + ") coincide con destino");
+            return;
+        }
         try {
             ServerSocket ss = new ServerSocket(r.puertoExterno, 50, InetAddress.getByName("0.0.0.0"));
             Thread t = new Thread(() -> bucleAceptar(r, ss), "pforward-" + r.puertoExterno);
@@ -241,11 +253,17 @@ public final class RedManager {
     }
 
     private static void procesarConexion(Regla r, Socket cliente) {
+        int puertoDestino = (r.puertoInterno == 22 ? 8022 : r.puertoInterno);
+        if (puertoDestino == r.puertoExterno) {
+            Log.w(TAG, "Bucle evitado: puerto externo y destino son " + puertoDestino);
+            try { cliente.close(); } catch (Exception ignored) { }
+            return;
+        }
         Socket destino = null;
         try {
             // Conectar al puerto local interno del host
             // (Si el entorno destino corre sshd en 8022 o su propio puerto, redirige directamente)
-            destino = new Socket("127.0.0.1", r.puertoInterno == 22 ? 8022 : r.puertoInterno);
+            destino = new Socket("127.0.0.1", puertoDestino);
             Socket finalDestino = destino;
 
             if (poolPipes != null && !poolPipes.isShutdown()) {

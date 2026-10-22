@@ -518,6 +518,15 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
    - En [primer-arranque.sh](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/primer-arranque.sh): ahora detecta la ruta real de la instancia desde `$GLIBC_PREFIX` y ajusta dinámicamente tanto `android.js` como `/etc/ld.so.conf.d/android-prefijo.conf`.
    - Corregido en vivo en la instancia `test-62438` en el dispositivo vía `run-as`.
    - `capa.tgz` y `instalar.sh` actualizados en `trabajo/assets-sdk36/`, APK recompilada e instalada en el Redmi 15 5G (`adb install -r`, Success).
+4. **Resolución de alto uso de CPU y memoria tras entrar al entorno gráfico (bucle infinito en `RedManager`):**
+   - Diagnóstico: los procesos Linux nativos (`sway`, `waybar`, `pipewire`) consumían solo entre 0.0% y 0.7% de CPU. El 125% de CPU y la saturación de memoria venían de la app Java (`dev.ben4shot.glibcprueba.sdk36`), específicamente de hilos `pforward-8022` y `pool-6-thread-*`.
+   - Causa raíz: [RedManager.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/RedManager.java) creaba por defecto una regla con `puertoExterno = 8022` y destino interno `22` (que `procesarConexion` mapeaba a `8022` para SSH). Como `RedManager` escuchaba en `0.0.0.0:8022` y al aceptar una conexión intentaba reenviar conectándose a `127.0.0.1:8022`, se conectaba recursivamente a su propio `ServerSocket`. Esto desataba una cascada infinita de auto-conexiones que saturaba la CPU al 100%, generaba miles de sockets `TIME-WAIT` e inflaba la memoria hasta activar agresivamente a `kswapd0`.
+   - Corrección en [RedManager.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/RedManager.java):
+     - Prevención estricta de auto-bucle en `iniciarServidorParaRegla` y `procesarConexion`: si `puertoExterno == puertoDestino`, se ignora la regla y se cierra la conexión evitando la recursión.
+     - Regla por defecto segura: desactivada (`activa: false`) en puerto no conflictivo `2222`.
+     - Pool acotado: reemplazado `Executors.newCachedThreadPool()` sin límite por un `ThreadPoolExecutor` acotado (máximo 16 hilos) con descarte seguro ante saturación.
+     - Limpiada la regla en bucle de `shared_prefs/red_config.xml` en el Redmi.
+   - Resultado: CPU en reposo bajó inmediatamente a **755% idle** (de 800%), uso de swap zram se redujo drásticamente y la app opera en reposo total. APK compilada e instalada con éxito (`adb install -r`).
 
 **Siguiente sesión (66ª):**
 1. **Configuración de proxy en puerto 22 real de Wi-Fi:**
