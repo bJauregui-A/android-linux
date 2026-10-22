@@ -92,4 +92,5 @@ echo ""
 echo "➜ Iniciando configuración del entorno Arch Linux..."
 echo ""
 export GLIBC_PREFIX="$P"
+export GLIBC_LOADER="$GLIBC_LOADER"
 PATH="$ARCH_PATH" exec "$GLIBC_LOADER" /usr/bin/bash /usr/local/share/arch-android/primer-arranque.sh

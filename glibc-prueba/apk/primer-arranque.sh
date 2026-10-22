@@ -12,8 +12,26 @@ paso() {
 }
 falla() {
     printf '\n\e[1;38;5;196m✖ Error: %s\e[0m\n' "$*"
-    read -rp "Presiona Enter para reintentar (Ctrl+C para salir a la terminal)... " _
-    exec bash "$0"
+    printf '\n\e[38;5;250mOpciones de recuperación:\e[0m\n'
+    printf '  \e[1;38;5;48m[1]\e[0m Reintentar instalación automáticamente\n'
+    printf '  \e[1;38;5;81m[2]\e[0m Abrir consola de rescate interactiva\n'
+    printf '  \e[1;38;5;196m[3]\e[0m Salir\n'
+    read -rp "Selecciona una opción [1]: " opt
+    case "$opt" in
+        2)
+            printf '\n\e[1;38;5;51mEntrando a terminal de rescate. Escribe "exit" para reanudar la instalación.\e[0m\n'
+            [ -f /var/lib/pacman/db.lck ] && ! pgrep -x pacman >/dev/null 2>&1 && rm -f /var/lib/pacman/db.lck
+            bash -l
+            exec bash "$0"
+            ;;
+        3)
+            exit 1
+            ;;
+        *)
+            [ -f /var/lib/pacman/db.lck ] && ! pgrep -x pacman >/dev/null 2>&1 && rm -f /var/lib/pacman/db.lck
+            exec bash "$0"
+            ;;
+    esac
 }
 lista() { for g; do sed 's/#.*//' "$D/paquetes-$g.txt"; done | tr -s ' \n' '  '; }
 
@@ -109,6 +127,7 @@ if [ ! -e $E/base-lista ]; then
         (cd / && GLIBC_FAKEROOT=1 HOME=/root bash -c ". $d/install; declare -F post_install >/dev/null && post_install $ver" > /dev/null 2>&1)
     done
     paso "Configurando llavero de pacman y certificados SSL"
+    [ -f /var/lib/pacman/db.lck ] && ! pgrep -x pacman >/dev/null 2>&1 && rm -f /var/lib/pacman/db.lck
     sudo pacman-key --init > /dev/null 2>&1 && sudo pacman-key --populate archlinuxarm || falla "falló pacman-key"
     sudo update-ca-trust > /dev/null 2>&1 || true
     touch $E/base-lista
@@ -366,7 +385,15 @@ editar_paquetes_grupo() {
     fi
 }
 
-if [ ! -e $E/opcionales ]; then
+if [ -e $E/opcionales ]; then
+    for i in "${!GRUPOS[@]}"; do
+        if grep -qx "${GRUPOS[$i]}" "$E/opcionales"; then
+            MARCA[$i]=1
+        else
+            MARCA[$i]=0
+        fi
+    done
+else
     idx_actual=0
     num_opciones=${#GRUPOS[@]}
 
@@ -537,6 +564,7 @@ printf '\e[1;38;5;81m│\e[0m  Paquetes seleccionados: \e[1;38;5;48m%d\e[0m\n' "
 printf '\e[1;38;5;81m└────────────────────────────────────────────────────────────┘\e[0m\n'
 
 for i in 1 2 3; do
+    [ -f /var/lib/pacman/db.lck ] && ! pgrep -x pacman >/dev/null 2>&1 && rm -f /var/lib/pacman/db.lck
     sudo pacman -Syu --needed --noconfirm "${PACMAN_A_INSTALAR[@]}" && break
     [ $i = 3 ] && falla "falló pacman 3 veces consecutivas (comprueba la conexión a internet)"
     printf '\n\e[38;5;214m✖ Falló la descarga, reintento %d de 2...\e[0m\n' $i

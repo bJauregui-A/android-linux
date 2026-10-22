@@ -543,6 +543,21 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
 3. **Despliegue y verificación:**
    - Paquete de sesión regenerado automáticamente por Gradle (`packageSessionLayer`).
    - APK `sdk36Debug` compilada e instalada en el Redmi 15 5G con `adb install -r` (Success, datos conservados).
+4. **Recuperación robusta ante interrupción de instalación de entornos (`db.lck` huérfano y código 1):**
+   - Problema reportado: tras crear un nuevo entorno (Niri), cerrar la app en medio de la descarga de paquetes pacman y reabrirla, la sesión terminaba abruptamente en `[Process completed (code 1) - press Enter]` sin iniciar el supervisor.
+   - Diagnóstico:
+     1. Al matar la app abruptamente durante la descarga, `/var/lib/pacman/db.lck` quedó huérfano en el prefijo de la instancia.
+     2. Al volver a abrir la instancia, `TerminalService` detecta que el entorno no ha completado la instalación (`!instalado`) y reanuda `primer-arranque.sh`.
+     3. `pacman -Syu` fallaba inmediatamente 3 veces consecutivas por el bloqueo de base de datos (`error: failed to synchronize all databases (unable to lock database)`).
+     4. Además, al reanudar con `$E/opcionales` ya creado, el array de selección de módulos `MARCA` no se reconstruía a partir del archivo, reseteándose a las marcas por defecto.
+   - Solución implementada:
+     - En [primer-arranque.sh](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/primer-arranque.sh):
+       - Limpieza automática de `db.lck` huérfano antes de `pacman-key` y antes de cada intento de `pacman -Syu` comprobando que pacman no esté corriendo en el sistema (`! pgrep -x pacman`).
+       - Restauración fidedigna de `MARCA` desde `$E/opcionales` si el archivo ya existe tras un reinicio de instalación.
+       - En `falla()`: menú interactivo claro que ofrece reintento automático (con limpieza de locks), consola de rescate contextualizada dentro del entorno para reparar manualmente o salir.
+     - En [instalar.sh](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/instalar.sh): asegurada la exportación de `GLIBC_LOADER` junto a `GLIBC_PREFIX`.
+     - Limpiado el lock huérfano en `niri-53164` en el Redmi 15 5G.
+     - Regenerado `trabajo/assets-sdk36/capa.tgz`, compilada e instalada la APK en el teléfono con `adb install -r` (Success). Al abrir ahora la instancia, reanuda la descarga/instalación de paquetes sin bloqueos y pasa a Niri bajo el supervisor al finalizar.
 
 **Siguiente sesión (67ª):**
 1. **Configuración de proxy en puerto 22 real de Wi-Fi:**
