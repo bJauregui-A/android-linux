@@ -56,6 +56,9 @@ grep -q "^$N:" /etc/group || echo "$N:x:$G:" >> /etc/group
 # Registrar zsh en /etc/shells para que PAM y login no rechacen la shell
 grep -q "^/usr/bin/zsh$" /etc/shells 2>/dev/null || echo "/usr/bin/zsh" >> /etc/shells
 grep -q "^/bin/zsh$" /etc/shells 2>/dev/null || echo "/bin/zsh" >> /etc/shells
+# Normalizar permisos de directorios del sistema para evitar advertencias de pacman
+umask 022
+find /usr /etc /var /opt -maxdepth 3 -type d -exec chmod 755 {} + 2>/dev/null || true
 # El home con las configs de /etc/skel (sway, waybar, kitty, zsh...)
 mkdir -p /home/$N/.config
 cp -rn /etc/skel/. /home/$N/ 2>/dev/null || true
@@ -569,8 +572,17 @@ elegido zsh && {
         sed -i "s|/home/$N:.*|/home/$N:/usr/bin/zsh|" /etc/passwd 2>/dev/null || true
     fi
 }
+# Ajustar rutas reales del prefijo en ld.so.conf.d y preferencias de Firefox
+if [ -n "$GLIBC_PREFIX" ]; then
+    P_REL=$(echo "$GLIBC_PREFIX" | sed -E 's|^/data/(user/0|data)/||')
+    sed -i "s|@P@|$P_REL|g; s|dev.ben4shot.glibcprueba.[^/]*/files/[^/\"']*|$P_REL|g" /etc/ld.so.conf.d/android-prefijo.conf 2>/dev/null || true
+    ldconfig 2>/dev/null || true
+fi
 FF=/usr/lib/firefox/browser/defaults/preferences
-[ -d $FF ] && sed "s|/home/user/|/home/$N/|g" $D/firefox-android.js > $FF/android.js
+if [ -d "$FF" ]; then
+    P_REL=$(echo "${GLIBC_PREFIX:-dev.ben4shot.glibcprueba.sdk36/files/archlinux}" | sed -E 's|^/data/(user/0|data)/||')
+    sed "s|/home/user/|/home/$N/|g; s|@P@|$P_REL|g; s|dev.ben4shot.glibcprueba.[^/]*/files/[^/\"',]*|$P_REL|g" "$D/firefox-android.js" > "$FF/android.js"
+fi
 [ -f /usr/share/applications/firefox.desktop ] &&
     sed 's|/usr/lib/firefox/firefox|/usr/local/bin/firefox|' /usr/share/applications/firefox.desktop \
         > ~/.local/share/applications/firefox.desktop

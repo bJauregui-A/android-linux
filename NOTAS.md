@@ -510,7 +510,14 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
    - Causa: en la sesión 64 se regeneró `capa.tgz` llamando directamente a `apk/capa.py --out trabajo/assets-sdk36/capa.tgz`. Como `capa.py` abría el tarfile en modo `"w"` (tar plano sin comprimir) y la compresión con gzip antes ocurría en `apk/armar.sh`, el asset quedó como tar sin comprimir de ~90 MB en el APK. Al intentar extraer la capa GPU, `tar -xzf` en Android Toybox arrojaba `zcat: not gzip` y `tar: had errors`.
    - En [capa.py](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/capa.py): `Salida` ahora detecta si la ruta termina en `.tgz` o `.tar.gz` y abre con `mode="w:gz"` automáticamente. `capa.tgz` regenerado pasa de 90 MB a 26 MB.
    - En [instalar.sh](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/instalar.sh): `extraer()` ahora inspecciona los primeros bytes del asset en el APK (`od -An -tx1`) buscando `1f8b` para usar `-z` solo cuando los datos son gzip, permitiendo compatibilidad bidireccional limpia (gzip o tar plano).
-   - `capa.tgz` y `instalar.sh` actualizados en `trabajo/assets-sdk36/`, APK recompilada (`assembleSdk36Debug`) e instalada con éxito en el Redmi 15 5G con `adb install -r`.
+2. **Eliminación de advertencias de permisos en `pacman` (`warning: directory permissions differ on ... 700 vs 755`):**
+   - En [instalar.sh](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/instalar.sh): añadido `umask 022` al inicio y normalización de directorios extraídos con `chmod 755` sobre `/usr`, `/etc`, `/var` y `/opt`.
+   - En [primer-arranque.sh](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/primer-arranque.sh): `umask 022` y pase de `chmod 755` antes de invocar `pacman`. De esta forma `filesystem` tiene `755` y coincide exactamente con lo esperado por los paquetes oficiales de Arch ARM, silenciando por completo las advertencias.
+3. **Corrección de caída de pestañas en Firefox ("Gah. Your tab just crashed"):**
+   - Causa: en la arquitectura multi-instancia, los rootfs viven en `files/instancias/<id>/`, pero las preferencias de sandbox de contenido en `android.js` y `android-prefijo.conf` tenían hardcodeado el prefijo clásico `files/archlinux/`. El broker de sandbox de Firefox negaba la lectura al proceso de contenido de la pestaña por quedar fuera de la whitelist de rutas (`security.sandbox.content.read_path_whitelist`), provocando el crash de cada pestaña.
+   - En [primer-arranque.sh](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/primer-arranque.sh): ahora detecta la ruta real de la instancia desde `$GLIBC_PREFIX` y ajusta dinámicamente tanto `android.js` como `/etc/ld.so.conf.d/android-prefijo.conf`.
+   - Corregido en vivo en la instancia `test-62438` en el dispositivo vía `run-as`.
+   - `capa.tgz` y `instalar.sh` actualizados en `trabajo/assets-sdk36/`, APK recompilada e instalada en el Redmi 15 5G (`adb install -r`, Success).
 
 **Siguiente sesión (66ª):**
 1. **Configuración de proxy en puerto 22 real de Wi-Fi:**

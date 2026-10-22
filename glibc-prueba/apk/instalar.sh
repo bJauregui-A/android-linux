@@ -3,6 +3,7 @@
 # del APK (assets sin comprimir: APK, *_OFF y *_LEN los pasa Instalador.java) y sigue con
 # primer-arranque.sh dentro de Arch. Se puede repetir: si ya extrajo, va directo a pacman.
 set -e
+umask 022
 ARCH_PATH=$PATH
 PATH=/system/bin:$PATH
 P=$GLIBC_PREFIX
@@ -78,6 +79,8 @@ if [ ! -e "$E/extraido" ]; then
         extraer "$CAPA_OFF" "$CAPA_LEN" "Capa GPU (Turnip, Zink, Mesa, wlroots, configs)"
     fi
     touch "$E/extraido"
+    # Normalizar permisos de directorios base a 755 para evitar warnings de pacman
+    find "$P/usr" "$P/etc" "$P/var" "$P/opt" -type d -exec chmod 755 {} + 2>/dev/null || true
     printf '\e[1;38;5;111m└────────────────────────────────────────────────────────────┘\e[0m\n'
 fi
 
@@ -88,4 +91,5 @@ cd "$P"
 echo ""
 echo "➜ Iniciando configuración del entorno Arch Linux..."
 echo ""
+export GLIBC_PREFIX="$P"
 PATH="$ARCH_PATH" exec "$GLIBC_LOADER" /usr/bin/bash /usr/local/share/arch-android/primer-arranque.sh
