@@ -19,6 +19,8 @@ final class Wayland {
         return "/run/user/" + Process.myUid();
     }
 
+    private static File dirAnfitrion;
+
     // Idempotente: lo llaman la terminal y WaylandActivity.
     static synchronized void iniciar(Context ctx) {
         File dir = new File(SistemaLinux.raizSeleccionada(ctx), runtimeDir().substring(1));
@@ -29,7 +31,32 @@ final class Wayland {
         dir.setReadable(true, true);
         dir.setWritable(true, true);
         dir.setExecutable(true, true);
-        if (!iniciar(dir.getAbsolutePath())) Log.e("WAYLAND", "no arrancó el anfitrión en " + dir);
+        if (dirAnfitrion == null) {
+            if (iniciar(dir.getAbsolutePath())) {
+                dirAnfitrion = dir;
+            } else {
+                Log.e("WAYLAND", "no arrancó el anfitrión en " + dir);
+            }
+        }
+        // Si el anfitrión ya arrancó en otra instancia, enlazar el socket wayland-0
+        if (dirAnfitrion != null && !dirAnfitrion.equals(dir)) {
+            File srcSock = new File(dirAnfitrion, "wayland-0");
+            File dstSock = new File(dir, "wayland-0");
+            File srcLock = new File(dirAnfitrion, "wayland-0.lock");
+            File dstLock = new File(dir, "wayland-0.lock");
+            try {
+                if (srcSock.exists() && (!dstSock.exists() || !dstSock.getCanonicalPath().equals(srcSock.getCanonicalPath()))) {
+                    dstSock.delete();
+                    android.system.Os.symlink(srcSock.getAbsolutePath(), dstSock.getAbsolutePath());
+                }
+                if (srcLock.exists() && (!dstLock.exists() || !dstLock.getCanonicalPath().equals(srcLock.getCanonicalPath()))) {
+                    dstLock.delete();
+                    android.system.Os.symlink(srcLock.getAbsolutePath(), dstLock.getAbsolutePath());
+                }
+            } catch (Exception e) {
+                Log.w("WAYLAND", "enlace simbólico wayland-0", e);
+            }
+        }
     }
 
     private static native boolean iniciar(String dir);

@@ -211,9 +211,34 @@ public class WaylandActivity extends Activity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        inmersivo();
+        reconectarVentana();
+    }
+
+    private void reconectarVentana() {
+        if (vista != null && vista.getHolder() != null && vista.getHolder().getSurface() != null
+                && vista.getHolder().getSurface().isValid()) {
+            int ancho = vista.getWidth();
+            int alto = vista.getHeight();
+            if (ancho > 0 && alto > 0) {
+                DisplayMetrics dm = getResources().getDisplayMetrics();
+                Wayland.ventana(vista.getHolder().getSurface(), ancho, alto,
+                        Math.round(ancho / dm.xdpi * 25.4f), Math.round(alto / dm.ydpi * 25.4f));
+                startService(new Intent(this, TerminalService.class)
+                        .setAction(TerminalService.REAJUSTAR_PANTALLA));
+            }
+        }
+    }
+
+    @Override
     public void onWindowFocusChanged(boolean foco) {
         super.onWindowFocusChanged(foco);
-        if (foco) inmersivo();
+        if (foco) {
+            inmersivo();
+            reconectarVentana();
+        }
         Portapapeles.foco(this, foco);
         if (!foco) Mandos.soltarTodo();
     }

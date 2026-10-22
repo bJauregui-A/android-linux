@@ -53,6 +53,9 @@ fi
 U=$(id -u); G=$(id -g)
 grep -q "^$N:" /etc/passwd || echo "$N:x:$U:$G:$N:/home/$N:/usr/bin/zsh" >> /etc/passwd
 grep -q "^$N:" /etc/group || echo "$N:x:$G:" >> /etc/group
+# Registrar zsh en /etc/shells para que PAM y login no rechacen la shell
+grep -q "^/usr/bin/zsh$" /etc/shells 2>/dev/null || echo "/usr/bin/zsh" >> /etc/shells
+grep -q "^/bin/zsh$" /etc/shells 2>/dev/null || echo "/bin/zsh" >> /etc/shells
 # El home con las configs de /etc/skel (sway, waybar, kitty, zsh...)
 mkdir -p /home/$N/.config
 cp -rn /etc/skel/. /home/$N/ 2>/dev/null || true
@@ -517,6 +520,9 @@ fi
 paso "Ajustes del sistema"
 elegido ssh && { [ -e /etc/ssh/ssh_host_ed25519_key ] || sudo ssh-keygen -A; }
 sed -i '/^tty:x:5:/d' /etc/group
+if [ -f /etc/pam.d/phosh ]; then
+    printf "%s\n" "#%PAM-1.0" "auth       include      system-auth" "account    include      system-auth" "session    include      system-auth" > /etc/pam.d/phosh
+fi
 elegido zsh && {
     mkdir -p "/home/$N/.config/kitty" "/home/$N/.config/starship"
     cp -rn /etc/skel/.config/kitty/. "/home/$N/.config/kitty/" 2>/dev/null || true
