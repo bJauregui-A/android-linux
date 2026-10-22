@@ -369,14 +369,20 @@ public class WaylandActivity extends Activity {
         fab.setBackground(crearFondo(0xbb0f172a, 0x6638bdf8, dp(20), dp(1)));
         fab.setElevation(dp(6));
         FrameLayout.LayoutParams lpFab = new FrameLayout.LayoutParams(dp(40), dp(40));
-        lpFab.gravity = Gravity.BOTTOM | Gravity.END;
-        lpFab.rightMargin = dp(16);
-        lpFab.bottomMargin = dp(16);
+        lpFab.gravity = Gravity.TOP | Gravity.START;
         fab.setLayoutParams(lpFab);
         fab.setVisibility(View.GONE);
 
+        fab.post(() -> {
+            View p = (View) fab.getParent();
+            if (p != null) {
+                fab.setX(p.getWidth() - dp(40 + 16));
+                fab.setY(p.getHeight() - dp(40 + 20));
+            }
+        });
+
         View.OnTouchListener arrastreFab = new View.OnTouchListener() {
-            private float dX, dY, startX, startY;
+            private float startX, startY, initX, initY;
             private boolean moviendo;
 
             @Override
@@ -385,28 +391,28 @@ public class WaylandActivity extends Activity {
                     case MotionEvent.ACTION_DOWN:
                         startX = e.getRawX();
                         startY = e.getRawY();
-                        dX = fab.getTranslationX() - e.getRawX();
-                        dY = fab.getTranslationY() - e.getRawY();
+                        initX = fab.getX();
+                        initY = fab.getY();
                         moviendo = false;
                         return true;
 
                     case MotionEvent.ACTION_MOVE:
                         float diff = (float) Math.hypot(e.getRawX() - startX, e.getRawY() - startY);
-                        if (!moviendo && diff > dp(6)) {
+                        if (!moviendo && diff > dp(5)) {
                             moviendo = true;
                         }
                         if (moviendo) {
-                            float nx = e.getRawX() + dX;
-                            float ny = e.getRawY() + dY;
+                            float nx = initX + (e.getRawX() - startX);
+                            float ny = initY + (e.getRawY() - startY);
                             View p = (View) fab.getParent();
                             if (p != null) {
-                                float minX = -(p.getWidth() - fab.getWidth() - dp(16));
-                                nx = Math.max(minX, Math.min(0, nx));
-                                float maxArriba = -(p.getHeight() - fab.getHeight() - dp(24));
-                                ny = Math.max(maxArriba, Math.min(0, ny));
+                                float maxX = Math.max(0, p.getWidth() - fab.getWidth());
+                                float maxY = Math.max(0, p.getHeight() - fab.getHeight());
+                                nx = Math.max(0, Math.min(maxX, nx));
+                                ny = Math.max(dp(20), Math.min(maxY - dp(6), ny));
                             }
-                            fab.setTranslationX(nx);
-                            fab.setTranslationY(ny);
+                            fab.setX(nx);
+                            fab.setY(ny);
                         }
                         return true;
 
@@ -423,20 +429,57 @@ public class WaylandActivity extends Activity {
         botonAlternar = fab;
         contenedor.addView(fab);
 
-        // 2. Barra flotante tipo "Pill" (arrastrable)
-        LinearLayout marcoBarra = new LinearLayout(this);
+        // 2. Barra flotante tipo "Pill" (arrastrable por toda la pantalla)
+        LinearLayout marcoBarra = new LinearLayout(this) {
+            private float downX, downY;
+            private boolean interceptando;
+
+            @Override
+            public boolean onInterceptTouchEvent(MotionEvent ev) {
+                switch (ev.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        downX = ev.getRawX();
+                        downY = ev.getRawY();
+                        interceptando = false;
+                        break;
+                    case MotionEvent.ACTION_MOVE:
+                        float dx = Math.abs(ev.getRawX() - downX);
+                        float dy = Math.abs(ev.getRawY() - downY);
+                        // Deslizar verticalmente sobre las teclas o el fondo arrastra toda la barra por la pantalla
+                        if (!interceptando && dy > dp(6) && dy > dx * 0.7f) {
+                            interceptando = true;
+                            return true;
+                        }
+                        break;
+                    case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL:
+                        interceptando = false;
+                        break;
+                }
+                return super.onInterceptTouchEvent(ev);
+            }
+        };
         marcoBarra.setOrientation(LinearLayout.HORIZONTAL);
         marcoBarra.setGravity(Gravity.CENTER_VERTICAL);
         marcoBarra.setBackground(crearFondo(0xee0f172a, 0x4438bdf8, dp(16), dp(1)));
         marcoBarra.setElevation(dp(8));
         marcoBarra.setPadding(dp(5), dp(4), dp(5), dp(4));
+
+        int anchoBarra = Math.min(getResources().getDisplayMetrics().widthPixels - dp(24), dp(420));
         FrameLayout.LayoutParams lpMarco = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
-        lpMarco.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
-        lpMarco.bottomMargin = dp(12);
-        lpMarco.leftMargin = dp(10);
-        lpMarco.rightMargin = dp(10);
+                anchoBarra, FrameLayout.LayoutParams.WRAP_CONTENT);
+        lpMarco.gravity = Gravity.TOP | Gravity.START;
         marcoBarra.setLayoutParams(lpMarco);
+
+        marcoBarra.post(() -> {
+            View p = (View) marcoBarra.getParent();
+            if (p != null) {
+                float initX = Math.max(0, (p.getWidth() - marcoBarra.getWidth()) / 2f);
+                float initY = Math.max(0, p.getHeight() - marcoBarra.getHeight() - dp(18));
+                marcoBarra.setX(initX);
+                marcoBarra.setY(initY);
+            }
+        });
 
         // Manija de arrastre a la izquierda
         TextView handle = new TextView(this);
@@ -461,7 +504,7 @@ public class WaylandActivity extends Activity {
         fila.setOrientation(LinearLayout.HORIZONTAL);
         fila.setGravity(Gravity.CENTER_VERTICAL);
 
-        String[] teclas = {"⌨", "⛶", "ESC", "TAB", "CTRL", "ALT", "SUPER", "←", "↓", "↑", "→", "SALIR"};
+        String[] teclas = {"⌨", "ESC", "TAB", "CTRL", "ALT", "SUPER", "←", "↓", "↑", "→", "SALIR"};
         for (String t : teclas) {
             TextView b = new TextView(this);
             b.setText(t);
@@ -511,9 +554,9 @@ public class WaylandActivity extends Activity {
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         marcoBarra.addView(btnMin, lpMin);
 
-        // Arrastre para mover la barra flotante a cualquier posición vertical/horizontal
+        // Arrastre libre para mover la barra flotante a cualquier parte de la pantalla (X y Y)
         View.OnTouchListener arrastreBarra = new View.OnTouchListener() {
-            private float dX, dY, startX, startY;
+            private float startX, startY, initX, initY;
             private boolean moviendo;
 
             @Override
@@ -522,30 +565,28 @@ public class WaylandActivity extends Activity {
                     case MotionEvent.ACTION_DOWN:
                         startX = e.getRawX();
                         startY = e.getRawY();
-                        dX = marcoBarra.getTranslationX() - e.getRawX();
-                        dY = marcoBarra.getTranslationY() - e.getRawY();
+                        initX = marcoBarra.getX();
+                        initY = marcoBarra.getY();
                         moviendo = false;
                         return true;
 
                     case MotionEvent.ACTION_MOVE:
                         float diff = (float) Math.hypot(e.getRawX() - startX, e.getRawY() - startY);
-                        if (!moviendo && diff > dp(5)) {
+                        if (!moviendo && diff > dp(4)) {
                             moviendo = true;
                         }
                         if (moviendo) {
-                            float nx = e.getRawX() + dX;
-                            float ny = e.getRawY() + dY;
+                            float nx = initX + (e.getRawX() - startX);
+                            float ny = initY + (e.getRawY() - startY);
                             View p = (View) marcoBarra.getParent();
                             if (p != null) {
-                                float maxDer = (p.getWidth() - marcoBarra.getWidth()) / 2.0f;
-                                float maxIzq = -maxDer;
-                                nx = Math.max(maxIzq, Math.min(maxDer, nx));
-                                float maxAbajo = 0;
-                                float maxArriba = -(p.getHeight() - marcoBarra.getHeight() - dp(24));
-                                ny = Math.max(maxArriba, Math.min(maxAbajo, ny));
+                                float maxX = Math.max(0, p.getWidth() - marcoBarra.getWidth());
+                                float maxY = Math.max(0, p.getHeight() - marcoBarra.getHeight());
+                                nx = Math.max(0, Math.min(maxX, nx));
+                                ny = Math.max(dp(20), Math.min(maxY - dp(6), ny));
                             }
-                            marcoBarra.setTranslationX(nx);
-                            marcoBarra.setTranslationY(ny);
+                            marcoBarra.setX(nx);
+                            marcoBarra.setY(ny);
                         }
                         return true;
 
@@ -557,6 +598,7 @@ public class WaylandActivity extends Activity {
             }
         };
         handle.setOnTouchListener(arrastreBarra);
+        marcoBarra.setOnTouchListener(arrastreBarra);
 
         barraTeclas = marcoBarra;
         contenedor.addView(marcoBarra);
