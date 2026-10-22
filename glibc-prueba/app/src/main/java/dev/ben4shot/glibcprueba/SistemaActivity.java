@@ -175,7 +175,7 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
     private LinearLayout filaTeclas() {
         LinearLayout fila = new LinearLayout(this);
         fila.setBackgroundColor(0xff121820);
-        String[] teclas = {"⌨", "ESC", "TAB", "CTRL", "ALT", "-", "/", "|", "~", "←", "↓", "↑", "→"};
+        String[] teclas = {"⌨", "ESC", "TAB", "CTRL", "ALT", "←", "↓", "↑", "→"};
         for (String t : teclas) {
             TextView b = new TextView(this);
             b.setText(t);

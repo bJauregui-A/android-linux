@@ -359,7 +359,9 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
 3. **Borrado efectivo y permisos de directorios de instancias (`SistemaLinux.java`):**
    - En `SistemaLinux.java`, `borrarRecursivo` ahora fuerza permisos de lectura/escritura/ejecución (`setWritable(true, false)`) y ejecuta `chmod -R u+w && rm -rf` como respaldo para que directorios de solo lectura del rootfs no fallen en silencio. Si la instancia eliminada está activa, se detiene su servicio en `TerminalService`.
    - Limpiados los directorios huérfanos residuales en `files/instancias/`.
-4. **Compilación y despliegue:**
+4. **Limpieza de botones especiales (`TerminalActivity.java`, `SistemaActivity.java`):**
+   - Eliminados los botones `-`, `/`, `|` y `~` de la barra inferior de teclas virtuales en la terminal de rescate y en la consola de inicio, dejando una fila más espaciosa y limpia con los modificadores y flechas de navegación.
+5. **Compilación y despliegue:**
    - Regenerada `capa.tgz` con `python3 apk/capa.py`, compilada APK `sdk36Debug` e instalada con éxito en el Redmi 15 5G (`adb -s dab6b001 install -r`).
 
 **Siguiente sesión (59ª):**
