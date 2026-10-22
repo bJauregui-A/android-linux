@@ -35,6 +35,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
     private static final String CANAL = "terminal";
     // WaylandActivity lo manda al abrirse: arrancar la sesión gráfica si no está corriendo.
     static final String INICIAR_ESCRITORIO = "dev.ben4shot.glibcprueba.INICIAR_ESCRITORIO";
+    static final String REAJUSTAR_PANTALLA = "dev.ben4shot.glibcprueba.REAJUSTAR_PANTALLA";
 
     private final IBinder binder = new Local();
     private TerminalSession sesion;
@@ -66,6 +67,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
         if (Build.VERSION.SDK_INT >= 34) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
         else startForeground(1, n);
         if (intent != null && INICIAR_ESCRITORIO.equals(intent.getAction())) iniciarEscritorio();
+        if (intent != null && REAJUSTAR_PANTALLA.equals(intent.getAction())) reajustarPantalla();
         return START_NOT_STICKY;
     }
 
@@ -435,4 +437,22 @@ public class TerminalService extends Service implements TerminalSessionClient {
 
     @Override
     public void logStackTrace(String tag, Exception e) { Log.e(TAG, tag, e); }
+
+    private void reajustarPantalla() {
+        if (!escritorioVivo()) return;
+        new Thread(() -> {
+            try {
+                linux("/usr/bin/bash", "-c",
+                        "if command -v hyprctl >/dev/null 2>&1; then " +
+                        "  hyprctl keyword monitor WAYLAND-1,preferred,auto,${ANDROID_ESCALA:-2.5} >/dev/null 2>&1; " +
+                        "elif command -v swaymsg >/dev/null 2>&1; then " +
+                        "  swaymsg reload >/dev/null 2>&1; " +
+                        "fi; " +
+                        "if [ -x /usr/local/bin/reajustar-pantalla ]; then /usr/local/bin/reajustar-pantalla; fi"
+                ).start();
+            } catch (Exception e) {
+                Log.w(TAG, "Error al reajustar pantalla: " + e.getMessage());
+            }
+        }, "reajustar-pantalla").start();
+    }
 }

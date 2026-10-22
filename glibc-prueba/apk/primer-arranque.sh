@@ -29,7 +29,7 @@ printf '\e[1;38;5;141m└──────────────────�
 if [ ! -s $E/usuario ]; then
     printf '\n\e[1;38;5;111m┌─ [1/4] Identidad del Sistema y Usuario ────────────────────┐\e[0m\n'
     while :; do
-        printf '\e[1;38;5;111m│\e[0m  \e[1;38;5;48m❯\e[0m Nombre de usuario (letras minúsculas, números, - y _) [user]: '
+        printf '\e[1;38;5;111m│\e[0m  \e[1;38;5;48m❯\e[0m Nombre de usuario [user]: '
         read -r N
         N=${N:-user}
         [[ $N =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] && [ "$N" != root ] && break
@@ -41,11 +41,11 @@ N=$(cat $E/usuario)
 if [ ! -s /etc/hostname ]; then
     S=$(echo "${ANDROID_MODELO:-android}" | tr 'A-Z ' 'a-z-' | tr -cd 'a-z0-9-' | sed 's/^-*//; s/-*$//')
     while :; do
-        printf '\e[1;38;5;111m│\e[0m  \e[1;38;5;48m❯\e[0m Nombre del dispositivo (hostname) [%s]: ' "${S:-android}"
+        printf '\e[1;38;5;111m│\e[0m  \e[1;38;5;48m❯\e[0m Nombre del dispositivo [%s]: ' "${S:-android}"
         read -r H
         H=${H:-${S:-android}}
         [[ $H =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$ ]] && break
-        printf '\e[1;38;5;111m│\e[0m  \e[38;5;214m✖ Inválido: solo letras, números y guiones (sin espacios)\e[0m\n'
+        printf '\e[1;38;5;111m│\e[0m  \e[38;5;214m✖ Inválido: solo letras, números y guiones\e[0m\n'
     done
     echo "$H" > /etc/hostname
     printf '\e[1;38;5;111m└────────────────────────────────────────────────────────────┘\e[0m\n'
@@ -66,7 +66,7 @@ contrasena_definida() { grep -q "^$N:[^!*:][^:]*:" /etc/shadow 2>/dev/null; }
 pedir_contrasena() {
     local p1 p2 h
     printf '\n\e[1;38;5;111m┌─ [2/4] Seguridad y Autenticación ──────────────────────────┐\e[0m\n'
-    printf '\e[1;38;5;111m│\e[0m  Configura la contraseña de \e[1;38;5;48m%s\e[0m (sudo, SSH, pantalla de bloqueo):\n' "$N"
+    printf '\e[1;38;5;111m│\e[0m  Configura la contraseña para \e[1;38;5;48m%s\e[0m:\n' "$N"
     while :; do
         printf '\e[1;38;5;111m│\e[0m  \e[1;38;5;48m❯\e[0m Nueva contraseña: '
         read -rsp "" p1; echo
@@ -116,31 +116,68 @@ fi
 ED=$D/escritorios
 if [ ! -s $E/escritorio ]; then
     mapfile -t IDS < <(grep -v '^#' $ED/orden)
-    printf '\n\e[1;38;5;111m┌────────────────────────────────────────────────────────────┐\e[0m\n'
-    printf '\e[1;38;5;111m│\e[0m  \e[1;38;5;81m[3/4] Selección de Entorno de Escritorio\e[0m                  \e[1;38;5;111m│\e[0m\n'
-    printf '\e[1;38;5;111m│\e[0m  \e[38;5;245m14 entornos validados con GPU Adreno (Turnip + Zink)\e[0m       \e[1;38;5;111m│\e[0m\n'
-    printf '\e[1;38;5;111m├────────────────────────────────────────────────────────────┤\e[0m\n'
-    for i in "${!IDS[@]}"; do
-        (. $ED/${IDS[$i]}/escritorio.conf
-         if [ "$ESTADO" = probado ]; then
-             e=$'\e[1;38;5;48m● PROBADO\e[0m'
-         else
-             e=$'\e[38;5;214m○ experimental\e[0m'
-         fi
-         # Nombres destacados con color cian brillante
-         printf '\e[1;38;5;111m│\e[0m  \e[1;38;5;81m[%2d]\e[0m \e[1;38;5;51m%-14s\e[0m %-18s \e[38;5;248m%-18s\e[0m\e[1;38;5;111m│\e[0m\n' \
-             $((i + 1)) "$NOMBRE" "$e" "($TAMANO)")
-    done
-    printf '\e[1;38;5;111m└────────────────────────────────────────────────────────────┘\e[0m\n'
+    idx_esc=0
+    num_esc=${#IDS[@]}
+
+    dibujar_menu_escritorios() {
+        printf '\033[2J\033[H'
+        printf '\e[1;38;5;111m┌────────────────────────────────────────────────────────────┐\e[0m\n'
+        printf '\e[1;38;5;111m│\e[0m  \e[1;38;5;81m[3/4] Selección de Entorno de Escritorio\e[0m                  \e[1;38;5;111m│\e[0m\n'
+        printf '\e[1;38;5;111m│\e[0m  \e[38;5;245mUsa ↑/↓ para moverte y Enter para seleccionar entorno\e[0m     \e[1;38;5;111m│\e[0m\n'
+        printf '\e[1;38;5;111m├────────────────────────────────────────────────────────────┤\e[0m\n'
+        for i in "${!IDS[@]}"; do
+            (. $ED/${IDS[$i]}/escritorio.conf
+             if [ "$ESTADO" = probado ]; then
+                 e=$'\e[1;38;5;48m● PROBADO\e[0m'
+             else
+                 e=$'\e[38;5;214m○ experimental\e[0m'
+             fi
+             tam=${TAMANO//[()]/}
+             if [ "$i" -eq "$idx_esc" ]; then
+                 printf '\e[1;38;5;111m│\e[0m \e[1;38;5;51m❯\e[0m \e[1;38;5;48m[✔]\e[0m \e[1;38;5;15;48;5;238m %-12s\e[0m %-18s \e[1;38;5;252m%-15s\e[0m\e[1;38;5;111m│\e[0m\n' \
+                     "$NOMBRE" "$e" "$tam"
+             else
+                 printf '\e[1;38;5;111m│\e[0m   \e[38;5;245m[ ]\e[0m \e[1;38;5;51m%-13s\e[0m %-18s \e[38;5;248m%-15s\e[0m\e[1;38;5;111m│\e[0m\n' \
+                     "$NOMBRE" "$e" "$tam"
+             fi
+            )
+        done
+        printf '\e[1;38;5;111m├────────────────────────────────────────────────────────────┤\e[0m\n'
+        if [ "$idx_esc" -eq "$num_esc" ]; then
+            printf '\e[1;38;5;111m│\e[0m \e[1;38;5;51m❯\e[0m  \e[1;38;5;48m[ ✔ CONFIRMAR Y CONTINUAR ]\e[0m                              \e[1;38;5;111m│\e[0m\n'
+        else
+            printf '\e[1;38;5;111m│\e[0m    \e[38;5;245m[   Confirmar y continuar   ]\e[0m                              \e[1;38;5;111m│\e[0m\n'
+        fi
+        printf '\e[1;38;5;111m└────────────────────────────────────────────────────────────┘\e[0m\n'
+    }
+
     while :; do
-        printf '\e[1;38;5;48m❯\e[0m Selecciona un número [1-%d, por defecto 1 = sway]: ' "${#IDS[@]}"
-        read -r r
-        r=${r//[$'\r ']/}
-        r=${r:-1}
-        [[ $r =~ ^[0-9]+$ ]] && [ "$r" -ge 1 ] && [ "$r" -le ${#IDS[@]} ] && break
-        printf '\e[38;5;214m✖ Número fuera de rango (1 a %d)\e[0m\n' "${#IDS[@]}"
+        dibujar_menu_escritorios
+        IFS= read -rsn1 tecla
+        if [ "$tecla" = $'\e' ]; then
+            read -rsn2 -t 0.1 resto || true
+            case "$resto" in
+                '[A'|'OA')
+                    if [ $idx_esc -gt 0 ]; then
+                        ((idx_esc--))
+                    fi
+                    ;;
+                '[B'|'OB')
+                    if [ $idx_esc -lt "$num_esc" ]; then
+                        ((idx_esc++))
+                    fi
+                    ;;
+            esac
+        elif [ "$tecla" = "" ] || [ "$tecla" = $'\n' ] || [ "$tecla" = $'\r' ]; then
+            break
+        elif [ "$tecla" = " " ]; then
+            if [ "$idx_esc" -eq "$num_esc" ]; then
+                break
+            fi
+        fi
     done
-    echo "${IDS[r - 1]}" > $E/escritorio
+    [ "$idx_esc" -eq "$num_esc" ] && idx_esc=$((num_esc - 1))
+    echo "${IDS[idx_esc]}" > $E/escritorio
 fi
 ESC=$(cat $E/escritorio)
 if [[ ! "$ESC" =~ ^[a-z0-9-]+$ ]] || [ ! -f "$ED/$ESC/escritorio.conf" ] || [ ! -f "$ED/$ESC/sesion" ]; then
@@ -167,12 +204,12 @@ paso "Aplicando configuración de $ESC para $SISTEMA_LINUX"
 configurar_escritorio "$ESC" || falla "no se pudo aplicar la receta de $ESC"
 
 GRUPOS=(ssh audio firefox desarrollo adb utilidades)
-TEXTOS=("SSH: Servidor seguro en el puerto 8022 (~5 MB)"
-        "Audio: PipeWire → Altavoz Android vía AudioTrack (~25 MB)"
-        "Firefox con aceleración GPU WebRender (~250 MB)"
-        "Desarrollo: gcc, meson, git, gdb, strace (~400 MB)"
-        "ADB local sin PC: depuración inalámbrica (~10 MB)"
-        "Utilidades: htop, grim (capturas), unzip, wget (~5 MB)")
+TEXTOS=("SSH: Servidor seguro en el puerto 8022"
+        "Audio: PipeWire a Altavoz Android vía AudioTrack"
+        "Firefox con aceleración GPU WebRender"
+        "Desarrollo: gcc, meson, git, gdb, strace"
+        "ADB local sin PC: depuración inalámbrica"
+        "Utilidades: htop, grim, unzip, wget")
 MARCA=(1 1 0 0 0 0)
 
 if [ ! -e $E/opcionales ]; then
@@ -199,9 +236,9 @@ if [ ! -e $E/opcionales ]; then
         done
         printf '\e[1;38;5;111m├────────────────────────────────────────────────────────────┤\e[0m\n'
         if [ "$idx_actual" -eq "$num_opciones" ]; then
-            printf '\e[1;38;5;111m│\e[0m \e[1;38;5;51m❯\e[0m  \e[1;38;5;48m[ ✔ ENVIAR Y CONTINUAR (SUBMIT) ]\e[0m                        \e[1;38;5;111m│\e[0m\n'
+            printf '\e[1;38;5;111m│\e[0m \e[1;38;5;51m❯\e[0m  \e[1;38;5;48m[ ✔ ENVIAR Y CONTINUAR ]\e[0m                                 \e[1;38;5;111m│\e[0m\n'
         else
-            printf '\e[1;38;5;111m│\e[0m    \e[38;5;245m[   Enviar y continuar (Submit)   ]\e[0m                        \e[1;38;5;111m│\e[0m\n'
+            printf '\e[1;38;5;111m│\e[0m    \e[38;5;245m[   Enviar y continuar   ]\e[0m                                 \e[1;38;5;111m│\e[0m\n'
         fi
         printf '\e[1;38;5;111m└────────────────────────────────────────────────────────────┘\e[0m\n'
     }

@@ -1,0 +1,8 @@
+#!/usr/bin/bash
+# Reajustar resolución y geometría en el compositor Wayland activo (Hyprland, Sway, etc.)
+if command -v hyprctl >/dev/null 2>&1 && [ -n "$HYPRLAND_INSTANCE_SIGNATURE" ]; then
+    escala=${ANDROID_ESCALA:-2.5}
+    hyprctl keyword monitor WAYLAND-1,preferred,auto,$escala >/dev/null 2>&1
+elif command -v swaymsg >/dev/null 2>&1 && [ -n "$SWAYSOCK" ]; then
+    swaymsg reload >/dev/null 2>&1
+fi

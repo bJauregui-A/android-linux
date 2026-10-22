@@ -26,6 +26,7 @@ import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -159,6 +160,8 @@ public class WaylandActivity extends Activity {
                 DisplayMetrics dm = getResources().getDisplayMetrics();
                 Wayland.ventana(h.getSurface(), ancho, alto,
                         Math.round(ancho / dm.xdpi * 25.4f), Math.round(alto / dm.ydpi * 25.4f));
+                startService(new Intent(WaylandActivity.this, TerminalService.class)
+                        .setAction(TerminalService.REAJUSTAR_PANTALLA));
             }
 
             @Override
@@ -171,14 +174,20 @@ public class WaylandActivity extends Activity {
             return true;
         });
 
-        LinearLayout raiz = new LinearLayout(this);
-        raiz.setOrientation(LinearLayout.VERTICAL);
+        FrameLayout raiz = new FrameLayout(this);
         raiz.setBackgroundColor(Color.BLACK);
-        raiz.addView(vista, new LinearLayout.LayoutParams(-1, 0, 1));
-        raiz.addView(filaTeclas(), new LinearLayout.LayoutParams(-1, -2));
+        raiz.addView(vista, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+
+        LinearLayout barraTeclas = filaTeclas();
+        FrameLayout.LayoutParams paramsBarra = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT);
+        paramsBarra.gravity = Gravity.BOTTOM;
+        raiz.addView(barraTeclas, paramsBarra);
+
         raiz.setOnApplyWindowInsetsListener((v, insets) -> {
-            android.graphics.Insets i = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.ime());
-            v.setPadding(i.left, i.top, i.right, i.bottom);
+            android.graphics.Insets ime = insets.getInsets(WindowInsets.Type.ime());
+            barraTeclas.setTranslationY(-ime.bottom);
             return WindowInsets.CONSUMED;
         });
         setContentView(raiz);
@@ -303,7 +312,7 @@ public class WaylandActivity extends Activity {
     private LinearLayout filaTeclas() {
         LinearLayout fila = new LinearLayout(this);
         fila.setBackgroundColor(0xff1a1a1a);
-        String[] teclas = {"⌨", "ESC", "TAB", "CTRL", "ALT", "SUPER", "←", "↓", "↑", "→"};
+        String[] teclas = {"⌨", "⛶", "ESC", "TAB", "CTRL", "ALT", "SUPER", "←", "↓", "↑", "→"};
         for (String t : teclas) {
             TextView b = new TextView(this);
             b.setText(t);
@@ -326,6 +335,9 @@ public class WaylandActivity extends Activity {
                 vista.requestFocus();
                 getSystemService(InputMethodManager.class).showSoftInput(vista, 0);
                 return;
+            case "⛶":
+                reajustar();
+                return;
             case "CTRL": ctrl = !ctrl; Wayland.tecla(CTRL, ctrl); marcar(); return;
             case "ALT": alt = !alt; Wayland.tecla(ALT, alt); marcar(); return;
             case "SUPER": sup = !sup; Wayland.tecla(SUPER, sup); marcar(); return;
@@ -336,6 +348,21 @@ public class WaylandActivity extends Activity {
             case "↑": pulsar(103); return;
             case "→": pulsar(106); return;
         }
+    }
+
+    private void reajustar() {
+        inmersivo();
+        if (vista != null && vista.getHolder().getSurface() != null) {
+            int ancho = vista.getWidth();
+            int alto = vista.getHeight();
+            if (ancho > 0 && alto > 0) {
+                DisplayMetrics dm = getResources().getDisplayMetrics();
+                Wayland.ventana(vista.getHolder().getSurface(), ancho, alto,
+                        Math.round(ancho / dm.xdpi * 25.4f), Math.round(alto / dm.ydpi * 25.4f));
+            }
+        }
+        startService(new Intent(this, TerminalService.class)
+                .setAction(TerminalService.REAJUSTAR_PANTALLA));
     }
 
     private void marcar() {
