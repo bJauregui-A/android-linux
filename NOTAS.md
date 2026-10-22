@@ -556,8 +556,11 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
        - Restauración fidedigna de `MARCA` desde `$E/opcionales` si el archivo ya existe tras un reinicio de instalación.
        - En `falla()`: menú interactivo claro que ofrece reintento automático (con limpieza de locks), consola de rescate contextualizada dentro del entorno para reparar manualmente o salir.
      - En [instalar.sh](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/instalar.sh): asegurada la exportación de `GLIBC_LOADER` junto a `GLIBC_PREFIX`.
+     - Corregido delimitador en `sed` en [primer-arranque.sh](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/primer-arranque.sh) para rutas con alternancias (`s@^/data/(user/0|data)/@@`).
      - Limpiado el lock huérfano en `niri-53164` en el Redmi 15 5G.
-     - Regenerado `trabajo/assets-sdk36/capa.tgz`, compilada e instalada la APK en el teléfono con `adb install -r` (Success). Al abrir ahora la instancia, reanuda la descarga/instalación de paquetes sin bloqueos y pasa a Niri bajo el supervisor al finalizar.
+     - Descarga e instalación completa de los 67 paquetes de Niri verificada y completada en el dispositivo (binario `usr/bin/niri` instalado y funcional).
+     - Generada la marca `/var/lib/arch-android/instalado` y eliminado el estado temporal `/var/lib/arch-android/instalando`.
+     - Regenerado `trabajo/assets-sdk36/capa.tgz`, compilada e instalada la APK en el teléfono con `adb install -r` (Success). El entorno Niri queda listo para iniciar directamente con el supervisor `sesion-android` y el visualizador de arranque al presionar `▶ ESCRITORIO`.
 
 **Siguiente sesión (67ª):**
 1. **Configuración de proxy en puerto 22 real de Wi-Fi:**
@@ -571,4 +574,5 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
 5. **Estado y notas operativas del teléfono:**
    - Dispositivo: Redmi 15 5G (`spring`, Snapdragon 4 Gen 2, serial `dab6b001`).
    - Instancias activas verificadas en concurrencia: dos instancias de consola funcionando independientemente en segundo plano con archivos y procesos aislados.
+   - Instancia gráfica Niri: completamente instalada con 67 paquetes pacman, lista para iniciar vía `▶ ESCRITORIO`.
    - Reconexión de depuración inalámbrica local en el teléfono si se reinicia o pierde Wi-Fi: script `adb-conectar` (`~/.local/bin/adb-conectar`).
