@@ -376,11 +376,29 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
    - En `autostart-android`: bucle en segundo plano que invoca `android-shm-limpiar` periódicamente (cada 45 s) para recolectar segmentos huérfanos durante la sesión (ej. cierres abruptos de Steam, Wine o clientes X11).
    - Integrado en `CapaSesion.java`, `app/build.gradle.kts` (`packageSessionLayer`) y `apk/capa.py`. Desplegado en caliente a las instancias existentes en el Redmi (`sway-54452`, `niri-70360`, `cosmic-67805`, `phosh-4056`) sin interrumpir los procesos activos.
 
-**Siguiente sesión (60ª):**
-1. Punto 3.2: glibc 0020 — Emulación de Netlink (`ip a` e `ip r`: bind falso y generación de GETLINK sintético a partir de GETADDR e ioctl).
-2. Punto 3.3: Ejecución de binarios estáticos (cargador de ELF static-pie en espacio de usuario desde `execve`).
-3. Probar en el Redmi la creación de una instancia limpia de Sway u otro escritorio (comprobar que pacman instala la base completa y el escritorio inicia con fluidez sin quedarse en negro).
-4. Verificar que al eliminar una instancia desde el selector de la app, su carpeta en `files/instancias/` se elimine completamente del disco.
-5. Compatibilidad con Debian y Ubuntu arm64 (Wayland / adaptador).
-6. Servidor / Compositor X11 Directo (sin Xwayland como intermediario).
+**60ª sesión (2026-10-22, repo + Redmi por USB):**
+1. **glibc 0020 — Emulación universal de Netlink Route (Punto 3.2):**
+   - **Diagnóstico del problema:** Android SELinux niega incondicionalmente a aplicaciones no privilegiadas (`untrusted_app`) tanto el `bind()` en sockets Netlink con `nl_groups == 0` (`Cannot bind netlink socket: Permission denied`) como el envío de mensajes `RTM_GETLINK` / `RTM_GETNEIGH` por `sendto` / `sendmsg` (regla `audit: type=1400 avc: denied { nlmsg_readpriv } ... scontext=u:r:untrusted_app:s0:c77,c257,c512,c768 tcontext=u:r:untrusted_app:s0:c77,c257,c512,c768 tclass=netlink_route_socket`), impidiendo que herramientas estándar (`ip a`, `ip r`, `ip link`, `ip neigh`) y resolutores internos de glibc (`check_native()`, ordenamiento RFC 3484) descubran interfaces de red.
+   - **Prototipo y pruebas de campo:** Se demostró mediante pruebas binarias que las operaciones de consulta de direcciones (`RTM_GETADDR`), rutas del kernel (`RTM_GETROUTE`) y los ioctls de interfaces (`SIOCGIFCONF`, `SIOCGIFFLAGS`, `SIOCGIFMTU`, `SIOCGIFINDEX`) **sí funcionan con éxito completo al 100%** dentro de la app sin root.
+   - **Implementación del parche 0020 (`0020-android-netlink.patch`):**
+     - En `sysdeps/unix/sysv/linux/aarch64/sysdep.h`: se incluyeron `__NR_getsockname`, `__NR_sendto`, `__NR_sendmsg`, `__NR_recvmsg`, `__NR_recvfrom` y `__NR_close` en `__android_path_nr()`.
+     - En `sysdeps/unix/sysv/linux/aarch64/android-path.c`:
+       - `__NR_bind`: intercepta `AF_NETLINK`; si falla con `EACCES` y `nl_groups == 0`, retorna 0 y marca el descriptor en un mapa de bits atómico.
+       - `__NR_getsockname`: para descriptores Netlink emulados con `nl_pid == 0`, sintetiza `nl_pid = getpid()`.
+       - `__NR_sendto` / `__NR_sendmsg`: intercepta solicitudes `RTM_GETLINK` y `RTM_GETNEIGH`. Para `RTM_GETLINK` construye dinámicamente un flujo binario `RTM_NEWLINK` compatible a partir de `SIOCGIFCONF` con atributos `IFLA_IFNAME`, `IFLA_MTU`, banderas de interfaz e índices del kernel, finalizando con un mensaje `NLMSG_DONE` con `sizeof(int) = 0` (evitando el error `DONE truncated` de `libnetlink`). Soporta tanto dumps completos (`NLM_F_DUMP` / `NLM_F_ROOT`) como búsquedas individuales por índice (`ifi_index`) o nombre.
+       - `__NR_recvmsg` / `__NR_recvfrom`: sirve los buffers sintéticos respetando lecturas parciales y sondeos (`MSG_PEEK`), liberando el slot al completarse la lectura.
+       - `__NR_close`: limpia los buffers sintéticos y desmarca el descriptor.
+     - Ubicado de forma previa a la comprobación de `state == 2`, permitiendo que la emulación opere de forma universal tanto con `GLIBC_PREFIX` activo como en binarios aislados.
+   - **Compilación, validación y despliegue:**
+     - Compilada la nueva glibc en Docker con `glibc-cross`.
+     - Probada inicialmente de forma aislada en `test-glibc/` del Redmi. Salida de `ip a`, `ip r`, `ip link` e `ip neigh` completamente limpia, retornando todas las interfaces (`lo`, `rmnet_data1`, `rmnet_data2`, `wlan2`), MTUs, direcciones IPv4/IPv6 y rutas locales sin una sola advertencia de permiso.
+     - Respaldadas las versiones previas como `libc.so.6.0019` y desplegada atómicamente la nueva `libc.so.6` (`.0020`) y `ld-linux-aarch64.so.1` (`.0020`) a todas las instancias activas del teléfono (`sway-54452`, `cosmic-67805`, `niri-70360`, `phosh-4056`) mediante `rename` atómico sin interrumpir las sesiones en ejecución.
+     - Actualizado `app/src/main/jniLibs/arm64-v8a/libldp.so` y creado el parche `glibc/parches/0020-android-netlink.patch`.
+
+**Siguiente sesión (61ª):**
+1. Punto 3.3: Ejecución de binarios estáticos (cargador de ELF static-pie en espacio de usuario desde `execve`).
+2. Probar en el Redmi la creación de una instancia limpia de Sway u otro escritorio (comprobar que pacman instala la base completa y el escritorio inicia con fluidez sin quedarse en negro).
+3. Verificar que al eliminar una instancia desde el selector de la app, su carpeta en `files/instancias/` se elimine completamente del disco.
+4. Compatibilidad con Debian y Ubuntu arm64 (Wayland / adaptador).
+5. Servidor / Compositor X11 Directo (sin Xwayland como intermediario).
 **Cómo consultar Hyprland desde el PC (sin tocar nada):** guardar un script con `cd files/archlinux; PID=$(ps -A -o PID,ARGS | grep "argv0 Hyprland" | grep -v grep | head -1 | awk '{print $1}'); L=$(awk '/libldp.so/{print $6; exit}' /proc/$PID/maps); SIG=$(ls -t run/user/10331/hypr | head -1); export GLIBC_PREFIX=$PWD GLIBC_LOADER=$L XDG_RUNTIME_DIR=/run/user/10331 HYPRLAND_INSTANCE_SIGNATURE=$SIG; $L $PWD/usr/bin/hyprctl -j monitors all` y correrlo con `adb shell 'run-as dev.ben4shot.glibcprueba.sdk36 sh -s' < script`. Con `adb` siempre `< /dev/null` (si no, `run-as` se queda esperando stdin). No usar `hyprctl output create`: crea salidas extra.
