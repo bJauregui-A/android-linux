@@ -465,11 +465,11 @@ public final class RedManager {
             if (!r.activa) continue;
             if (servidores.containsKey(r.puertoExterno)) continue;
 
-            iniciarServidorParaRegla(r);
+            iniciarServidorParaRegla(c, r);
         }
     }
 
-    private static void iniciarServidorParaRegla(Regla r) {
+    private static void iniciarServidorParaRegla(Context c, Regla r) {
         int destinoPort = (r.puertoInterno == 22 ? 8022 : r.puertoInterno);
         if (r.puertoExterno == destinoPort) {
             Log.w(TAG, "Regla omitida para evitar bucle infinito: puerto externo (" + r.puertoExterno + ") coincide con destino");
@@ -477,7 +477,7 @@ public final class RedManager {
         }
         try {
             ServerSocket ss = new ServerSocket(r.puertoExterno, 50, InetAddress.getByName("0.0.0.0"));
-            Thread t = new Thread(() -> bucleAceptar(r, ss), "pforward-" + r.puertoExterno);
+            Thread t = new Thread(() -> bucleAceptar(c, r, ss), "pforward-" + r.puertoExterno);
             ServidorForward sf = new ServidorForward(r, ss, t);
             servidores.put(r.puertoExterno, sf);
             t.start();
@@ -487,12 +487,12 @@ public final class RedManager {
         }
     }
 
-    private static void bucleAceptar(Regla r, ServerSocket ss) {
+    private static void bucleAceptar(Context c, Regla r, ServerSocket ss) {
         while (!Thread.currentThread().isInterrupted() && !ss.isClosed()) {
             try {
                 Socket cliente = ss.accept();
                 if (poolPipes != null && !poolPipes.isShutdown()) {
-                    poolPipes.execute(() -> procesarConexion(r, cliente));
+                    poolPipes.execute(() -> procesarConexion(c, r, cliente));
                 } else {
                     cliente.close();
                 }
@@ -503,7 +503,7 @@ public final class RedManager {
         }
     }
 
-    private static void procesarConexion(Regla r, Socket cliente) {
+    private static void procesarConexion(Context c, Regla r, Socket cliente) {
         int puertoDestino = (r.puertoInterno == 22 ? 8022 : r.puertoInterno);
         if (puertoDestino == r.puertoExterno) {
             Log.w(TAG, "Bucle evitado: puerto externo y destino son " + puertoDestino);
@@ -512,14 +512,31 @@ public final class RedManager {
         }
         Socket destino = null;
         try {
-            // Conectar al puerto local interno del host
-            // (Si el entorno destino corre sshd en 8022 o su propio puerto, redirige directamente)
-            destino = new Socket("127.0.0.1", puertoDestino);
+            // Resolver IP de loopback virtual destino para la instancia
+            String hostDestino = "127.0.0.1";
+            if (r.instanciaId != null && !r.instanciaId.isEmpty()) {
+                String ipVirt = ipParaInstancia(c, r.instanciaId);
+                if (ipVirt.contains("/")) ipVirt = ipVirt.substring(0, ipVirt.indexOf('/'));
+                String[] partes = ipVirt.trim().split("\\.");
+                if (partes.length == 4) {
+                    try {
+                        int b2 = Integer.parseInt(partes[1]);
+                        int b3 = Integer.parseInt(partes[2]);
+                        int b4 = Integer.parseInt(partes[3]);
+                        hostDestino = "127." + b2 + "." + b3 + "." + b4;
+                    } catch (NumberFormatException ignorada) { }
+                }
+            }
+            Log.i(TAG, "Conexión aceptada en :" + r.puertoExterno + ", reenviando a " + hostDestino + ":" + puertoDestino);
+            destino = new Socket(hostDestino, puertoDestino);
             Socket finalDestino = destino;
 
             if (poolPipes != null && !poolPipes.isShutdown()) {
                 poolPipes.execute(() -> reenviarFlujo(cliente, finalDestino));
-                reenviarFlujo(destino, cliente);
+                poolPipes.execute(() -> reenviarFlujo(finalDestino, cliente));
+            } else {
+                cliente.close();
+                destino.close();
             }
         } catch (Exception e) {
             Log.w(TAG, "Fallo de conexión forward a " + r.instanciaId + ":" + r.puertoInterno + " - " + e.getMessage());

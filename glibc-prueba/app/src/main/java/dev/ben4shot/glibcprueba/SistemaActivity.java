@@ -210,6 +210,7 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
 
         actualizarLista();
         iniciarConsola();
+        RedManager.actualizar(this);
     }
 
     private void mostrarOverlayConsola(boolean mostrar) {
