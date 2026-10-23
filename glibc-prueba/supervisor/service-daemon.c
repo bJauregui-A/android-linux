@@ -14,7 +14,7 @@
 #include <sys/wait.h>
 #include <dirent.h>
 
-#define MAX_SERVICES 128
+#define MAX_SERVICES 512
 #define LINE_MAX_LEN 1024
 #define SERVICES_DIR "/etc/services.d"
 #define SYSTEM_UNITS_DIR "/usr/lib/systemd/system"
@@ -186,7 +186,19 @@ static int parsear_unidad(const char *name, Service *srv) {
         }
     }
     fclose(f);
-    return (srv->exec_start[0] != '\0') ? 0 : -1;
+    if (srv->exec_start[0] == '\0') return -1;
+
+    // Adaptar servicios estándar de systemd que por defecto se bifurcan (Type=forking)
+    // para que se ejecuten en primer plano bajo el supervisor de procesos.
+    if (strcmp(srv->name, "nginx") == 0 && strstr(srv->exec_start, "daemon off") == NULL) {
+        strncat(srv->exec_start, " -g 'daemon off;'", sizeof(srv->exec_start) - strlen(srv->exec_start) - 1);
+    } else if ((strcmp(srv->name, "httpd") == 0 || strcmp(srv->name, "apache2") == 0) && strstr(srv->exec_start, "-DFOREGROUND") == NULL) {
+        strncat(srv->exec_start, " -DFOREGROUND", sizeof(srv->exec_start) - strlen(srv->exec_start) - 1);
+    } else if (strcmp(srv->name, "sshd") == 0 && strstr(srv->exec_start, "-D") == NULL) {
+        strncat(srv->exec_start, " -D", sizeof(srv->exec_start) - strlen(srv->exec_start) - 1);
+    }
+
+    return 0;
 }
 
 static Service *buscar_o_crear(const char *name) {
