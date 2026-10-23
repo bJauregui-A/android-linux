@@ -1,0 +1,259 @@
+#!/system/bin/sh
+# proxy-ports-daemon: Demonio de reenvío de puertos universales para UID shell (Android sin root)
+
+CONF_FILE="/data/local/tmp/proxy-ports.conf"
+WORKER_FILE="/data/local/tmp/proxy-port-worker.sh"
+PIDS_FILE="/data/local/tmp/proxy-ports.pids"
+LOGS_DIR="/data/local/tmp/proxy-logs"
+
+mkdir -p "$LOGS_DIR" 2>/dev/null
+[ ! -f "$CONF_FILE" ] && touch "$CONF_FILE" && chmod 666 "$CONF_FILE" 2>/dev/null
+
+obtener_pid_puerto() {
+    PUERTO="$1"
+    # 1. Buscar en archivo PIDS
+    if [ -f "$PIDS_FILE" ]; then
+        PID=$(grep -E "^${PUERTO}:" "$PIDS_FILE" 2>/dev/null | cut -d: -f2 | tr -d '\r\n ')
+        if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+            echo "$PID"
+            return 0
+        fi
+    fi
+    # 2. Buscar proceso activo en ps
+    PID=$(ps -ef | grep "toybox nc -L -p ${PUERTO} " | grep -v grep | awk '{print $2}' | head -n1)
+    if [ -n "$PID" ]; then
+        echo "$PID"
+        return 0
+    fi
+    return 1
+}
+
+guardar_pid_puerto() {
+    PUERTO="$1"
+    PID="$2"
+    TMP="/data/local/tmp/proxy-ports.pids.tmp"
+    if [ -f "$PIDS_FILE" ]; then
+        grep -v -E "^${PUERTO}:" "$PIDS_FILE" 2>/dev/null > "$TMP"
+    else
+        touch "$TMP"
+    fi
+    [ -n "$PID" ] && echo "${PUERTO}:${PID}" >> "$TMP"
+    mv -f "$TMP" "$PIDS_FILE"
+    chmod 666 "$PIDS_FILE" 2>/dev/null
+}
+
+iniciar_puerto() {
+    PUERTO="$1"
+    if [ -z "$PUERTO" ]; then return 1; fi
+
+    PID=$(obtener_pid_puerto "$PUERTO")
+    if [ -n "$PID" ]; then
+        echo "Puerto $PUERTO ya está en escucha (PID $PID)."
+        return 0
+    fi
+
+    LOG="$LOGS_DIR/port-${PUERTO}.log"
+    nohup /system/bin/toybox nc -L -p "$PUERTO" /system/bin/sh "$WORKER_FILE" "$PUERTO" > "$LOG" 2>&1 &
+    NUEVO_PID=$!
+    guardar_pid_puerto "$PUERTO" "$NUEVO_PID"
+    sleep 0.2
+
+    PID=$(obtener_pid_puerto "$PUERTO")
+    if [ -n "$PID" ]; then
+        DEST=$(grep -E "^[[:space:]]*${PUERTO}[[:space:]]+" "$CONF_FILE" 2>/dev/null | awk '{print $2":"$3}')
+        echo "✔ Puerto $PUERTO escuchando (PID $PID) ➜ ${DEST:-127.0.0.1:$PUERTO}"
+        return 0
+    else
+        echo "✕ Error al iniciar escucha en puerto $PUERTO. Ver $LOG"
+        cat "$LOG" 2>/dev/null
+        return 1
+    fi
+}
+
+detener_puerto() {
+    PUERTO="$1"
+    if [ -z "$PUERTO" ]; then return 1; fi
+
+    PID=$(obtener_pid_puerto "$PUERTO")
+    if [ -n "$PID" ]; then
+        kill "$PID" 2>/dev/null
+        sleep 0.1
+    fi
+    # Barrer cualquier proceso residual para ese puerto
+    for p in $(ps -ef | grep "toybox nc -L -p ${PUERTO} " | grep -v grep | awk '{print $2}'); do
+        kill -9 "$p" 2>/dev/null
+    done
+    guardar_pid_puerto "$PUERTO" ""
+    echo "✔ Puerto $PUERTO detenido."
+}
+
+iniciar_todos() {
+    COUNT=0
+    # 1. Puertos configurados en proxy-ports.conf
+    if [ -f "$CONF_FILE" ]; then
+        while read -r LINE; do
+            [ -z "$LINE" ] && continue
+            case "$LINE" in \#*) continue ;; esac
+            P=$(echo "$LINE" | awk '{print $1}')
+            if [ -n "$P" ]; then
+                iniciar_puerto "$P"
+                COUNT=$((COUNT + 1))
+            fi
+        done < "$CONF_FILE"
+    fi
+
+    # 2. Si no hay regla para puerto 22 pero existe ssh-proxy-target, iniciarlo
+    if ! grep -q -E "^[[:space:]]*22[[:space:]]+" "$CONF_FILE" 2>/dev/null; then
+        if [ -f "/data/local/tmp/ssh-proxy-target" ]; then
+            iniciar_puerto "22"
+            COUNT=$((COUNT + 1))
+        fi
+    fi
+
+    if [ "$COUNT" -eq 0 ]; then
+        echo "No hay puertos configurados en $CONF_FILE"
+    fi
+}
+
+detener_todos() {
+    if [ -f "$PIDS_FILE" ]; then
+        while read -r LINE; do
+            P=$(echo "$LINE" | cut -d: -f1)
+            [ -n "$P" ] && detener_puerto "$P"
+        done < "$PIDS_FILE"
+        rm -f "$PIDS_FILE"
+    fi
+    for p in $(ps -ef | grep 'toybox nc -L -p' | grep -v grep | awk '{print $2}'); do
+        kill -9 "$p" 2>/dev/null
+    done
+    echo "✔ Todos los puertos detenidos."
+}
+
+estado() {
+    echo "=== REENVÍO DE PUERTOS (UID SHELL) ==="
+    HAY=0
+    if [ -f "$CONF_FILE" ]; then
+        while read -r LINE; do
+            [ -z "$LINE" ] && continue
+            case "$LINE" in \#*) continue ;; esac
+            P=$(echo "$LINE" | awk '{print $1}')
+            H=$(echo "$LINE" | awk '{print $2}')
+            D=$(echo "$LINE" | awk '{print $3}')
+            PID=$(obtener_pid_puerto "$P")
+            if [ -n "$PID" ]; then
+                echo "● :$P (PID $PID) ➜ $H:$D [ACTIVO]"
+            else
+                echo "○ :$P ➜ $H:$D [INACTIVO]"
+            fi
+            HAY=1
+        done < "$CONF_FILE"
+    fi
+
+    # Revisar puerto 22 legado si existe
+    if ! grep -q -E "^[[:space:]]*22[[:space:]]+" "$CONF_FILE" 2>/dev/null; then
+        if [ -f "/data/local/tmp/ssh-proxy-target" ]; then
+            T=$(cat /data/local/tmp/ssh-proxy-target 2>/dev/null)
+            PID=$(obtener_pid_puerto "22")
+            if [ -n "$PID" ]; then
+                echo "● :22 (PID $PID) ➜ ${T:-127.0.0.1:8022} [ACTIVO (SSH)]"
+            else
+                echo "○ :22 ➜ ${T:-127.0.0.1:8022} [INACTIVO (SSH)]"
+            fi
+            HAY=1
+        fi
+    fi
+
+    if [ "$HAY" -eq 0 ]; then
+        echo "No hay puertos configurados en $CONF_FILE."
+    fi
+}
+
+add_regla() {
+    EXT="$1"
+    DEST="$2"
+    INT="$3"
+    [ -z "$INT" ] && INT="$EXT"
+
+    if [ -z "$EXT" ] || [ -z "$DEST" ]; then
+        echo "Uso: proxy-ports-daemon add <puerto_ext> <destino|instancia> [puerto_int]"
+        return 1
+    fi
+
+    # Resolver si DEST es nombre de instancia
+    if [ "${DEST#*:}" = "$DEST" ] && [ "${DEST#*.}" = "$DEST" ]; then
+        VIP=$(run-as dev.ben4shot.glibcprueba.sdk36 cat "files/instancias/$DEST/etc/virtual-ip" 2>/dev/null | tr -d '\r\n')
+        if [ -n "$VIP" ]; then
+            DEST="$VIP"
+        fi
+    fi
+
+    # Mapear 10.0.0.X a 127.0.0.X si corresponde
+    case "$DEST" in
+        10.*)
+            B2=$(echo "$DEST" | cut -d. -f2)
+            B3=$(echo "$DEST" | cut -d. -f3)
+            B4=$(echo "$DEST" | cut -d. -f4 | cut -d/ -f1)
+            DEST="127.$B2.$B3.$B4"
+            ;;
+    esac
+
+    # Quitar regla previa si existía para ese puerto
+    TMP="/data/local/tmp/proxy-ports.conf.tmp"
+    if [ -f "$CONF_FILE" ]; then
+        grep -v -E "^[[:space:]]*${EXT}[[:space:]]+" "$CONF_FILE" 2>/dev/null > "$TMP"
+    else
+        touch "$TMP"
+    fi
+    echo "${EXT} ${DEST} ${INT}" >> "$TMP"
+    mv -f "$TMP" "$CONF_FILE"
+    chmod 666 "$CONF_FILE" 2>/dev/null
+
+    echo "✔ Regla guardada: :$EXT ➜ $DEST:$INT"
+    # Reiniciar listener de ese puerto
+    detener_puerto "$EXT" >/dev/null 2>&1
+    iniciar_puerto "$EXT"
+}
+
+del_regla() {
+    EXT="$1"
+    if [ -z "$EXT" ]; then
+        echo "Uso: proxy-ports-daemon del <puerto_ext>"
+        return 1
+    fi
+    detener_puerto "$EXT"
+    TMP="/data/local/tmp/proxy-ports.conf.tmp"
+    if [ -f "$CONF_FILE" ]; then
+        grep -v -E "^[[:space:]]*${EXT}[[:space:]]+" "$CONF_FILE" 2>/dev/null > "$TMP"
+        mv -f "$TMP" "$CONF_FILE"
+        chmod 666 "$CONF_FILE" 2>/dev/null
+    fi
+    echo "✔ Regla para puerto $EXT eliminada."
+}
+
+case "$1" in
+    start|iniciar)
+        if [ -n "$2" ]; then iniciar_puerto "$2"; else iniciar_todos; fi
+        ;;
+    stop|detener)
+        if [ -n "$2" ]; then detener_puerto "$2"; else detener_todos; fi
+        ;;
+    restart|reiniciar)
+        if [ -n "$2" ]; then
+            detener_puerto "$2"; sleep 0.2; iniciar_puerto "$2"
+        else
+            detener_todos; sleep 0.3; iniciar_todos
+        fi
+        ;;
+    status|estado|list|listar)
+        estado
+        ;;
+    add|agregar)
+        add_regla "$2" "$3" "$4"
+        ;;
+    del|borrar|eliminar)
+        del_regla "$2"
+        ;;
+    *)
+        echo "Uso: proxy-ports-daemon {start [puerto]|stop [puerto]|restart|status|add <ext> <dest> [int]|del <ext>}"
+        ;;
+esac

@@ -38,6 +38,7 @@ public final class RedManager {
     public static final String PREF_PROXY22_HABILITADO = "proxy22_habilitado";
     public static final String PREF_PROXY22_TARGET = "proxy22_target";
     public static final String ARCHIVO_TARGET_PROXY22 = "/data/local/tmp/ssh-proxy-target";
+    public static final String ARCHIVO_CONF_PROXY_PORTS = "/data/local/tmp/proxy-ports.conf";
     public static final String DEFAULT_SUBRED = "10.0.0.0/24";
 
     public static class Subred {
@@ -431,6 +432,7 @@ public final class RedManager {
 
     public static synchronized void actualizar(Context c) {
         actualizarProxy22Target(c);
+        sincronizarProxyPortsConf(c);
         if (poolPipes == null || poolPipes.isShutdown()) {
             poolPipes = new ThreadPoolExecutor(
                     2, 16, 60L, TimeUnit.SECONDS,
@@ -477,6 +479,12 @@ public final class RedManager {
         int destinoPort = (r.puertoInterno == 22 ? 8022 : r.puertoInterno);
         if (r.puertoExterno == destinoPort) {
             Log.w(TAG, "Regla omitida para evitar bucle infinito: puerto externo (" + r.puertoExterno + ") coincide con destino");
+            return;
+        }
+        // Puertos privilegiados (< 1024, ej. 80, 443, 22, 21) se delegan al proxy shell UID 2000
+        if (r.puertoExterno < 1024) {
+            Log.i(TAG, "Puerto privilegiado :" + r.puertoExterno + " delegado a proxy-ports en espacio shell UID 2000");
+            activarPuertoEnShell(r.puertoExterno);
             return;
         }
         try {
@@ -637,13 +645,65 @@ public final class RedManager {
         }
     }
 
-    public static boolean estaProxy22Activo() {
+    public static void sincronizarProxyPortsConf(Context c) {
+        try {
+            List<Regla> reglas = listarReglas(c);
+            StringBuilder sb = new StringBuilder();
+            sb.append("# proxy-ports.conf - Reenvío universal de puertos en espacio shell\n");
+            for (Regla r : reglas) {
+                if (!r.activa) continue;
+                int destinoPort = (r.puertoInterno == 22 ? 8022 : r.puertoInterno);
+                String hostDestino = "127.0.0.1";
+                if (r.instanciaId != null && !r.instanciaId.isEmpty()) {
+                    String ipVirt = ipParaInstancia(c, r.instanciaId);
+                    if (ipVirt.contains("/")) ipVirt = ipVirt.substring(0, ipVirt.indexOf('/'));
+                    String[] partes = ipVirt.trim().split("\\.");
+                    if (partes.length == 4) {
+                        try {
+                            int b2 = Integer.parseInt(partes[1]);
+                            int b3 = Integer.parseInt(partes[2]);
+                            int b4 = Integer.parseInt(partes[3]);
+                            hostDestino = "127." + b2 + "." + b3 + "." + b4;
+                        } catch (NumberFormatException ignorada) { }
+                    }
+                }
+                sb.append(r.puertoExterno).append(" ").append(hostDestino).append(" ").append(destinoPort).append("\n");
+            }
+            java.io.File cf = new java.io.File(ARCHIVO_CONF_PROXY_PORTS);
+            try (java.io.FileWriter fw = new java.io.FileWriter(cf, false)) {
+                fw.write(sb.toString());
+            }
+            cf.setReadable(true, false);
+            cf.setWritable(true, false);
+            Log.i(TAG, "Sincronizado " + ARCHIVO_CONF_PROXY_PORTS + " con " + reglas.size() + " reglas");
+        } catch (Exception e) {
+            Log.w(TAG, "Error escribiendo proxy-ports.conf: " + e.getMessage());
+        }
+    }
+
+    public static void activarPuertoEnShell(int puertoExterno) {
+        // Si hay una conexión ADB activa o daemon de shell en ejecución, se asegura el listener
+        new Thread(() -> {
+            try {
+                java.io.File daemon = new java.io.File("/data/local/tmp/proxy-ports-daemon");
+                if (daemon.exists()) {
+                    Runtime.getRuntime().exec(new String[]{"/system/bin/sh", daemon.getAbsolutePath(), "start", String.valueOf(puertoExterno)});
+                }
+            } catch (Exception ignored) { }
+        }, "shell-port-starter").start();
+    }
+
+    public static boolean estaPuertoActivo(int puerto) {
         try (Socket s = new Socket()) {
-            s.connect(new java.net.InetSocketAddress("127.0.0.1", 22), 150);
+            s.connect(new java.net.InetSocketAddress("127.0.0.1", puerto), 120);
             return true;
         } catch (Exception ignored) {
             return false;
         }
+    }
+
+    public static boolean estaProxy22Activo() {
+        return estaPuertoActivo(22);
     }
 
     public static synchronized void detenerTodo() {

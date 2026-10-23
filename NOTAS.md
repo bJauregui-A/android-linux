@@ -764,24 +764,27 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
    - **Mejora:** Modificados [apk/pacman-xfer](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/pacman-xfer) y [scripts/bootstrap.py](file:///media/ben4shot/E/Develop/Android/glibc-prueba/scripts/bootstrap.py) para imprimir el nombre de cada paquete en curso (`↓ <paquete>`) junto a una barra de progreso interactiva (`curl -#`), manteniendo silenciadas solo las comprobaciones de firmas (`*.sig`).
    - Reconstruidos `base.tgz` y `capa.tgz`, recompilado APK `sdk36Debug` e instalado en el Redmi vía `adb install -r`.
 
-7. **Proxy en puerto 22 real de Wi-Fi sin root (Punto 2 ejecutado):**
+7. **Proxy en puerto 22 real de Wi-Fi y Reenvío Universal de Puertos sin root (Puertos 0-65535):**
    - **Diagnóstico y capacidad:**
      - En Android, aplicaciones estándar (UID >= 1024) no pueden enlazar puertos privilegiados (< 1024) por restricción del kernel (`ip_unprivileged_port_start = 1024`). Sin embargo, el usuario `shell` (UID 2000, ADB local) dispone de la capacidad `CAP_NET_BIND_SERVICE`.
-     - Se demostró que `toybox nc -L -p 22` en UID 2000 abre y escucha exitosamente en `0.0.0.0:22` sobre todas las interfaces del teléfono (Wi-Fi `wlan2`, datos y loopback) sin requerir root.
-   - **Arquitectura e implementación:**
-     - Creado `glibc-prueba/android/proxy-ssh-22-worker`: script worker ejecutado por `toybox nc` en cada conexión entrante. Lee `/data/local/tmp/ssh-proxy-target` y reenvía dinámicamente el tráfico TCP al host y puerto de la instancia correspondiente (`127.0.0.X:8022`).
-     - Creado `glibc-prueba/android/proxy-ssh-22-daemon`: demonio en espacio `shell` con control de ciclo de vida (`start`, `stop`, `restart`, `status`, `target <destino>`), archivo de PID (`/data/local/tmp/proxy-ssh-22.pid`) y registro de logs.
-     - Creado `glibc-prueba/android/proxy-ssh-22`: utilidad de consola para Arch Linux (`/usr/local/bin/proxy-ssh-22`). Permite al usuario consultar el estado (`proxy-ssh-22 status`) y reasignar la máquina de destino (`proxy-ssh-22 target <instancia|ip>`) de forma directa sin requerir ADB, y gestionar el inicio/parada del demonio vía `adb-conectar` / ADB local.
-     - Modificado `glibc-prueba/scripts/adb-conectar` para asegurar automáticamente la presencia y permisos de los scripts en `/data/local/tmp/` al vincularse.
-     - En `RedManager.java`: añadidos métodos `esProxy22Habilitado()`, `setProxy22Habilitado()`, `obtenerProxy22Target()`, `setProxy22Target()` y `actualizarProxy22Target()`. Escribe `/data/local/tmp/ssh-proxy-target` con la IP loopback virtual correspondiente (`127.0.0.X:8022`) al cambiar de instancia o actualizar la red.
-     - En `SistemaActivity.java`: añadida tarjeta visual en la pestaña `⇄ REENVÍO PUERTOS` (`⚡ SSH PUERTO 22 (WI-FI SIN ROOT)`) con badge en tiempo real `● ACTIVO` / `○ INACTIVO`, selector dinámico de instancia destino y botón de comprobación.
+     - Se demostró que `toybox nc -L -p <puerto>` en UID 2000 abre y escucha exitosamente en `0.0.0.0:<puerto>` para cualquier puerto (probados 22 [SSH], 80 [HTTP] y 443 [HTTPS]) sobre todas las interfaces del teléfono (Wi-Fi `wlan2`, datos y loopback) sin requerir root.
+   - **Arquitectura e implementación generalizada:**
+     - Creado `glibc-prueba/android/proxy-port-worker.sh`: script worker universal ejecutado por `toybox nc` al recibir conexiones en cualquier puerto `$1`. Consulta `/data/local/tmp/proxy-ports.conf`, resuelve el host loopback virtual (`127.0.0.X`) y reenvía el flujo TCP con `toybox nc $HOST $PORT`. Mantiene fallback para puerto 22 hacia `/data/local/tmp/ssh-proxy-target`.
+     - Creado `glibc-prueba/android/proxy-ports-daemon`: demonio multi-puerto en espacio `shell` con control granular por puerto o global (`start [puerto]`, `stop [puerto]`, `restart`, `status`, `add <ext> <dest> [int]`, `del <ext>`). Persiste reglas en `proxy-ports.conf` y PIDs en `proxy-ports.pids`.
+     - Creado `glibc-prueba/android/proxy-puertos`: utilidad CLI para Arch Linux (`/usr/local/bin/proxy-puertos` y symlink `proxy-ports`) para listar, agregar y borrar reglas directamente desde la terminal del usuario.
+     - Adaptado `glibc-prueba/android/proxy-ssh-22` como wrapper 100% compatible hacia `proxy-puertos`.
+     - En `RedManager.java`:
+       - `sincronizarProxyPortsConf()`: escribe automáticamente todas las reglas activas de la app en `/data/local/tmp/proxy-ports.conf` asignando la IP virtual de loopback correspondiente (`127.0.0.X`).
+       - `iniciarServidorParaRegla()`: detecta puertos `< 1024` (ej. 80, 443, 22) y delega automáticamente el enlace al demonio en espacio `shell` evitando excepciones `EACCES` en Java.
+       - Añadidos métodos `estaPuertoActivo(int puerto)`.
+     - En `SistemaActivity.java`: el campo de puerto externo en `[ ⇄ RED ]` ahora acepta cualquier puerto (`80`, `443`, `22`, etc.), y las reglas privilegiadas se identifican con el distintivo `⚡`.
    - **Validación en vivo:**
-     - Demonio iniciado en el Redmi 15 5G escuchando en `0.0.0.0:22` (PID 31883).
-     - Probado handshake criptográfico OpenSSH completo (`kex: mlkem768x25519-sha256`, `chacha20-poly1305@openssh.com`) desde el PC a través del puerto 22 del teléfono hacia el `sshd` de la instancia `test-18492` (`127.0.0.2:8022`).
-     - Verificado cambio de destino dinámico al vuelo sin reiniciar el demonio.
+     - Demonio universal probado en el Redmi 15 5G con múltiples puertos concurrentes: `:80` (PID 9391), `:22` (PID 9467) y `:443` (PID 9538) activos simultáneamente.
+     - Handshake criptográfico OpenSSH verificado a través del puerto 22 hacia `test-18492` (`127.0.0.2:8022`).
+     - Borrado y parada granular de puertos probada en vivo (`del 443` cerrando su socket limpiamente).
    - **Empaquetado e integración:**
-     - Actualizado `apk/capa.py` incorporando `proxy-ssh-22`, `proxy-ssh-22-daemon` y `proxy-ssh-22-worker`.
-     - Regenerado `capa.tgz`, compilado APK `sdk36Debug` exitosamente y sincronizados los scripts en la instancia activa del teléfono.
+     - Actualizado `apk/capa.py` con `proxy-puertos`, `proxy-ports`, `proxy-ports-daemon`, `proxy-port-worker.sh` y wrappers.
+     - Regenerado `capa.tgz`, compilado APK `sdk36Debug` y sincronizados los scripts en el teléfono.
 
 **Siguiente sesión (72ª):**
 1. **Inicialización de entornos basada en Dockerfile / OCI (`dockerfile-runner` / importador):**

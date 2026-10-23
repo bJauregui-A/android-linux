@@ -1014,7 +1014,8 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
                     fila.setBackground(crearFondo(0xff16202c, BORDE_NORMAL, dp(6), dp(1)));
 
                     String ipInst = RedManager.ipParaInstancia(this, r.instanciaId);
-                    TextView info = texto(":" + r.puertoExterno + " ➜ " + r.instanciaId + " (" + ipInst + "):" + r.puertoInterno, 11, true, r.activa ? ACCENTO_VERDE : TEXTO_MUTED);
+                    String badgePriv = r.puertoExterno < 1024 ? " ⚡" : "";
+                    TextView info = texto(":" + r.puertoExterno + badgePriv + " ➜ " + r.instanciaId + " (" + ipInst + "):" + r.puertoInterno, 11, true, r.activa ? ACCENTO_VERDE : TEXTO_MUTED);
                     fila.addView(info, new LinearLayout.LayoutParams(0, -2, 1.0f));
 
                     TextView btnDel = crearBotonChip("✕", ACCENTO_ROJO, () -> {
@@ -1037,7 +1038,7 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         formFwd.setGravity(Gravity.CENTER_VERTICAL);
 
         EditText inExt = new EditText(this);
-        inExt.setHint("Ext(8022)");
+        inExt.setHint("Ext(80)");
         inExt.setHintTextColor(0xff556272);
         inExt.setTextColor(TEXTO_CLARO);
         inExt.setTypeface(Typeface.MONOSPACE);

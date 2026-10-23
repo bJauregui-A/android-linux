@@ -1,0 +1,91 @@
+#!/bin/bash
+# proxy-puertos: CLI en Arch Linux para reenvío universal de puertos (0-65535) en Wi-Fi sin root
+
+DAEMON_SCRIPT="/data/local/tmp/proxy-ports-daemon"
+WORKER_SCRIPT="/data/local/tmp/proxy-port-worker.sh"
+CONF_FILE="/data/local/tmp/proxy-ports.conf"
+LOCAL_SHARE="/usr/local/share/linux-android"
+[ ! -d "$LOCAL_SHARE" ] && LOCAL_SHARE="/usr/local/share/arch-android"
+
+instalar_en_tmp() {
+    if [ ! -f "$DAEMON_SCRIPT" ] || [ ! -f "$WORKER_SCRIPT" ]; then
+        if [ -f "$LOCAL_SHARE/proxy-ports-daemon" ]; then
+            cp -f "$LOCAL_SHARE/proxy-ports-daemon" "$DAEMON_SCRIPT" 2>/dev/null || true
+            chmod 755 "$DAEMON_SCRIPT" 2>/dev/null || true
+        fi
+        if [ -f "$LOCAL_SHARE/proxy-port-worker.sh" ]; then
+            cp -f "$LOCAL_SHARE/proxy-port-worker.sh" "$WORKER_SCRIPT" 2>/dev/null || true
+            chmod 755 "$WORKER_SCRIPT" 2>/dev/null || true
+        fi
+    fi
+}
+
+instalar_en_tmp
+
+invocar_adb() {
+    if ! command -v adb >/dev/null 2>&1; then
+        echo "✕ Error: Para controlar demonios en puertos privilegiados (< 1024) se requiere nivel shell."
+        echo "  Instala android-tools: sudo pacman -S android-tools"
+        echo "  O gestiona las reglas desde la app Android (diálogo [ ⇄ RED ])."
+        return 1
+    fi
+
+    if ! adb devices 2>/dev/null | grep -q "device$"; then
+        echo "ADB no conectado. Intentando reconectar vía adb-conectar..."
+        if command -v adb-conectar >/dev/null 2>&1; then
+            adb-conectar
+        fi
+    fi
+
+    if ! adb devices 2>/dev/null | grep -q "device$"; then
+        echo "✕ No se pudo conectar a ADB local (UID 2000)."
+        echo "  Asegúrate de que la depuración inalámbrica esté activa y ejecuta 'adb-conectar'."
+        return 1
+    fi
+
+    exec adb shell "$DAEMON_SCRIPT" "$@"
+}
+
+resolver_destino() {
+    ARG="$1"
+    if [ -n "$ARG" ] && [ "${ARG#*:}" = "$ARG" ] && [ "${ARG#*.}" = "$ARG" ]; then
+        for DIR in "/var/lib/linux-android/instancias/$ARG" "/var/lib/arch-android/instancias/$ARG"; do
+            if [ -f "$DIR/etc/virtual-ip" ]; then
+                ARG="$(cat "$DIR/etc/virtual-ip" 2>/dev/null | tr -d '\r\n')"
+                break
+            fi
+        done
+    fi
+    echo "$ARG"
+}
+
+case "$1" in
+    status|estado|list|listar|"")
+        if [ -f "$DAEMON_SCRIPT" ] && command -v adb >/dev/null 2>&1 && adb devices 2>/dev/null | grep -q "device$"; then
+            exec adb shell "$DAEMON_SCRIPT" status
+        else
+            echo "=== REENVÍO DE PUERTOS ==="
+            if [ -f "$CONF_FILE" ]; then
+                cat "$CONF_FILE"
+            else
+                echo "No hay reglas en $CONF_FILE"
+            fi
+        fi
+        ;;
+    add|agregar)
+        EXT="$2"
+        DEST=$(resolver_destino "$3")
+        INT="$4"
+        [ -z "$INT" ] && INT="$EXT"
+        invocar_adb add "$EXT" "$DEST" "$INT"
+        ;;
+    del|borrar|eliminar)
+        invocar_adb del "$2"
+        ;;
+    start|iniciar|stop|detener|restart|reiniciar)
+        invocar_adb "$@"
+        ;;
+    *)
+        echo "Uso: proxy-puertos {status|list|add <puerto_ext> <instancia|ip> [puerto_int]|del <puerto_ext>|start|stop|restart}"
+        ;;
+esac

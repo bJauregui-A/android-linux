@@ -1,121 +1,27 @@
 #!/bin/bash
-# proxy-ssh-22: Administrador del proxy SSH en puerto 22 real de Wi-Fi
+# proxy-ssh-22: Wrapper de compatibilidad hacia proxy-puertos para puerto 22
 
-PID_FILE="/data/local/tmp/proxy-ssh-22.pid"
-TARGET_FILE="/data/local/tmp/ssh-proxy-target"
-WORKER_FILE="/data/local/tmp/ssh-proxy-worker.sh"
-DAEMON_SCRIPT="/data/local/tmp/proxy-ssh-22"
-LOCAL_SHARE="/usr/local/share/linux-android"
-[ ! -d "$LOCAL_SHARE" ] && LOCAL_SHARE="/usr/local/share/arch-android"
-
-instalar_en_tmp() {
-    if [ ! -f "$DAEMON_SCRIPT" ] || [ ! -f "$WORKER_FILE" ]; then
-        if [ -f "$LOCAL_SHARE/proxy-ssh-22-daemon" ]; then
-            cp -f "$LOCAL_SHARE/proxy-ssh-22-daemon" "$DAEMON_SCRIPT" 2>/dev/null || true
-            chmod 755 "$DAEMON_SCRIPT" 2>/dev/null || true
-        fi
-        if [ -f "$LOCAL_SHARE/proxy-ssh-22-worker" ]; then
-            cp -f "$LOCAL_SHARE/proxy-ssh-22-worker" "$WORKER_FILE" 2>/dev/null || true
-            chmod 755 "$WORKER_SCRIPT" 2>/dev/null || true
-        fi
-    fi
-}
-
-instalar_en_tmp
-
-puerto22_responde() {
-    (echo > /dev/tcp/127.0.0.1/22) >/dev/null 2>&1
-}
-
-estado() {
-    TARGET="$(cat "$TARGET_FILE" 2>/dev/null)"
-    TARGET="${TARGET:-127.0.0.1:8022}"
-    PID=""
-    if [ -f "$PID_FILE" ]; then
-        PID="$(cat "$PID_FILE" 2>/dev/null | tr -d '\r\n ')"
-    fi
-
-    if puerto22_responde; then
-        echo "● Activo${PID:+ (PID $PID)} escuchando en 0.0.0.0:22"
-        echo "  Destino actual: $TARGET"
-    else
-        echo "○ Inactivo (puerto 22 libre)"
-        echo "  Destino configurado: $TARGET"
-    fi
-}
-
-set_target() {
-    if [ -z "$1" ]; then
-        echo "Uso: proxy-ssh-22 target <ip:puerto | ip | instancia>"
-        return 1
-    fi
-    ARG="$1"
-    # Si no tiene puerto y no contiene punto, buscar virtual-ip en instancias
-    if [ "${ARG#*:}" = "$ARG" ] && [ "${ARG#*.}" = "$ARG" ]; then
-        for DIR in "/var/lib/linux-android/instancias/$ARG" "/var/lib/arch-android/instancias/$ARG"; do
-            if [ -f "$DIR/etc/virtual-ip" ]; then
-                VIP="$(cat "$DIR/etc/virtual-ip" 2>/dev/null | tr -d '\r\n')"
-                [ -n "$VIP" ] && ARG="$VIP:8022"
-                break
-            fi
-        done
-    fi
-
-    case "$ARG" in
-        10.*)
-            HOST_PART="${ARG%:*}"
-            PORT_PART="${ARG#*:}"
-            [ "$PORT_PART" = "$ARG" ] && PORT_PART=8022
-            B2=$(echo "$HOST_PART" | cut -d. -f2)
-            B3=$(echo "$HOST_PART" | cut -d. -f3)
-            B4=$(echo "$HOST_PART" | cut -d. -f4 | cut -d/ -f1)
-            ARG="127.$B2.$B3.$B4:$PORT_PART"
-            ;;
-        *:*) ;;
-        *)   ARG="$ARG:8022" ;;
-    esac
-
-    echo "$ARG" > "$TARGET_FILE"
-    chmod 666 "$TARGET_FILE" 2>/dev/null
-    echo "✔ Destino actualizado a: $ARG"
-    estado
-}
-
-invocar_adb() {
-    if ! command -v adb >/dev/null 2>&1; then
-        echo "✕ Error: Para iniciar o detener el demonio en puerto 22 se requiere nivel shell."
-        echo "  Instala android-tools: sudo pacman -S android-tools"
-        echo "  O usa el botón correspondiente en la app Android (diálogo [ ⇄ RED ])."
-        return 1
-    fi
-
-    if ! adb devices 2>/dev/null | grep -q "device$"; then
-        echo "ADB no conectado. Intentando reconectar vía adb-conectar..."
-        if command -v adb-conectar >/dev/null 2>&1; then
-            adb-conectar
-        fi
-    fi
-
-    if ! adb devices 2>/dev/null | grep -q "device$"; then
-        echo "✕ No se pudo conectar a ADB local (UID 2000)."
-        echo "  Asegúrate de que la depuración inalámbrica esté activa y ejecuta 'adb-conectar'."
-        return 1
-    fi
-
-    exec adb shell "$DAEMON_SCRIPT" "$@"
-}
+SCRIPT_DIR="$(dirname "$0")"
+PUERTOS="$SCRIPT_DIR/proxy-puertos"
+[ ! -x "$PUERTOS" ] && PUERTOS="/usr/local/bin/proxy-puertos"
 
 case "$1" in
-    status|estado|"")
-        estado
-        ;;
     target|destino)
-        set_target "$2"
+        exec "$PUERTOS" add 22 "$2" 8022
         ;;
-    start|iniciar|stop|detener|restart|reiniciar)
-        invocar_adb "$@"
+    status|estado|"")
+        exec "$PUERTOS" status
+        ;;
+    start|iniciar)
+        exec "$PUERTOS" start 22
+        ;;
+    stop|detener)
+        exec "$PUERTOS" stop 22
+        ;;
+    restart|reiniciar)
+        exec "$PUERTOS" restart 22
         ;;
     *)
-        set_target "$1"
+        exec "$PUERTOS" add 22 "$1" 8022
         ;;
 esac
