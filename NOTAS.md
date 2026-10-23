@@ -659,20 +659,37 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
     - Navegadores Edge y Brave cargando exitosamente `http://127.0.0.1:8000/`.
     - Agregada la app a la lista blanca de ahorro de batería (`cmd deviceidle whitelist +dev.ben4shot.glibcprueba.sdk36`) para evitar congelamiento de sockets y CPU throttling en segundo plano.
 
-**Siguiente sesión (69ª):**
-1. **Validación en vivo de creación de entornos en el Redmi 15 5G:**
-   - Probar la creación de un nuevo entorno (con entorno gráfico o servidor) desde la interfaz de la app, verificando que `primer-arranque.sh` corra de principio a fin sin fallos de PATH ni SIGSYS, completando pacman y registrando la marca `/var/lib/arch-android/instalado`.
-   - Confirmar que la nueva instancia arranque con `99: vnet0` y responda a `ping` inmediatamente.
-2. **Validación de la interfaz de Red y subredes virtuales (`[ ⇄ RED ]`):**
-   - Probar la creación de subredes CIDR adicionales en `⑂ SUBREDES` y las reglas de port-forwarding en `⇄ REENVÍO PUERTOS`.
-   - Probar acceso desde otros dispositivos en la misma LAN WiFi usando la IP real del teléfono (`wlan2`).
-3. **Validación del Supervisor de servicios nativo en C (`service` / `sv`):**
-   - Comprobar el autoarranque del demonio `service-daemon` al abrir sesión interactiva o de escritorio.
-   - Probar gestión de servicios con `service <nombre> start/stop/status/logs/list`.
-   - Probar la instalación de nuevos servicios vía `sudo pacman -S <paquete>` verificando que sus unidades se alojen en `/etc/services.d` vía el symlink `/usr/lib/systemd/system`.
-4. **Proxy en puerto 22 real de Wi-Fi:**
+**69ª sesión (2026-10-22, Redmi por USB):**
+1. **Acceso y comunicación vía cable USB (ADB Forward):**
+   - Configurado reenvío de puertos `adb forward tcp:8088 tcp:8000` por cable USB.
+   - Petición HTTP directa desde el PC a través del cable USB: `curl -I http://127.0.0.1:8088/` devolviendo `HTTP/1.1 200 OK` de `nginx/1.30.6` corriendo en la instancia `server1-25913`.
+2. **Validación del Supervisor de servicios nativo en C (`service` / `sv`):**
+   - Verificado `service list` listando unidades de `/etc/services.d` y `/usr/lib/systemd/system`.
+   - Diagnóstico: se identificó que `MAX_SERVICES 128` en `service-daemon.c` se saturaba con las más de 280 unidades del sistema Arch; conviene ampliarlo o priorizar `/etc/services.d`.
+   - Validado ciclo de vida completo de un servicio en `/etc/services.d/prueba.service`:
+     - Inicio: `service prueba start` -> `✔ Servicio prueba iniciado (PID 26147)`.
+     - Estado en vivo: `service prueba status` reportando `active (running) (PID 26147)` y sus logs de inicio.
+     - Parada limpia: `service prueba stop` -> `✔ Servicio prueba detenido`.
+     - Estado detenido: `service prueba status` reportando `inactive (stopped)`.
+3. **Creación y validación de una nueva instancia real (`srvtest-91001`):**
+   - Descompresión limpia de `base.tgz` y `capa.tgz` directo desde el APK instalado.
+   - Asignada IP virtual `10.0.0.4/24` en `/etc/virtual-ip` y hostname `srvtest` en `/etc/hostname`.
+   - Detección automática en `ip a`: interfaz `99: vnet0` con IP `10.0.0.4/24` activa.
+   - Conectividad y enrutamiento inter-instancia probado:
+     - `srvtest (10.0.0.4) -> server1 (10.0.0.2)`: ping con 0% packet loss, RTT 0.98 ms.
+     - `srvtest (10.0.0.4) -> client (10.0.0.3)`: ping con 0% packet loss, RTT 0.58 ms.
+     - HTTP desde `srvtest` a Nginx en `server1:80`: `HTTP/1.1 200 OK`.
+     - HTTP desde `srvtest` a servidor Python temporal en `server1:9000`: `HTTP/1.0 200 OK`.
+   - Registrada la instancia `srvtest-91001` en `shared_prefs/instalacion-linux.xml` y `shared_prefs/red_config.xml`.
+
+**Siguiente sesión (70ª):**
+1. **Optimización de `service-daemon.c`:**
+   - Ampliar `MAX_SERVICES` a 512 o cargar dinámicamente unidades bajo demanda para no truncar la lista de systemd.
+2. **Inicialización de entornos basada en Dockerfile / OCI (`dockerfile-runner` / importador):**
+   - Diseñar e implementar un generador o intérprete que cree e inicialice instancias aisladas a partir de un `Dockerfile` (soportando directivas clave: `FROM`, `ENV`, `COPY`, `RUN`, `WORKDIR`, `EXPOSE`, `CMD`), o mediante importación directa de rootfs OCI/Docker inyectando `libldp.so`/glibc propia.
+3. **Proxy en puerto 22 real de Wi-Fi:**
    - Implementar y poner a prueba el script o daemon en espacio `shell` (UID 2000, con `CAP_NET_BIND_SERVICE`) vía `adb-conectar` para escuchar en `0.0.0.0:22` y redirigir el tráfico SSH directamente a la instancia seleccionada o configurada en la UI de Red.
-5. **Punto 3.3: Soporte para ejecución de binarios estáticos (`execve_x` en `android-path.c`):**
+4. **Punto 3.3: Soporte para ejecución de binarios estáticos (`execve_x` en `android-path.c`):**
    - Soporte para binarios estáticos (`ldconfig`, `busybox`, herramientas compiladas estáticamente sin `PT_INTERP`) bajo W^X de Android mediante cargador en espacio de usuario.
-6. **Distribuciones adicionales (Punto 4: Debian y Ubuntu ARM64):**
+5. **Distribuciones adicionales (Punto 4: Debian y Ubuntu ARM64):**
    - Creación de adaptadores (`AdaptadorDebianArm64.java`), bootstrap de rootfs y recetas.
