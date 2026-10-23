@@ -3,7 +3,7 @@
 # Deja el Arch completo: usuario, llavero, paquetes (lo mínimo + lo que se elija en el menú: ssh,
 # audio, Firefox, juegos...) y los ajustes que antes hacían a mano los scripts subir-*.sh.
 # Se puede volver a correr (pacman --needed); --elegir vuelve a mostrar el menú.
-export PATH="/usr/local/bin:/usr/bin"
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 D=/usr/local/share/linux-android
 [ -d "$D" ] || D=/usr/local/share/arch-android
 E=/var/lib/linux-android
@@ -765,8 +765,8 @@ if [ -e $E/instalado ]; then
     printf '\e[1;38;5;48m└────────────────────────────────────────────────────────────┘\e[0m\n'
     exit 0
 fi
-touch $E/instalado
-rm -f $E/instalando
+touch "$E/instalado" 2>/dev/null || : > "$E/instalado"
+rm -f "$E/instalando"
 
 printf '\n\e[1;38;5;48m┌────────────────────────────────────────────────────────────┐\e[0m\n'
 printf '\e[1;38;5;48m│\e[0m  \e[1;38;5;81mINSTALACIÓN COMPLETADA CON ÉXITO\e[0m                          \e[1;38;5;48m│\e[0m\n'

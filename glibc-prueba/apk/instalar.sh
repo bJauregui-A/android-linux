@@ -170,8 +170,7 @@ EOF
         mkdir -p "$P/run/sshd" 2>/dev/null || true
     fi
 
-    # Enlaces de compatibilidad awk, nologin y apt-key de la capa
-    [ -x "$P/usr/local/bin/apt-key" ] && cp -f "$P/usr/local/bin/apt-key" "$P/usr/bin/apt-key" 2>/dev/null || true
+    # Enlaces de compatibilidad awk y nologin
     [ -x "$P/usr/bin/mawk" ] && [ ! -e "$P/usr/bin/awk" ] && ln -sfn mawk "$P/usr/bin/awk" 2>/dev/null || true
     [ -e "$P/usr/bin/awk" ] && [ ! -e "$P/bin/awk" ] && ln -sfn /usr/bin/awk "$P/bin/awk" 2>/dev/null || true
     [ ! -e "$P/usr/sbin/nologin" ] && ln -sfn /bin/false "$P/usr/sbin/nologin" 2>/dev/null || true

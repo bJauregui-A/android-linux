@@ -74,8 +74,6 @@ ARCHIVOS = [
     ("android/proxy-ssh-22-daemon", f"{D}/proxy-ssh-22-daemon", 0o755),
     ("android/proxy-ssh-22-worker", f"{D}/proxy-ssh-22-worker", 0o755),
     ("apk/pacman-xfer", "usr/local/bin/pacman-xfer", 0o755),
-    ("apk/apt-key", "usr/local/bin/apt-key", 0o755),
-    ("apk/apt-key", "usr/bin/apt-key", 0o755),
     # escritorio elegido al instalar (escritorios/: uno por carpeta) y lo que arranca con todos
     ("escritorios/sesion-android", "usr/local/bin/sesion-android", 0o755),
     ("escritorios/autostart-android", "usr/local/bin/autostart-android", 0o755),
