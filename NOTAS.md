@@ -189,7 +189,7 @@ Script de reconexión rápida creado en `~/.local/bin/adb-conectar` (escaneo de 
   1. Creada capa de abstracción de gestor de paquetes (`detectar_backend`, `backend_nombre`, `backend_iniciar_base`, `backend_limpiar_lock`, `backend_instalar`, `backend_soporta_aur`, `resolver_archivo`).
   2. `primer-arranque.sh` desacopla la UI de consola ANSI y los flujos de configuración del comando `pacman`, permitiendo resolver paquetes según el backend (`paquetes-<grupo>-<backend>.txt` con fallback a `paquetes-<grupo>.txt`, y soporte para `apt` de Debian/Ubuntu).
   3. Módulo AUR condicionado automáticamente a backends que lo soportan.
-  4. Verificación de sintaxis con `bash -n` y compilación completa `:app:assembleSdk36Debug` exitosa en 1s.
+  4. Verificación de sintaxis con `bash -n`, regenerada `capa.tgz` con symlinks hacia `linux-android`, compilación completa `:app:assembleSdk36Debug` e instalada la APK en el Redmi con `adb install -r` (Success; datos e instancias conservados).
 
 **Siguiente sesión (58ª):**
 1. Generar la imagen rootfs base para Debian ARM64 (`base-debian.tgz`).
