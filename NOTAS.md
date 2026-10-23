@@ -687,12 +687,39 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
    - Refresco en caliente: si se edita un archivo `.service` en `/etc/services.d/`, el supervisor re-parsea la nueva definición automáticamente al reiniciar o invocar el servicio.
    - Listado inteligente y buffer de 64 KB: `service list` muestra de forma limpia los servicios activos y configurados; `service list -a` muestra todas las unidades del sistema sin truncamiento.
 
-**Siguiente sesión (70ª):**
+**70ª sesión (2026-10-22, Redmi por USB):**
+1. **Soporte para ejecución de binarios estáticos bajo W^X de Android (Punto 3.3):**
+   - **Diagnóstico del problema:**
+     - Al invocar directamente un binario estático (sin `PT_INTERP`, ej. `busybox`, `gcc -static`), `execve` al kernel restablecía los manejadores de señales a `SIG_DFL`, pero el proceso heredaba el filtro seccomp de Android. Al hacer syscalls restringidas o que requerían traducción, seccomp arrojaba `SIGSYS`, terminando el proceso con código 159 (`Bad system call`).
+     - Al lanzarlo a través del dynamic loader de glibc (`libldp.so`), glibc upstream ejecutaba `__rtld_execve` dentro de `rtld_chain_load`, el cual fallaba con `EACCES` bajo la política W^X de SELinux de Android (no permite ejecutar binarios desde almacenamiento de usuario).
+     - Al sortear `rtld_chain_load`, el cargador crasheaba por acceso a estructuras de datos dinámicas inexistentes en binarios sin sección dinámica o `PT_DYNAMIC`.
+   - **Solución implementada e integrada en glibc (`parches/0023-android-static-binaries.patch`):**
+     - **Detección en `execve` ([android-path.c](file:///media/ben4shot/E/Develop/Android/glibc-prueba/glibc/glibc-2.43/sysdeps/unix/sysv/linux/aarch64/android-path.c)):** sustituido `elf_is_glibc` por `elf_can_load`, reconociendo ejecutables ELF AArch64 (`ET_EXEC` o `ET_DYN`) sin intérprete dinámico para cargarlos en el espacio de usuario a través de `LOADER` (`libldp.so`).
+     - **Carga en espacio de usuario y auxv ([rtld.c](file:///media/ben4shot/E/Develop/Android/glibc-prueba/glibc/glibc-2.43/elf/rtld.c)):** se omite la llamada a `__rtld_execve` en `rtld_chain_load` para binarios estáticos (`is_static_binary`), permitiendo que el cargador continúe en el propio proceso y configure `AT_BASE = 0` en el vector auxiliar `auxv`.
+     - **Manejador SIGSYS en `rtld` sin trampa TLS:** la pila alternativa `pila_sigsys` (`__thread` con `tls_model_ie`) no se puede usar en `rtld` temprano porque `TPIDR_EL0` es NULL antes de inicializar el TCB, provocando `SIGSEGV {si_addr=NULL}`. Se confinaron las variables TLS a `#if IS_IN (libc)` y se implementó un manejador ligero `sigsys_handler_rtld` bajo `#if IS_IN (rtld)` con `struct k_sigaction` (máscara kernel de 64 bits) y `RAW(__NR_rt_sigaction)` que ejecuta la capa seccomp propia antes de transferir el control al binario.
+     - **Corrección de crash `si_addr = 0x8` en `audit_list_add_dynamic_tag`:** en `elf/rtld.c:225`, se evaluaba `D_PTR(main_map, l_info[DT_STRTAB])` incondicionalmente. Al no tener sección dinámica, `l_info[DT_STRTAB]` era NULL y desreferenciaba el offset 8 (`0x8`). Se añadió guarda `if (info != NULL && main_map->l_info[DT_STRTAB] != NULL)`.
+     - **Corrección de `SEGV_ACCERR` por protección prematura de RELRO:** `_dl_relocate_object` invocaba `_dl_protect_relro (main_map)` marcando la sección con `PROT_READ` antes de llamar a `_start`. Al arrancar el binario estático, `__libc_start_main` intentaba inicializar sus variables globales en `.data.rel.ro` (dirección `0x49f750`), fallando con violación de permisos de escritura. Se añadieron guardas `if (l->l_ld == NULL) return;` en `_dl_relocate_object` y `_dl_protect_relro` para delegar el control de RELRO al propio binario estático.
+     - **Guardas en inicializadores:** protecciones añadidas en [dl-init.c](file:///media/ben4shot/E/Develop/Android/glibc-prueba/glibc/glibc-2.43/elf/dl-init.c) y [rtld.c](file:///media/ben4shot/E/Develop/Android/glibc-prueba/glibc/glibc-2.43/elf/rtld.c) para link maps sin `l_initfini`.
+   - **Validación en vivo en el Redmi 15 5G:**
+     - Compilado binario estático `test_static` que verifica `argc`, `argv`, PID e intenta leer `/etc/hostname`.
+     - Ejecución exitosa con `ld-test.so`:
+       ```
+       ¡Hola desde binario estático! PID: 14030, argc: 1
+         argv[0] = /data/local/tmp/test_static
+       Contenido de /etc/hostname: arch-redmi-static
+       ```
+     - Verificado paso de múltiples argumentos (`foo`, `bar`, `baz`) y que la capa seccomp propia intercepta y traduce rutas relativas al prefijo (`/etc/hostname` -> `/data/local/tmp/etc/hostname`).
+2. **Empaquetado e integración de artefactos compilados:**
+   - Generado parche limpio [0023-android-static-binaries.patch](file:///media/ben4shot/E/Develop/Android/glibc-prueba/glibc/parches/0023-android-static-binaries.patch) probado con éxito sobre la base de parches 0001-0022.
+   - Recompilada glibc en Docker (`salida/usr/lib/ld-linux-aarch64.so.1` y `libc.so.6`).
+   - Sincronizado `ld-linux-aarch64.so.1` a `app/src/main/jniLibs/arm64-v8a/libldp.so`.
+   - Reempaquetados `base.tgz` y `capa.tgz` en `trabajo/assets-sdk36/` con `apk/armar.sh sdk36`.
+   - Compilado APK `sdk36Debug` con Gradle (`BUILD SUCCESSFUL in 3s`).
+
+**Siguiente sesión (71ª):**
 1. **Inicialización de entornos basada en Dockerfile / OCI (`dockerfile-runner` / importador):**
    - Diseñar e implementar un generador o intérprete que cree e inicialice instancias aisladas a partir de un `Dockerfile` (soportando directivas clave: `FROM`, `ENV`, `COPY`, `RUN`, `WORKDIR`, `EXPOSE`, `CMD`), o mediante importación directa de rootfs OCI/Docker inyectando `libldp.so`/glibc propia.
 2. **Proxy en puerto 22 real de Wi-Fi:**
    - Implementar y poner a prueba el script o daemon en espacio `shell` (UID 2000, con `CAP_NET_BIND_SERVICE`) vía `adb-conectar` para escuchar en `0.0.0.0:22` y redirigir el tráfico SSH directamente a la instancia seleccionada o configurada en la UI de Red.
-3. **Punto 3.3: Soporte para ejecución de binarios estáticos (`execve_x` en `android-path.c`):**
-   - Soporte para binarios estáticos (`ldconfig`, `busybox`, herramientas compiladas estáticamente sin `PT_INTERP`) bajo W^X de Android mediante cargador en espacio de usuario.
-4. **Distribuciones adicionales (Punto 4: Debian y Ubuntu ARM64):**
+3. **Distribuciones adicionales (Punto 4: Debian y Ubuntu ARM64):**
    - Creación de adaptadores (`AdaptadorDebianArm64.java`), bootstrap de rootfs y recetas.

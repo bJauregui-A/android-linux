@@ -1,0 +1,333 @@
+--- a/sysdeps/unix/sysv/linux/aarch64/android-path.c
++++ b/sysdeps/unix/sysv/linux/aarch64/android-path.c
+@@ -356,10 +356,11 @@
+   return RAW (__NR_pread64, fd, buf, n, off);
+ }
+ 
+-/* Intérprete del ELF abierto en FD: 1 si es el de glibc (ld-linux), 0 si
+-   no tiene o es otro (bionic, estático).  */
++/* Intérprete o compatibilidad del ELF abierto en FD:
++   1 si es ejecutable glibc o estático (ejecutable por nuestro cargador),
++   0 si es incompatible o dinámico bionic/otro.  */
+ static int
+-elf_is_glibc (int fd, const char *hdr, long int n)
++elf_can_load (int fd, const char *hdr, long int n)
+ {
+   Elf64_Ehdr eh;
+   if (n < (long int) sizeof eh)
+@@ -367,6 +368,10 @@
+   mcopy ((char *) &eh, hdr, sizeof eh);
+   if (eh.e_ident[EI_CLASS] != ELFCLASS64 || eh.e_phentsize != sizeof (Elf64_Phdr))
+     return 0;
++  if (eh.e_machine != EM_AARCH64)
++    return 0;
++  if (eh.e_type != ET_EXEC && eh.e_type != ET_DYN)
++    return 0;
+   for (int i = 0; i < eh.e_phnum; i++)
+     {
+       Elf64_Phdr ph;
+@@ -387,7 +392,7 @@
+ 	  return 1;
+       return 0;
+     }
+-  return 0;
++  return 1;
+ }
+ 
+ static long int
+@@ -454,10 +459,10 @@
+       return do_execve (interp, nargv, envp, buf, depth + 1);
+     }
+ 
+-  int glibc = n >= SELFMAG && starts (hdr, ELFMAG, SELFMAG)
+-	      && elf_is_glibc (fd, hdr, n);
++  int can_load = n >= SELFMAG && starts (hdr, ELFMAG, SELFMAG)
++	      && elf_can_load (fd, hdr, n);
+   RAW (__NR_close, fd);
+-  if (!glibc || LOADER[0] == '\0')
++  if (!can_load || LOADER[0] == '\0')
+     return RAW (__NR_execve, t, argv, envp);
+ 
+   /* Ruta absoluta para el cargador: queda en AT_EXECFN, y /proc/self/exe
+@@ -2301,12 +2306,10 @@
+   return raw (nr, a0, a1, a2, a3, a4, a5);
+ }
+ 
+-#if IS_IN (libc)
++#if IS_IN (libc) || IS_IN (rtld)
+ # include <signal.h>
+ # include <sys/ucontext.h>
+-# include <tls.h>
+ # include <sys/prctl.h>
+-# include <sys/mman.h>
+ # include <linux/audit.h>
+ # include <linux/filter.h>
+ # include <linux/seccomp.h>
+@@ -2317,12 +2320,15 @@
+ # define DATOS 0xa1d
+ # define SONDA 0x5ec0a1d
+ 
+-/* El seccomp de las apps responde a las syscalls no permitidas con SIGSYS
+-   (SECCOMP_RET_TRAP).  Se atrapa y la syscall devuelve ENOSYS, como en un
+-   kernel que no la tiene: los programas ya saben arreglárselas con eso.
+-   sigaction(SIGSYS) del programa no reemplaza este manejador (bash
+-   interactivo instala uno para todas las señales fatales): se guarda en
+-   user_sigsys y solo recibe los SIGSYS que no vienen de seccomp.  */
++/* struct sigaction del kernel en aarch64 (sigset de 64 bits).  */
++struct k_sigaction
++{
++  void *handler;
++  unsigned long int flags;
++  void *restorer;
++  unsigned long int mask;
++};
++
+ static struct sigaction user_sigsys; /* SIG_DFL */
+ 
+ int
+@@ -2336,6 +2342,10 @@
+   return 0;
+ }
+ 
++#if IS_IN (libc)
++# include <tls.h>
++# include <sys/mman.h>
++
+ /* get_robust_list(tid, &head, &len) también está bloqueada, y Steam y su
+    steamwebhelper usan la respuesta sin mirar el error (NULL -> SIGSEGV).
+    Como set_robust_list no se puede registrar (0001), la lista de cada hilo
+@@ -2359,15 +2369,7 @@
+   *len = sizeof (struct robust_list_head);
+   return 0;
+ }
+-
+-/* struct sigaction del kernel en aarch64 (sigset de 64 bits).  */
+-struct k_sigaction
+-{
+-  void *handler;
+-  unsigned long int flags;
+-  void *restorer;
+-  unsigned long int mask;
+-};
++#endif
+ 
+ /* Syscall atrapada por la capa propia: hecha fuera de la glibc, sin MARCA.
+    r = registros del programa; mascara = la que restaura el sigreturn.  */
+@@ -2436,6 +2438,7 @@
+    hilo); el manejador bloquea las demás señales, así ninguna anidada pisa el
+    marco que dejó el kernel en la pila de señales.  */
+ # define PILA_SIGSYS (256 * 1024)
++#if IS_IN (libc)
+ # define GUARDA 4096
+ static __thread char *pila_sigsys attribute_tls_model_ie;
+ 
+@@ -2570,6 +2573,7 @@
+       RAW (__NR_write, 2, msg, q + 33 - msg);
+     }
+ }
++#endif
+ 
+ /* Filtro de la capa propia (ver trampas[] y MARCA): deja pasar lo marcado y
+    atrapa el resto de las syscalls de la lista; rt_sigaction solo para SIGSYS,
+@@ -2630,6 +2634,7 @@
+     }
+ }
+ 
++#if IS_IN (libc)
+ void
+ __android_sigsys_init (void)
+ {
+@@ -2646,3 +2651,43 @@
+     seccomp_propio ();
+ }
+ #endif
++
++#if IS_IN (rtld)
++static void
++sigsys_handler_rtld (int sig, siginfo_t *si, void *ctx)
++{
++  if (si->si_code != 1 /* SYS_SECCOMP */)
++    return;
++  unsigned long long int *r = ((ucontext_t *) ctx)->uc_mcontext.regs;
++  if (si->si_errno == DATOS)
++    {
++      r[0] = trampa (si->si_syscall, r, &((ucontext_t *) ctx)->uc_sigmask);
++      if (debug_sigsys)
++	{
++	  char msg[80], *q = msg;
++	  mcopy (q, "glibc: static syscall ", 22);
++	  q = utoa (q + 22, si->si_syscall);
++	  mcopy (q, " atrapada por la capa propia\n", 29);
++	  RAW (__NR_write, 2, msg, q + 29 - msg);
++	}
++      return;
++    }
++  r[0] = -ENOSYS;
++  init ();
++}
++
++void
++__android_sigsys_init_rtld (void)
++{
++  struct k_sigaction ka;
++  ka.handler = (void *) sigsys_handler_rtld;
++  ka.flags = SA_SIGINFO | SA_NODEFER;
++  ka.restorer = NULL;
++  ka.mask = ~0UL & ~(1UL << (SIGSYS - 1));
++  RAW (__NR_rt_sigaction, SIGSYS, &ka, 0, sizeof (unsigned long int));
++  init ();
++  if (state == 2 && !sin_seccomp)
++    seccomp_propio ();
++}
++#endif
++#endif
+--- a/elf/rtld.c
++++ b/elf/rtld.c
+@@ -222,9 +222,11 @@
+ 			    unsigned int tag)
+ {
+   ElfW(Dyn) *info = main_map->l_info[ADDRIDX (tag)];
+-  const char *strtab = (const char *) D_PTR (main_map, l_info[DT_STRTAB]);
+-  if (info != NULL)
+-    audit_list_add_string (list, strtab + info->d_un.d_val);
++  if (info != NULL && main_map->l_info[DT_STRTAB] != NULL)
++    {
++      const char *strtab = (const char *) D_PTR (main_map, l_info[DT_STRTAB]);
++      audit_list_add_string (list, strtab + info->d_un.d_val);
++    }
+ }
+ 
+ static const char *
+@@ -1072,17 +1074,10 @@
+     if (main_map->l_phdr[i].p_type == PT_INTERP)
+       return;
+ 
+-  const char *pathname = _dl_argv[0];
+-  if (argv0 != NULL)
+-    _dl_argv[0] = argv0;
+-  int errcode = __rtld_execve (pathname, _dl_argv, _environ);
+-  const char *errname = strerrorname_np (errcode);
+-  if (errname != NULL)
+-    _dl_fatal_printf("%s: cannot execute %s: %s\n",
+-		     rtld_soname, pathname, errname);
+-  else
+-    _dl_fatal_printf("%s: cannot execute %s: %d\n",
+-		     rtld_soname, pathname, errcode);
++  /* Android: para binarios estáticos no intentamos llamar a __rtld_execve
++     (que fallaría con EACCES bajo W^X de Android), sino que el cargador
++     continúa y los ejecuta en el espacio de usuario actual.  */
++  return;
+ }
+ 
+ /* Called to complete the initialization of the link map for the main
+@@ -1360,6 +1355,7 @@
+   char *file;
+   unsigned int i;
+   bool rtld_is_main = false;
++  bool is_static_binary = false;
+   void *tcbp = NULL;
+   int skip_env = 0;
+ 
+@@ -1597,6 +1593,19 @@
+       /* Now the map for the main executable is available.  */
+       main_map = GL(dl_ns)[LM_ID_BASE]._ns_loaded;
+ 
++      if (main_map->l_info[DT_NEEDED] == NULL)
++	{
++	  bool has_pt_interp = false;
++	  for (size_t i = 0; i < main_map->l_phnum; ++i)
++	    if (main_map->l_phdr[i].p_type == PT_INTERP)
++	      {
++		has_pt_interp = true;
++		break;
++	      }
++	  if (!has_pt_interp)
++	    is_static_binary = true;
++	}
++
+       if (__glibc_likely (state.mode == rtld_mode_normal))
+ 	rtld_chain_load (main_map, argv0);
+ 
+@@ -1630,6 +1639,10 @@
+ 	  case AT_EXECFN:
+ 	    av->a_un.a_val = (uintptr_t) _dl_argv[0];
+ 	    break;
++	  case AT_BASE:
++	    if (is_static_binary)
++	      av->a_un.a_val = 0;
++	    break;
+ 	  }
+ #endif
+ 
+@@ -2275,6 +2288,7 @@
+ 
+   RTLD_TIMING_VAR (start);
+   rtld_timer_start (&start);
++  if (main_map->l_initfini != NULL)
+   {
+     unsigned i = main_map->l_searchlist.r_nlist;
+     while (i-- > 0)
+@@ -2383,6 +2397,12 @@
+   _dl_unload_cache ();
+ #endif
+ 
++  if (is_static_binary)
++    {
++      extern void __android_sigsys_init_rtld (void) attribute_hidden;
++      __android_sigsys_init_rtld ();
++    }
++
+   /* Once we return, _dl_sysdep_start will invoke
+      the DT_INIT functions and then *USER_ENTRY.  */
+ }
+--- a/elf/dl-init.c
++++ b/elf/dl-init.c
+@@ -79,6 +79,13 @@
+ void
+ _dl_init (struct link_map *main_map, int argc, char **argv, char **env)
+ {
++  if (main_map->l_initfini == NULL)
++    {
++#ifndef HAVE_INLINED_SYSCALLS
++      _dl_starting_up = 0;
++#endif
++      return;
++    }
+   ElfW(Dyn) *preinit_array = main_map->l_info[DT_PREINIT_ARRAY];
+   ElfW(Dyn) *preinit_array_size = main_map->l_info[DT_PREINIT_ARRAYSZ];
+   unsigned int i;
+--- a/elf/dl-reloc.c
++++ b/elf/dl-reloc.c
+@@ -205,6 +205,11 @@
+ _dl_relocate_object_no_relro (struct link_map *l, struct r_scope_elem *scope[],
+ 			      int reloc_mode, int consider_profiling)
+ {
++  if (l->l_ld == NULL)
++    {
++      l->l_relocated = 1;
++      return;
++    }
+   struct textrels
+   {
+     caddr_t start;
+@@ -343,6 +348,11 @@
+ {
+   if (l->l_relocated)
+     return;
++  if (l->l_ld == NULL)
++    {
++      l->l_relocated = 1;
++      return;
++    }
+   _dl_relocate_object_no_relro (l, scope, reloc_mode, consider_profiling);
+   _dl_protect_relro (l);
+ }
+@@ -350,6 +360,8 @@
+ void
+ _dl_protect_relro (struct link_map *l)
+ {
++  if (l->l_ld == NULL)
++    return;
+   if (l->l_relro_size == 0)
+     return;
+ 
