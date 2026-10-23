@@ -113,7 +113,7 @@ static void mostrar_logs(const char *name) {
 
 static void uso(void) {
     printf("%sUso:%s service <nombre> <start|stop|restart|status|enable|disable|logs>\n", BOLD, RESET);
-    printf("     service status | service list\n\n");
+    printf("     service list [-a] | service status\n\n");
     printf("%sComandos:%s\n", BOLD, RESET);
     printf("  %sstart%s    Inicia el servicio en segundo plano\n", CIAN, RESET);
     printf("  %sstop%s     Detiene el servicio limpiamente\n", CIAN, RESET);
@@ -122,7 +122,7 @@ static void uso(void) {
     printf("  %senable%s   Habilita el auto-arranque del servicio\n", CIAN, RESET);
     printf("  %sdisable%s  Deshabilita el auto-arranque\n", CIAN, RESET);
     printf("  %slogs%s     Muestra los últimos logs del servicio\n", CIAN, RESET);
-    printf("  %slist%s     Lista todos los servicios configurados\n", CIAN, RESET);
+    printf("  %slist%s     Lista los servicios configurados y activos (usar -a para ver todas las unidades systemd)\n", CIAN, RESET);
     exit(1);
 }
 
@@ -132,8 +132,11 @@ int main(int argc, char **argv) {
     const char *nombre = NULL;
     const char *accion = NULL;
 
-    if (argc == 2) {
-        if (strcmp(argv[1], "status") == 0 || strcmp(argv[1], "list") == 0) {
+    if (strcmp(argv[1], "list") == 0) {
+        accion = "list";
+        if (argc >= 3) nombre = argv[2];
+    } else if (argc == 2) {
+        if (strcmp(argv[1], "status") == 0) {
             accion = "list";
         } else {
             nombre = argv[1];
@@ -166,21 +169,30 @@ int main(int argc, char **argv) {
 
     char req[512];
     if (strcmp(accion, "list") == 0) {
-        snprintf(req, sizeof(req), "LIST\n");
+        if (nombre && (strcmp(nombre, "-a") == 0 || strcasecmp(nombre, "all") == 0)) {
+            snprintf(req, sizeof(req), "LIST ALL\n");
+        } else {
+            snprintf(req, sizeof(req), "LIST\n");
+        }
     } else {
         snprintf(req, sizeof(req), "%s %s\n", accion, nombre);
     }
     write(sfd, req, strlen(req));
 
-    char resp[4096];
-    ssize_t n = read(sfd, resp, sizeof(resp) - 1);
+    static char resp[65536];
+    size_t total = 0;
+    while (total < sizeof(resp) - 1) {
+        ssize_t n = read(sfd, resp + total, sizeof(resp) - 1 - total);
+        if (n <= 0) break;
+        total += n;
+    }
     close(sfd);
 
-    if (n <= 0) {
+    if (total == 0) {
         fprintf(stderr, "%sError: Respuesta vacía del supervisor%s\n", ROJO, RESET);
         return 1;
     }
-    resp[n] = '\0';
+    resp[total] = '\0';
 
     if (strcmp(accion, "list") == 0) {
         printf("%s%-4s %-25s %-12s %-8s %-10s %-8s %s%s\n",

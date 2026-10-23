@@ -14,7 +14,6 @@
 #include <sys/wait.h>
 #include <dirent.h>
 
-#define MAX_SERVICES 512
 #define LINE_MAX_LEN 1024
 #define SERVICES_DIR "/etc/services.d"
 #define SYSTEM_UNITS_DIR "/usr/lib/systemd/system"
@@ -35,8 +34,9 @@ typedef struct {
     int wanted_state; // 1 = running, 0 = stopped
 } Service;
 
-static Service g_services[MAX_SERVICES];
+static Service *g_services = NULL;
 static int g_num_services = 0;
+static int g_capacity = 0;
 static volatile sig_atomic_t g_running = 1;
 
 static void obtener_socket_path(char *out, size_t maxlen) {
@@ -204,17 +204,33 @@ static int parsear_unidad(const char *name, Service *srv) {
 static Service *buscar_o_crear(const char *name) {
     for (int i = 0; i < g_num_services; i++) {
         if (strcmp(g_services[i].name, name) == 0) {
+            // Si el servicio no está corriendo, actualizar definición desde disco por si cambió
+            if (g_services[i].pid <= 0) {
+                Service temp;
+                if (parsear_unidad(name, &temp) == 0) {
+                    temp.restart_count = g_services[i].restart_count;
+                    g_services[i] = temp;
+                }
+            }
             return &g_services[i];
         }
     }
-    if (g_num_services >= MAX_SERVICES) return NULL;
 
-    Service *s = &g_services[g_num_services];
-    if (parsear_unidad(name, s) < 0) {
+    Service temp;
+    if (parsear_unidad(name, &temp) < 0) {
         return NULL;
     }
-    g_num_services++;
-    return s;
+
+    if (g_num_services >= g_capacity) {
+        int new_cap = (g_capacity == 0) ? 16 : g_capacity * 2;
+        Service *new_arr = realloc(g_services, new_cap * sizeof(Service));
+        if (!new_arr) return NULL;
+        g_services = new_arr;
+        g_capacity = new_cap;
+    }
+
+    g_services[g_num_services] = temp;
+    return &g_services[g_num_services++];
 }
 
 static int iniciar_servicio(Service *s) {
@@ -339,7 +355,7 @@ static void manejar_cliente(int client_fd) {
     char arg[128] = {0};
     sscanf(req, "%63s %127s", cmd, arg);
 
-    char resp[4096];
+    static char resp[65536];
     memset(resp, 0, sizeof(resp));
 
     if (strcasecmp(cmd, "PING") == 0) {
@@ -401,7 +417,8 @@ static void manejar_cliente(int client_fd) {
                      running ? s->pid : 0, uptime, s->restart_count, enab, s->description);
         }
     } else if (strcasecmp(cmd, "LIST") == 0) {
-        const char *dirs[] = { SERVICES_DIR, SYSTEM_UNITS_DIR, NULL };
+        int listar_todo = (arg[0] != '\0' && (strcasecmp(arg, "ALL") == 0 || strcasecmp(arg, "-a") == 0));
+        const char *dirs[] = { SERVICES_DIR, listar_todo ? SYSTEM_UNITS_DIR : NULL, NULL };
         for (int j = 0; dirs[j] != NULL; j++) {
             DIR *d = opendir(dirs[j]);
             if (d) {
@@ -425,6 +442,15 @@ static void manejar_cliente(int client_fd) {
             int running = (s->pid > 0 && kill(s->pid, 0) == 0);
             int enab = es_habilitado(s->name);
             long uptime = running ? (long)(time(NULL) - s->start_time) : 0;
+            // Si es listado estándar, solo mostrar servicios en services.d, habilitados o activos
+            if (!listar_todo && !running && !enab) {
+                char path[512];
+                snprintf(path, sizeof(path), "%s/%s.service", SERVICES_DIR, s->name);
+                if (access(path, F_OK) != 0) {
+                    snprintf(path, sizeof(path), "%s/%s.conf", SERVICES_DIR, s->name);
+                    if (access(path, F_OK) != 0) continue;
+                }
+            }
             off += snprintf(resp + off, sizeof(resp) - off, "SRV %s|%s|%d|%ld|%d|%s\n",
                             s->name, running ? "running" : "stopped",
                             running ? s->pid : 0, uptime, enab, s->description);
