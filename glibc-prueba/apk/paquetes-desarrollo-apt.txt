@@ -1,0 +1,2 @@
+# Desarrollo para Debian (apt)
+build-essential git python3-dev gdb strace

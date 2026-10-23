@@ -88,7 +88,8 @@ backend_iniciar_base() {
             # Prevenir que scripts de paquetes intenten iniciar servicios con policy-rc.d
             printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d 2>/dev/null || true
             chmod +x /usr/sbin/policy-rc.d 2>/dev/null || true
-            sudo apt-get update > /dev/null 2>&1 || true
+            paso "Actualizando índices de paquetes de Debian (apt-get update)"
+            sudo apt-get update || true
             ;;
         *)
             backend_limpiar_lock

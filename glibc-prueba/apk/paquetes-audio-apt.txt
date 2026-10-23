@@ -1,0 +1,2 @@
+# Audio para Debian (apt)
+pipewire pipewire-pulse wireplumber

@@ -1,0 +1,2 @@
+# Base minima de escritorio para Debian (apt)
+xterm tint2 picom openbox x11-utils x11-xserver-utils

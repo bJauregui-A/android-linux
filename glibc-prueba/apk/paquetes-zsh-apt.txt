@@ -1,0 +1,2 @@
+# Zsh para Debian (apt)
+zsh zsh-autosuggestions zsh-syntax-highlighting fonts-jetbrains-mono

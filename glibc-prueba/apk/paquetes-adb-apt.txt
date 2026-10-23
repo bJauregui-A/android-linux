@@ -1,0 +1,2 @@
+# adb local para Debian (apt)
+adb

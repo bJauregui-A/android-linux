@@ -83,7 +83,8 @@ PAQUETES_OBJETIVO = [
     "apt",
     "debian-archive-keyring",
     "gpgv",
-    "openssl"
+    "openssl",
+    "mawk"
 ]
 
 
@@ -361,6 +362,16 @@ def main():
     out.archivo("etc/apt/apt.conf.d/99android", APT_CONF_ANDROID, 0o644)
     out.archivo("etc/apt/sources.list", SOURCES_LIST, 0o644)
     out.archivo("etc/resolv.conf", b"nameserver 1.1.1.1\nnameserver 8.8.8.8\n", 0o644)
+    out.archivo("etc/ld.so.conf", b"/usr/lib/aarch64-linux-gnu\n/lib/aarch64-linux-gnu\n/usr/lib\n/lib\n", 0o644)
+    out.archivo("etc/environment", b"LD_LIBRARY_PATH=/usr/lib/aarch64-linux-gnu:/lib/aarch64-linux-gnu:/usr/lib:/lib\nPATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n", 0o644)
+
+    # Enlace de la llave GPG oficial de Debian en trusted.gpg.d para verificacion de firmas en apt
+    ti_key = tarfile.TarInfo("etc/apt/trusted.gpg.d/debian-archive-keyring.gpg")
+    ti_key.type = tarfile.SYMTYPE
+    ti_key.linkname = "../../usr/share/keyrings/debian-archive-keyring.gpg"
+    ti_key.mode = 0o777
+    ti_key.mtime = int(time.time())
+    out.t.addfile(ti_key)
 
     # Enlaces de compatibilidad usrmerge (binarios esenciales en /usr/bin)
     for b in ["bash", "sh", "dash", "tar", "grep", "sed", "gzip", "cat", "ls", "cp",

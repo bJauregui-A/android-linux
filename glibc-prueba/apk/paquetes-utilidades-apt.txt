@@ -1,0 +1,2 @@
+# Utilidades para Debian (apt)
+htop unzip wget curl tmux procps psmisc

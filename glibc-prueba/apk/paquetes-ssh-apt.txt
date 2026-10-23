@@ -1,0 +1,2 @@
+# SSH para Debian (apt)
+openssh-server openssh-client

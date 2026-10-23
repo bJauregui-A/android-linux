@@ -1,0 +1,2 @@
+# Base consola sin entorno para Debian (apt)
+nano jq zsh openssh-server openssh-client htop tmux curl wget ca-certificates procps net-tools iproute2
