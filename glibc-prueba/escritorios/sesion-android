@@ -150,6 +150,9 @@ done
 case "$COMPROBACION_READY" in
     socket-wayland) [ "$PROTOCOLO_PANTALLA" = wayland ] ||
         rechazar_perfil "socket-wayland no corresponde al protocolo $PROTOCOLO_PANTALLA" ;;
+    socket-x11) [ "$PROTOCOLO_PANTALLA" = x11 ] ||
+        rechazar_perfil "socket-x11 no corresponde al protocolo $PROTOCOLO_PANTALLA" ;;
+    inmediato) ;;
     *) rechazar_perfil "comprobación de readiness no implementada: $COMPROBACION_READY";;
 esac
 case "$READY_LEVEL" in proveedor-y-proceso) ;; *)
@@ -215,7 +218,7 @@ perfil_file="$XDG_RUNTIME_DIR/linux-session.profile"
 perfil_tmp="$perfil_file.$$"
 printf '%s\n' "$id" > "$perfil_tmp" && mv -f "$perfil_tmp" "$perfil_file"
 # Guardar sockets que ya existían para no confundir restos de una sesión anterior con la nueva.
-anteriores=" $(for s in "$XDG_RUNTIME_DIR"/wayland-*; do
+anteriores=" $(for s in "$XDG_RUNTIME_DIR"/wayland-* /tmp/.X11-unix/X*; do
     [ -S "$s" ] || continue
     printf '%s:%s ' "${s##*/}" "$(stat -c %i "$s" 2>/dev/null)"
 done) "
@@ -314,6 +317,19 @@ for i in $(seq $((TIEMPO_READY * 4))); do
             done
             [ -n "$encontrado" ] && break
             ;;
+        socket-x11)
+            encontrado=
+            for s in /tmp/.X11-unix/X*; do
+                [ -S "$s" ] || continue
+                socket="${s##*/}:$(stat -c %i "$s" 2>/dev/null)"
+                case "$anteriores" in *" $socket "*) continue;; esac
+                num="${s##*/X}"
+                printf ':%s\n' "$num" > "$XDG_RUNTIME_DIR/$MARCADOR_PANTALLA"
+                encontrado=1
+                break
+            done
+            [ -n "$encontrado" ] && break
+            ;;
         inmediato)
             printf '%s\n' "headless" > "$XDG_RUNTIME_DIR/$MARCADOR_PANTALLA"
             break
@@ -350,7 +366,13 @@ if [ -s "$XDG_RUNTIME_DIR/$MARCADOR_PANTALLA" ]; then
         fi
     fi
     # Los servicios comparten este bus y el ciclo de vida del supervisor, no el del WM.
-    boot_ok "Wayland compositor ready on display '$endpoint'."
+    if [ "$PROTOCOLO_PANTALLA" = wayland ]; then
+        boot_ok "Wayland compositor ready on display '$endpoint'."
+    elif [ "$PROTOCOLO_PANTALLA" = x11 ]; then
+        boot_ok "X11 server ready on display '$endpoint'."
+    else
+        boot_ok "Display endpoint ready on '$endpoint'."
+    fi
     boot_ok "Reached target Graphical Interface ($id)."
     printf 'LISTO:%s:%s\n' "$id" "$endpoint" > "$estado_file"
     autostart-android --esperar > /tmp/autostart-android.log 2>&1 &

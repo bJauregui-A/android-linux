@@ -11,3 +11,4 @@ glibc-prueba/glibc/salida/
 glibc-prueba/glibc/build.log
 glibc-prueba/wayland/fuentes/
 glibc-prueba/wayland/salida/
+.idea/

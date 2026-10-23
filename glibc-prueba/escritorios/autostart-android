@@ -17,6 +17,19 @@ if [ "$1" = --esperar ]; then
                     fi
                 fi
                 ;;
+            socket-x11)
+                marker=${ARCH_ANDROID_SCREEN_MARKER:-linux-session-display-x11}
+                variable=${ARCH_ANDROID_SCREEN_ENV:-DISPLAY}
+                if [ -s "$XDG_RUNTIME_DIR/$marker" ]; then
+                    display=$(cat "$XDG_RUNTIME_DIR/$marker")
+                    num="${display#:}"
+                    if [ -S "/tmp/.X11-unix/X$num" ]; then
+                        export "$variable=$display"
+                        listo=1
+                        break
+                    fi
+                fi
+                ;;
             inmediato)
                 listo=1
                 break
@@ -152,6 +165,9 @@ if [ "${ARCH_ANDROID_SCREEN_PROTOCOL:-}" = wayland ] \
         && command -v wl-paste >/dev/null 2>&1 && command -v cliphist >/dev/null 2>&1; then
     iniciar cliphist-texto proceso wl-paste --type text --watch cliphist store
     iniciar cliphist-imagen proceso wl-paste --type image --watch cliphist store
+elif [ "${ARCH_ANDROID_SCREEN_PROTOCOL:-}" = x11 ] \
+        && command -v xclip >/dev/null 2>&1 && command -v cliphist >/dev/null 2>&1; then
+    iniciar cliphist-texto proceso bash -c "while true; do xclip -selection clipboard -o 2>/dev/null | cliphist store 2>/dev/null; sleep 1; done"
 fi
 
 # Auto-arranque del demonio supervisor para servicios gestionados

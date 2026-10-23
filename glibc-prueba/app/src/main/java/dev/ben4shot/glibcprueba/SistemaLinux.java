@@ -97,7 +97,7 @@ final class SistemaLinux {
     static List<DistroInfo> distrosDisponibles() {
         return Arrays.asList(
                 new DistroInfo(ARCH, "Arch Linux ARM", "ARM64", true),
-                new DistroInfo(DEBIAN, "Debian", "arm64", false),
+                new DistroInfo(DEBIAN, "Debian", "arm64", true),
                 new DistroInfo(UBUNTU, "Ubuntu", "arm64", false));
     }
 
@@ -350,6 +350,9 @@ final class SistemaLinux {
     }
 
     static AdaptadorInstalacion adaptador(Instancia inst) {
+        if (inst != null && DEBIAN.equals(inst.distroId)) {
+            return new AdaptadorDebianArm64(inst.rutaRelativa);
+        }
         if (inst == null || ARCH.equals(inst.distroId)) {
             return new AdaptadorArchArm64(inst != null ? inst.rutaRelativa : "instancias/arch-principal");
         }
@@ -365,12 +368,14 @@ final class SistemaLinux {
         Instancia inst = instancia(c, id);
         if (inst != null) return adaptador(inst);
         if (ARCH.equals(id)) return adaptadorSeleccionado(c);
+        if (DEBIAN.equals(id)) return new AdaptadorDebianArm64();
         String ruta = id.startsWith("instancias/") ? id : "instancias/" + id;
         return new AdaptadorArchArm64(ruta);
     }
 
     static AdaptadorInstalacion adaptador(String id) {
         if (id == null || id.isEmpty() || ARCH.equals(id)) return new AdaptadorArchArm64();
+        if (DEBIAN.equals(id)) return new AdaptadorDebianArm64();
         String ruta = id.startsWith("instancias/") ? id : "instancias/" + id;
         return new AdaptadorArchArm64(ruta);
     }

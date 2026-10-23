@@ -1,0 +1,4 @@
+#!/bin/bash
+export DISPLAY=${DISPLAY:-:0}
+export XDG_CURRENT_DESKTOP=XFCE XDG_MENU_PREFIX=xfce-
+exec startxfce4

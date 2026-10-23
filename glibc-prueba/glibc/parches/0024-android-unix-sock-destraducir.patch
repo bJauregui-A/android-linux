@@ -1,0 +1,142 @@
+--- a/sysdeps/unix/sysv/linux/aarch64/sysdep.h
++++ b/sysdeps/unix/sysv/linux/aarch64/sysdep.h
+@@ -212,7 +212,7 @@
+     case __NR_renameat2: case __NR_symlinkat: case __NR_readlinkat:
+     case __NR_getcwd: case __NR_bind: case __NR_connect: case __NR_execve:
+     case __NR_execveat: case __NR_ioctl: case __NR_socket:
+-    case __NR_getsockname: case __NR_sendto: case __NR_sendmsg:
++    case __NR_getsockname: case __NR_getpeername: case __NR_sendto: case __NR_sendmsg:
+     case __NR_recvmsg: case __NR_recvfrom: case __NR_close:
+     case __NR_prctl:
+     case __NR_getuid: case __NR_geteuid: case __NR_getgid: case __NR_getegid:
+--- a/sysdeps/unix/sysv/linux/aarch64/android-path.c
++++ b/sysdeps/unix/sysv/linux/aarch64/android-path.c
+@@ -1040,6 +1040,64 @@
+ 	 && (uevent_fds[fd / UEV_BITS] >> (fd % UEV_BITS)) & 1;
+ }
+ 
++/* Tabla de sockets AF_UNIX creados con ruta larga vía /proc/self/fd/N.
++   Para que getsockname devuelva la ruta original del programa (Chromium
++   SingletonSocket, etc.) en vez del enlace de /proc/self/fd/N.  */
++struct unix_sock_largo
++{
++  int fd;
++  char ruta[108];
++};
++static struct unix_sock_largo socks_largos[32];
++
++static void
++guardar_sock_largo (int fd, const char *ruta)
++{
++  if (fd < 0 || ruta == NULL)
++    return;
++  for (int i = 0; i < 32; i++)
++    {
++      if (socks_largos[i].fd <= 0 || socks_largos[i].fd == fd)
++	{
++	  socks_largos[i].fd = fd;
++	  size_t n = slen (ruta);
++	  if (n >= sizeof (socks_largos[i].ruta))
++	    n = sizeof (socks_largos[i].ruta) - 1;
++	  mcopy (socks_largos[i].ruta, ruta, n);
++	  socks_largos[i].ruta[n] = '\0';
++	  return;
++	}
++    }
++}
++
++static const char *
++buscar_sock_largo (int fd)
++{
++  if (fd <= 0)
++    return NULL;
++  for (int i = 0; i < 32; i++)
++    {
++      if (socks_largos[i].fd == fd)
++	return socks_largos[i].ruta;
++    }
++  return NULL;
++}
++
++static void
++limpiar_sock_largo (int fd)
++{
++  if (fd <= 0)
++    return;
++  for (int i = 0; i < 32; i++)
++    {
++      if (socks_largos[i].fd == fd)
++	{
++	  socks_largos[i].fd = -1;
++	  return;
++	}
++    }
++}
++
+ /* Emulación de Netlink Route (RTM_GETLINK, RTM_GETNEIGH y bind).
+    Android SELinux prohíbe bind(nl_groups=0) y sendto(RTM_GETLINK) a apps
+    sin privilegios (untrusted_app) para evitar fuga de MAC de Wi-Fi.
+@@ -1718,6 +1776,7 @@
+       netlink_marcar (a0, 0);
+       uevent_marcar (a0, 0);
+       nl_slot_limpiar (a0);
++      limpiar_sock_largo ((int) a0);
+       return raw (nr, a0, a1, a2, a3, a4, a5);
+     case __NR_socket:
+       {
+@@ -1792,11 +1851,12 @@
+ 	break;
+       }
+     case __NR_getsockname:
++    case __NR_getpeername:
+       {
+ 	long int r = raw (nr, a0, a1, a2, 0, 0, 0);
+ 	if (r == 0 && a1 != 0)
+ 	  {
+-	    if (netlink_es (a0))
++	    if (nr == __NR_getsockname && netlink_es (a0))
+ 	      {
+ 		struct sockaddr_nl *snl = (struct sockaddr_nl *) a1;
+ 		if (snl->nl_family == AF_NETLINK && snl->nl_pid == 0)
+@@ -1812,6 +1872,32 @@
+ 		    if (leer_virtual_ip (&my_vip, &vlen) && my_vip != 0)
+ 		      sin->sin_addr.s_addr = loopback_a_vip (sin->sin_addr.s_addr, my_vip);
+ 		  }
++		else if (sin->sin_family == AF_UNIX)
++		  {
++		    struct sockaddr_un *sun = (struct sockaddr_un *) a1;
++		    socklen_t *sl = (socklen_t *) a2;
++		    size_t off = offsetof (struct sockaddr_un, sun_path);
++		    if (*sl > (socklen_t) off)
++		      {
++			const char *ruta_larga = (nr == __NR_getsockname) ? buscar_sock_largo ((int) a0) : NULL;
++			if (ruta_larga != NULL)
++			  {
++			    size_t nl = slen (ruta_larga);
++			    if (nl >= sizeof (sun->sun_path))
++			      nl = sizeof (sun->sun_path) - 1;
++			    mcopy (sun->sun_path, ruta_larga, nl);
++			    sun->sun_path[nl] = '\0';
++			    *sl = off + nl + 1;
++			  }
++			else if (sun->sun_path[0] == '/')
++			  {
++			    size_t cl = slen (sun->sun_path);
++			    size_t nl = unxlat (sun->sun_path, cl);
++			    sun->sun_path[nl] = '\0';
++			    *sl = off + nl + 1;
++			  }
++		      }
++		  }
+ 	      }
+ 	  }
+ 	return r;
+@@ -2260,6 +2346,8 @@
+ 		mcopy (q, base, nb + 1);
+ 		r = raw (nr, a0, (long int) &su, off + (q - su.sun_path) + nb + 1,
+ 			 0, 0, 0);
++		if (r == 0 && nr == __NR_bind)
++		  guardar_sock_largo ((int) a0, sa->sun_path);
+ 	      }
+ 	    RAW (__NR_close, fd);
+ 	    return r;

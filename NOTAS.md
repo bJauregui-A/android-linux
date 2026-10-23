@@ -818,8 +818,28 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
 - **Compilación e instalación:**
   - APK `sdk36Debug` recompilada exitosamente e instalada en el Redmi 15 5G con `adb install -r`.
 
-**Siguiente sesión (74ª):**
-1. **Inicialización de entornos basada en Dockerfile / OCI (`dockerfile-runner` / importador):**
-   - Diseñar e implementar un generador o intérprete que cree e inicialice instancias aisladas a partir de un `Dockerfile` (soportando directivas clave: `FROM`, `ENV`, `COPY`, `RUN`, `WORKDIR`, `EXPOSE`, `CMD`), o mediante importación directa de rootfs OCI/Docker inyectando `libldp.so`/glibc propia.
-2. **Distribuciones adicionales (Punto 4: Debian y Ubuntu ARM64):**
-   - Creación de adaptadores (`AdaptadorDebianArm64.java`), bootstrap de rootfs (`base-debian.tgz`) y recetas apt sin root.
+74ª sesión (2026-10-23):
+- **Detalle menor en glibc: destraducción de sockets `AF_UNIX` en `getsockname` y `getpeername` (parche 0024):**
+  - Para sockets con rutas largas (> 108 bytes con el prefijo de Android) enlazados vía `/proc/self/fd/N` (como `SingletonSocket` de Chromium/Steam), se almacena la ruta original en la tabla `socks_largos` durante `bind`.
+  - En `getsockname` y `getpeername`, si es AF_UNIX y pertenece a la tabla, devuelve la ruta original guardada. Si es un socket normal con ruta dentro del prefijo, `unxlat` retira el prefijo y destraduce la ruta.
+  - En `sysdep.h` se añadió `__NR_getpeername` al filtro de syscalls.
+  - Generado parche [0024-android-unix-sock-destraducir.patch](file:///media/ben4shot/E/Develop/Android/glibc-prueba/glibc/parches/0024-android-unix-sock-destraducir.patch). Recompilada glibc en Docker (`salida/usr/lib/ld-linux-aarch64.so.1` y `libc.so.6`) y sincronizado `libldp.so` en `app/src/main/jniLibs/arm64-v8a/libldp.so`.
+- **Proveedor y arquitectura de Compositor / Servidor X11 Real y Directo (sin Xwayland):**
+  - Descartada la emulación/compatibilidad anidada de Xwayland sobre Wayland según instrucción del usuario.
+  - Creado el proveedor nativo `escritorios/proveedores/x11-directo/proveedor.conf` (`PROTOCOLO_PANTALLA=x11`, `DISPLAY=:0`, `COMPROBACION_READY=socket-x11`, capacidades `x11-directo compositor-x11 socket-clientes`).
+  - Actualizado [escritorios/sesion-android](file:///media/ben4shot/E/Develop/Android/glibc-prueba/escritorios/sesion-android) con soporte para comprobación `socket-x11` (detección y publicación de `/tmp/.X11-unix/X*` en `linux-session-display-x11` y `linux-session.properties`).
+  - Actualizado [escritorios/autostart-android](file:///media/ben4shot/E/Develop/Android/glibc-prueba/escritorios/autostart-android) con soporte para `socket-x11` y puente de portapapeles con `xclip` hacia `cliphist`.
+  - Creados perfiles de escritorio nativos directos X11: `escritorios/openbox/` (Openbox con compositor `picom` y panel `tint2`) y `escritorios/xfce-x11/` (XFCE nativo con su compositor de ventanas `xfwm4`).
+  - Actualizado [escritorios/COMPATIBILIDAD.md](file:///media/ben4shot/E/Develop/Android/glibc-prueba/escritorios/COMPATIBILIDAD.md).
+- **Soporte de distribuciones adicionales (Punto 4: Debian ARM64):**
+  - Creado [AdaptadorDebianArm64.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/AdaptadorDebianArm64.java) implementando `AdaptadorInstalacion` para Debian bookworm/trixie: rootfs, usuario, shell `/bin/bash`, entorno con `DEBIAN_FRONTEND=noninteractive`, wrapper de `sudo` con `GLIBC_FAKEROOT=1` y configuración de APT para ejecución sin root (`APT::Sandbox::User "root"`, `DPkg::Options {"--force-not-root"; "--force-bad-path";}`).
+  - Habilitada Debian en [SistemaLinux.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/SistemaLinux.java) (`distrosDisponibles()`, resolución de adaptadores por ID y por instancia).
+- **Empaquetado y compilación:**
+  - Regenerados `base.tgz` y `capa.tgz` con `apk/armar.sh sdk36`.
+  - Compilada APK `sdk36Debug` con Gradle (`BUILD SUCCESSFUL in 6s`). No se instaló en el dispositivo para no interrumpir la sesión activa sin presencia del usuario.
+
+**Siguiente sesión (75ª):**
+1. **Bootstrap y rootfs base de Debian ARM64 (`scripts/bootstrap-debian.py` / `base-debian.tgz`):**
+   - Script para descargar y desempacar paquetes esenciales (coreutils, dpkg, apt, debian-archive-keyring, bash) inyectando `libldp.so` y glibc propia.
+2. **Inicialización de entornos basada en Dockerfile / OCI (`dockerfile-runner` / importador):**
+   - Intérprete para inicializar instancias aisladas desde `Dockerfile` (`FROM`, `ENV`, `COPY`, `RUN`, etc.) o tarballs OCI.

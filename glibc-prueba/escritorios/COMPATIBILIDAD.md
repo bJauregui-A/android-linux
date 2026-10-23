@@ -28,10 +28,10 @@ paquete exista o que su comando esté en `sesion` no significa que ya esté prob
 - El marcador publicado en `$XDG_RUNTIME_DIR` expone el endpoint listo a TerminalService y los
   servicios.
 
-El proveedor activo `wayland-anidado` conecta el compositor al `WAYLAND_DISPLAY` anfitrión y espera
-un socket Wayland nuevo. Todos los perfiles actuales lo solicitan explícitamente. Esto comprueba
-disponibilidad del endpoint, no que el compositor haya presentado un cuadro. Otros proveedores
-(por ejemplo, X11 anidado) necesitan su contrato y su comprobación de readiness antes de usarse.
+Los proveedores activos son:
+- `wayland-anidado`: conecta el compositor al `WAYLAND_DISPLAY` anfitrión (`wayland-0`) y espera un socket Wayland nuevo (`socket-wayland`).
+- `x11-directo`: servidor y compositor X11 real y directo en la superficie Android (sin intermediación de Wayland ni emulación Xwayland); espera el socket `/tmp/.X11-unix/X*` (`socket-x11`), exponiendo `DISPLAY=:0` para gestores y compositores nativos X11 (`openbox` con `picom`, `xfce` con `xfwm4`, `i3`, etc.).
+- `ninguno`: sesión de consola / headless para servidores.
 
 ## Ciclo común (mínimo)
 

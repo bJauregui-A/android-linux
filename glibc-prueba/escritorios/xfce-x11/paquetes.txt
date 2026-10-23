@@ -1,0 +1,4 @@
+xfce4
+xfwm4
+xterm
+xclip
