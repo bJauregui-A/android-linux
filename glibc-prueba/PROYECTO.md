@@ -637,6 +637,8 @@ Antecedente útil para ver qué parches hacen falta: el proyecto **glibc-package
 | `supervisor/service-daemon.c`, `supervisor/service.c` | Supervisor ligero y CLI (`service` / `sv`) en C nativo para control de servicios (`start`/`stop`/`status`/`enable`/`disable`/`logs`/`list`) sobre `/etc/services.d` |
 | `supervisor/supervisor.sh` | Script para `/etc/profile.d/` que levanta en segundo plano el demonio supervisor al iniciar la shell |
 | `glibc/parches/0022-android-virtual-net.patch` | Emulación de red virtual privada: interfaz sintética `vnet0`, `RTM_GETADDR`, y redirección de `bind` (a INADDR_ANY) y `connect` (a 127.0.0.1) |
+| `glibc/parches/0023-android-static-binaries.patch` | Soporte nativo para binarios estáticos (AArch64 ET_EXEC/ET_DYN sin PT_INTERP) bajo W^X de Android (omisión de rtld_chain_load, seccomp k_sigaction en rtld, auxv AT_BASE=0 y deferencia de RELRO) |
+| `apk/pacman-xfer` | Wrapper ligero para XferCommand de pacman que mapea transparentemente repos SteamOS Holo (`holo-core.db` / `holo-extra.db` -> `core.db` / `extra.db`) con curl |
 | `app/src/main/java/.../RedManager.java` | Gestor de subredes virtuales CIDR, asignación de IPs fijas persistentes (`/etc/virtual-ip`) y reenvío de puertos TCP |
 
 `instalar-glibc.sh sdk36 archlinux` actualiza solo la glibc (APK + bibliotecas del prefijo) tras recompilar.

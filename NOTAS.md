@@ -729,10 +729,11 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
    - **Corrección:**
      - En [SistemaLinux.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/SistemaLinux.java): se eliminaron los lanzamientos de `IllegalArgumentException` en `raiz()` y `adaptador()`. Si el ID solicitado no está en la lista activa (ej. durante el proceso de cierre/eliminación), se resuelve dinámicamente hacia la ruta `instancias/<id>` con fallback seguro a `AdaptadorArchArm64`.
      - En [TerminalService.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/TerminalService.java): protegida con `try-catch` la rutina de limpieza de procesos en `cerrarInstancia()`.
-   - **Saneamiento en el teléfono:**
+   - **Saneamiento y validación en el teléfono:**
      - Terminados los procesos residuales de `server1` (`service-daemon` y `nginx`) y eliminado su directorio huérfano en disco.
      - Reconfigurado `shared_prefs/instalacion-linux.xml` con `srvtest-91001` activo.
      - APK `sdk36Debug` recompilada e instalada en el dispositivo vía `adb install -r`, verificando su arranque limpio y enfocado en primer plano.
+     - **Prueba de regresión en runtime ART:** ejecutada la clase de test `PruebaInstancia` con `app_process` en el teléfono invocando `SistemaLinux.adaptador()` y `SistemaLinux.raiz()` para `server1-25913`, IDs inexistentes y `null`. Verificada resolución limpia a `AdaptadorArchArm64` y ruta correspondiente sin lanzar excepciones (código de salida 0). Limpiados archivos temporales de prueba.
 
 **Siguiente sesión (71ª):**
 1. **Inicialización de entornos basada en Dockerfile / OCI (`dockerfile-runner` / importador):**
