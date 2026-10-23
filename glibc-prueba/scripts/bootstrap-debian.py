@@ -99,7 +99,10 @@ PAQUETES_OBJETIVO = [
     "debian-archive-keyring",
     "gpgv",
     "openssl",
-    "mawk"
+    "mawk",
+    "libc-bin",
+    "util-linux",
+    "usr-is-merged"
 ]
 
 
@@ -399,14 +402,53 @@ def main():
         ti.mtime = int(time.time())
         out.t.addfile(ti)
 
-    # Configuración de usuarios básica
+    # Configuración de usuarios y grupos estándar de Debian
     out.archivo("etc/passwd",
                 b"root:x:0:0:root:/root:/bin/bash\n"
                 b"user:x:10478:10478:user:/home/user:/bin/bash\n", 0o644)
     out.archivo("etc/group",
                 b"root:x:0:\n"
-                b"user:x:10478:\n"
-                b"sudo:x:27:user\n", 0o644)
+                b"daemon:x:1:\n"
+                b"bin:x:2:\n"
+                b"sys:x:3:\n"
+                b"adm:x:4:\n"
+                b"tty:x:5:\n"
+                b"disk:x:6:\n"
+                b"lp:x:7:\n"
+                b"mail:x:8:\n"
+                b"news:x:9:\n"
+                b"uucp:x:10:\n"
+                b"man:x:12:\n"
+                b"proxy:x:13:\n"
+                b"kmem:x:15:\n"
+                b"dialout:x:20:\n"
+                b"fax:x:21:\n"
+                b"voice:x:22:\n"
+                b"cdrom:x:24:\n"
+                b"floppy:x:25:\n"
+                b"tape:x:26:\n"
+                b"sudo:x:27:user\n"
+                b"audio:x:29:\n"
+                b"dip:x:30:\n"
+                b"www-data:x:33:\n"
+                b"backup:x:34:\n"
+                b"operator:x:37:\n"
+                b"list:x:38:\n"
+                b"irc:x:39:\n"
+                b"src:x:40:\n"
+                b"gnats:x:41:\n"
+                b"shadow:x:42:\n"
+                b"utmp:x:43:\n"
+                b"video:x:44:\n"
+                b"sasl:x:45:\n"
+                b"plugdev:x:46:\n"
+                b"staff:x:50:\n"
+                b"games:x:60:\n"
+                b"users:x:100:\n"
+                b"_ssh:x:101:\n"
+                b"ssh:x:102:\n"
+                b"nogroup:x:65534:\n"
+                b"user:x:10478:\n", 0o644)
 
     out.t.close()
     tam_mb = os.path.getsize(a.out) / (1024 * 1024)

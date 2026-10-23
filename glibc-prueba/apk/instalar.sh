@@ -152,6 +152,24 @@ DPkg::Options {
 Acquire::Languages "none";
 Acquire::Check-Valid-Until "false";
 EOF
+
+    # Grupos esenciales para servicios como ssh
+    if [ -f "$P/etc/group" ]; then
+        grep -q "^_ssh:" "$P/etc/group" || echo "_ssh:x:101:" >> "$P/etc/group"
+        grep -q "^ssh:" "$P/etc/group" || echo "ssh:x:102:" >> "$P/etc/group"
+    fi
+
+    # Stub de mountpoint para paquetes que lo comprueban
+    if [ ! -x "$P/usr/bin/mountpoint" ]; then
+        printf '#!/bin/sh\nexit 1\n' > "$P/usr/bin/mountpoint" 2>/dev/null || true
+        chmod +x "$P/usr/bin/mountpoint" 2>/dev/null || true
+        ln -sfn /usr/bin/mountpoint "$P/bin/mountpoint" 2>/dev/null || true
+    fi
+
+    # Marcar usr-is-merged en dpkg status para evitar convert-usrmerge
+    if [ -f "$P/var/lib/dpkg/status" ] && ! grep -q "^Package: usr-is-merged" "$P/var/lib/dpkg/status"; then
+        printf "Package: usr-is-merged\nStatus: install ok installed\nPriority: optional\nSection: oldlibs\nInstalled-Size: 13\nMaintainer: Marco d'Itri <md@linux.it>\nArchitecture: all\nVersion: 37~deb12u1\nDescription: Transitional package to assert a merged-/usr system\n\n" >> "$P/var/lib/dpkg/status"
+    fi
 fi
 
 # DNS de Android (el tar trae uno de respaldo)
