@@ -423,6 +423,12 @@ def main():
     ti_nologin.mtime = int(time.time())
     out.t.addfile(ti_nologin)
 
+    # apt-key adaptado a Android sin root
+    apt_key_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "apk", "apt-key")
+    if os.path.exists(apt_key_path):
+        out.archivo("usr/bin/apt-key", open(apt_key_path, "rb").read(), 0o755)
+        out.archivo("usr/local/bin/apt-key", open(apt_key_path, "rb").read(), 0o755)
+
     out.directorio("run/sshd")
 
     # Configuración de usuarios y grupos estándar de Debian
