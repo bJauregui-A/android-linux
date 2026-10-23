@@ -856,6 +856,14 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
   - APK `sdk36Debug` recompilada exitosamente (`BUILD SUCCESSFUL in 2s`) con ambos rootfs (`base.tgz` y `base-debian.tgz`) e instalada en el Redmi 15 5G con `adb install -r`.
   - `SistemaActivity` abierta en pantalla en el dispositivo lista para crear instancias Debian.
 
+- **Correcciones y compatibilidad del instalador para Debian:**
+  - **Ruta de bash y compatibilidad usrmerge:** En Debian bookworm `bash` reside en `/bin/bash`; [apk/instalar.sh](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/instalar.sh) ahora enlaza de forma cruzada `usr/bin/bash ↔ bin/bash` y resuelve dinámicamente el binario de shell con PATH extendido.
+  - **Marcador oficial de instalación:** [AdaptadorDebianArm64.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/AdaptadorDebianArm64.java) condiciona `instalada()` a `var/lib/linux-android/instalado`, evitando saltos prematuros al compositor gráfico antes de concluir el asistente.
+  - **Resolución de dependencias esenciales (`mawk`):** Añadido `mawk` a `PAQUETES_OBJETIVO` en [bootstrap-debian.py](file:///media/ben4shot/E/Develop/Android/glibc-prueba/scripts/bootstrap-debian.py) para satisfacer `base-files : PreDepends: awk`, permitiendo a `apt` ejecutar instalaciones sin bloqueos por dependencias rotas.
+  - **Llavero GPG oficial:** Enlazado `/usr/share/keyrings/debian-archive-keyring.gpg` en `/etc/apt/trusted.gpg.d/` para verificación exitosa de firmas en `apt-get update`.
+  - **Mapeo de paquetes oficiales para Debian (`apk/paquetes-*-apt.txt`):** Creadas listas de paquetes específicas para APT (`openssh-server`, `adb`, `fonts-jetbrains-mono`, etc.), eliminando fallos de paquetes con nombres exclusivos de Arch.
+  - **Regenerados y empaquetados:** `base-debian.tgz` (54 MB) y `capa.tgz`, compilada APK e instalada con `adb install -r`.
+
 **Siguiente sesión (76ª):**
 1. **Inicialización de entornos basada en Dockerfile / OCI (`dockerfile-runner` / importador):**
    - Intérprete para inicializar instancias aisladas desde `Dockerfile` (`FROM`, `ENV`, `COPY`, `RUN`, etc.) o tarballs OCI.
