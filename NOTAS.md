@@ -805,7 +805,20 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
   - APK `sdk36Debug` recompilada exitosamente (`BUILD SUCCESSFUL in 1s`) e instalada en el Redmi 15 5G con `adb install -r`.
   - Verificada la detección mDNS en vivo (`puerto 42241`), proxy escuchando en `[::]:22` y diálogo con navegación scrollable completa.
 
-**Siguiente sesión (73ª):**
+73ª sesión (2026-10-23):
+- **Rediseño integral de la interfaz de Port Forwarding en `SistemaActivity`:**
+  - Se eliminó el bloque específico de SSH (`boxP22`) y el cuadro estático de depuración inalámbrica (`boxAdb`). El puerto 22 y cualquier otro servicio ahora se gestionan de forma limpia y transparente a través de la lista general de reglas.
+  - **Evaluación reactiva individual por regla:** Cada regla de reenvío incluye ahora un indicador visual en tiempo real (`●` verde si el puerto está efectivamente abierto y respondiendo a conexiones de red, `○` rojo si el servicio no está escuchando o la regla está inactiva). Se agregó además un botón `[ REVISAR ESTADOS ]` para re-evaluar todos los puertos al instante.
+  - **Control granular por regla:** Se añadió un interruptor directo `[ON / OFF]` por cada regla para activarla o pausarla individualmente sin necesidad de eliminarla de la configuración.
+  - **Asistente informativo para puertos privilegiados (< 1024):** Al agregar una regla con puerto externo inferior a 1024 (ej. 80, 443, 22), la interfaz despliega un `AlertDialog` pedagógico explicando que Android restringe esos puertos para aplicaciones normales (UID >= 1024) y que el sistema los levanta automáticamente mediante el demonio en espacio `shell` (UID 2000) a través de la depuración inalámbrica (`adb-conectar`).
+- **Verificación técnica de red y comportamiento de puertos privilegiados:**
+  - **Validación de IP de loopback (`127.0.0.2`):** Verificada en vivo la capacidad de enlazar servicios en `127.0.0.2` (probado con servidor HTTP en `:8080` respondiendo `200 OK` y reenviado exitosamente a la red local).
+  - **Dispositivo sin vincular a depuración inalámbrica:** Si la depuración no está vinculada localmente (`adbd` rechaza conexiones con `unauthorized`), la app no puede despachar procesos bajo UID 2000. Como consecuencia, las reglas < 1024 no logran abrir el socket en `0.0.0.0` y se marcan con `○` inactivo. Las reglas en puertos estándar (>= 1024) no se ven afectadas ya que la app Java las abre directamente con su propio socket.
+  - **Desactivación de la depuración inalámbrica:** Si el usuario apaga el toggle de depuración inalámbrica con reglas < 1024 ya en ejecución, los procesos `proxy-ports-daemon` y `toybox nc` existentes en background continúan escuchando y reenviando tráfico normalmente mientras el kernel o LMK no termine los procesos. Únicamente tras un reinicio del sistema o detención manual se requerirá reactivar la depuración inalámbrica para reiniciar los sockets privilegiados.
+- **Compilación e instalación:**
+  - APK `sdk36Debug` recompilada exitosamente e instalada en el Redmi 15 5G con `adb install -r`.
+
+**Siguiente sesión (74ª):**
 1. **Inicialización de entornos basada en Dockerfile / OCI (`dockerfile-runner` / importador):**
    - Diseñar e implementar un generador o intérprete que cree e inicialice instancias aisladas a partir de un `Dockerfile` (soportando directivas clave: `FROM`, `ENV`, `COPY`, `RUN`, `WORKDIR`, `EXPOSE`, `CMD`), o mediante importación directa de rootfs OCI/Docker inyectando `libldp.so`/glibc propia.
 2. **Distribuciones adicionales (Punto 4: Debian y Ubuntu ARM64):**

@@ -929,130 +929,6 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         cbHabilitado.setOnCheckedChangeListener((bv, isChecked) -> RedManager.setHabilitado(this, isChecked));
         contTab2.addView(cbHabilitado);
 
-        // Sección: Depuración Inalámbrica (ADB mDNS)
-        LinearLayout boxAdb = new LinearLayout(this);
-        boxAdb.setOrientation(LinearLayout.VERTICAL);
-        boxAdb.setPadding(dp(8), dp(6), dp(8), dp(6));
-        boxAdb.setBackground(crearFondo(0xff131f2d, BORDE_NORMAL, dp(6), dp(1)));
-
-        LinearLayout filaAdbHeader = new LinearLayout(this);
-        filaAdbHeader.setOrientation(LinearLayout.HORIZONTAL);
-        filaAdbHeader.setGravity(Gravity.CENTER_VERTICAL);
-
-        TextView tituloAdb = texto("⚡ DEPURACIÓN INALÁMBRICA (ADB)", 11, true, ACCENTO_CIAN);
-        filaAdbHeader.addView(tituloAdb, new LinearLayout.LayoutParams(0, -2, 1.0f));
-
-        int pAdbActual = PuertoAdb.obtenerPuerto();
-        TextView badgeAdb = texto(pAdbActual > 0 ? "● ACTIVO (:" + pAdbActual + ")" : "○ BUSCANDO...", 10, true,
-                pAdbActual > 0 ? ACCENTO_VERDE : TEXTO_MUTED);
-        filaAdbHeader.addView(badgeAdb);
-        boxAdb.addView(filaAdbHeader);
-
-        TextView descAdb = texto("Android mDNS TLS. Permite vincular y correr proxy-ports sin PC.", 10, false, TEXTO_MUTED);
-        LinearLayout.LayoutParams lpDescAdb = new LinearLayout.LayoutParams(-1, -2);
-        lpDescAdb.topMargin = dp(2);
-        lpDescAdb.bottomMargin = dp(4);
-        boxAdb.addView(descAdb, lpDescAdb);
-
-        LinearLayout filaAdbAcciones = new LinearLayout(this);
-        filaAdbAcciones.setOrientation(LinearLayout.HORIZONTAL);
-        filaAdbAcciones.setGravity(Gravity.CENTER_VERTICAL);
-
-        TextView btnRefrescoAdb = crearBotonChip("REVISAR / RECONECTAR", BORDE_BOTON, () -> {
-            PuertoAdb.iniciar(this);
-            int p = PuertoAdb.obtenerPuerto();
-            badgeAdb.setText(p > 0 ? "● ACTIVO (:" + p + ")" : "○ BUSCANDO...");
-            badgeAdb.setTextColor(p > 0 ? ACCENTO_VERDE : TEXTO_MUTED);
-        });
-        filaAdbAcciones.addView(btnRefrescoAdb);
-        boxAdb.addView(filaAdbAcciones);
-
-        LinearLayout.LayoutParams lpBoxAdb = new LinearLayout.LayoutParams(-1, -2);
-        lpBoxAdb.topMargin = dp(4);
-        lpBoxAdb.bottomMargin = dp(6);
-        contTab2.addView(boxAdb, lpBoxAdb);
-
-        // Sección especial: SSH Puerto 22 real (Wi-Fi directo sin root)
-        LinearLayout boxP22 = new LinearLayout(this);
-        boxP22.setOrientation(LinearLayout.VERTICAL);
-        boxP22.setPadding(dp(8), dp(6), dp(8), dp(6));
-        boxP22.setBackground(crearFondo(0xff131f2d, BORDE_NORMAL, dp(6), dp(1)));
-
-        LinearLayout filaP22Header = new LinearLayout(this);
-        filaP22Header.setOrientation(LinearLayout.HORIZONTAL);
-        filaP22Header.setGravity(Gravity.CENTER_VERTICAL);
-
-        TextView tituloP22 = texto("⚡ SSH PUERTO 22 (WI-FI SIN ROOT)", 11, true, ACCENTO_CIAN);
-        filaP22Header.addView(tituloP22, new LinearLayout.LayoutParams(0, -2, 1.0f));
-
-        TextView badgeP22 = texto("○ REVISANDO...", 10, true, TEXTO_MUTED);
-        filaP22Header.addView(badgeP22);
-        boxP22.addView(filaP22Header);
-
-        RedManager.comprobarPuertoActivoAsync(22, activo -> {
-            badgeP22.setText(activo ? "● ACTIVO" : "○ INACTIVO");
-            badgeP22.setTextColor(activo ? ACCENTO_VERDE : TEXTO_MUTED);
-        });
-
-        TextView descP22 = texto("Proxy shell UID 2000 en 0.0.0.0:22. Conecta directo: ssh user@<ip>", 10, false, TEXTO_MUTED);
-        LinearLayout.LayoutParams lpDescP22 = new LinearLayout.LayoutParams(-1, -2);
-        lpDescP22.topMargin = dp(2);
-        lpDescP22.bottomMargin = dp(4);
-        boxP22.addView(descP22, lpDescP22);
-
-        LinearLayout filaP22Acciones = new LinearLayout(this);
-        filaP22Acciones.setOrientation(LinearLayout.HORIZONTAL);
-        filaP22Acciones.setGravity(Gravity.CENTER_VERTICAL);
-
-        TextView lblDest = texto("Destino: ", 11, false, TEXTO_MUTED);
-        filaP22Acciones.addView(lblDest);
-
-        android.widget.Spinner spinP22 = new android.widget.Spinner(this);
-        List<SistemaLinux.Instancia> instsP22 = SistemaLinux.listarInstancias(this);
-        List<String> nombresP22 = new ArrayList<>();
-        int selIdx = 0;
-        String curTarget = RedManager.obtenerProxy22Target(this);
-        for (int i = 0; i < instsP22.size(); i++) {
-            SistemaLinux.Instancia inst = instsP22.get(i);
-            nombresP22.add(inst.nombre + " (" + RedManager.ipParaInstancia(this, inst.id) + ")");
-            if (inst.id.equals(curTarget)) selIdx = i;
-        }
-        android.widget.ArrayAdapter<String> adaptP22 = new android.widget.ArrayAdapter<>(
-                this, android.R.layout.simple_spinner_dropdown_item, nombresP22);
-        spinP22.setAdapter(adaptP22);
-        if (selIdx >= 0 && selIdx < nombresP22.size()) spinP22.setSelection(selIdx);
-        spinP22.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(android.widget.AdapterView<?> parent, View view, int position, long id) {
-                if (position >= 0 && position < instsP22.size()) {
-                    RedManager.setProxy22Target(SistemaActivity.this, instsP22.get(position).id);
-                }
-            }
-            @Override
-            public void onNothingSelected(android.widget.AdapterView<?> parent) { }
-        });
-        filaP22Acciones.addView(spinP22, new LinearLayout.LayoutParams(0, -2, 1.0f));
-
-        TextView btnRefrescoP22 = crearBotonChip("ACTIVAR / REVISAR", BORDE_BOTON, () -> {
-            badgeP22.setText("○ REVISANDO...");
-            badgeP22.setTextColor(TEXTO_MUTED);
-            RedManager.activarPuertoEnShell(22);
-            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-                RedManager.comprobarPuertoActivoAsync(22, activo -> {
-                    badgeP22.setText(activo ? "● ACTIVO" : "○ INACTIVO");
-                    badgeP22.setTextColor(activo ? ACCENTO_VERDE : TEXTO_MUTED);
-                });
-            }, 600);
-        });
-        filaP22Acciones.addView(btnRefrescoP22);
-
-        boxP22.addView(filaP22Acciones);
-
-        LinearLayout.LayoutParams lpBoxP22 = new LinearLayout.LayoutParams(-1, -2);
-        lpBoxP22.topMargin = dp(4);
-        lpBoxP22.bottomMargin = dp(8);
-        contTab2.addView(boxP22, lpBoxP22);
-
         // Caja destacada para AGREGAR NUEVO REENVÍO
         LinearLayout boxNuevoFwd = new LinearLayout(this);
         boxNuevoFwd.setOrientation(LinearLayout.VERTICAL);
@@ -1070,7 +946,7 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         boxNuevoFwd.addView(formFwd, lpFFwdIn);
 
         EditText inExt = new EditText(this);
-        inExt.setHint("Ext(80)");
+        inExt.setHint("Ext(8080)");
         inExt.setHintTextColor(0xff556272);
         inExt.setTextColor(TEXTO_CLARO);
         inExt.setTypeface(Typeface.MONOSPACE);
@@ -1093,7 +969,7 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         formFwd.addView(spinInst, new LinearLayout.LayoutParams(0, -2, 1.0f));
 
         EditText inInt = new EditText(this);
-        inInt.setHint("Int(80)");
+        inInt.setHint("Int(8080)");
         inInt.setHintTextColor(0xff556272);
         inInt.setTextColor(TEXTO_CLARO);
         inInt.setTypeface(Typeface.MONOSPACE);
@@ -1127,14 +1003,34 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
                     return;
                 }
                 String instId = insts.get(idx).id;
-                List<RedManager.Regla> reglas = RedManager.listarReglas(this);
-                reglas.add(new RedManager.Regla(String.valueOf(System.currentTimeMillis()), pExt, instId, pInt, true));
-                RedManager.guardarReglas(this, reglas);
-                RedManager.actualizar(this);
-                inExt.setText("");
-                inInt.setText("");
-                recargarReglas[0].run();
-                Toast.makeText(this, "Regla: :" + pExt + " ➜ " + instId + ":" + pInt, Toast.LENGTH_SHORT).show();
+
+                Runnable ejecutarGuardado = () -> {
+                    List<RedManager.Regla> reglas = RedManager.listarReglas(this);
+                    reglas.add(new RedManager.Regla(String.valueOf(System.currentTimeMillis()), pExt, instId, pInt, true));
+                    RedManager.guardarReglas(this, reglas);
+                    RedManager.actualizar(this);
+                    inExt.setText("");
+                    inInt.setText("");
+                    recargarReglas[0].run();
+                    Toast.makeText(this, "Regla creada: :" + pExt + " ➜ " + instId + ":" + pInt, Toast.LENGTH_SHORT).show();
+                };
+
+                if (pExt < 1024) {
+                    new AlertDialog.Builder(this)
+                            .setTitle("⚡ Puerto Privilegiado (:" + pExt + ")")
+                            .setMessage("Android no permite abrir puertos menores a 1024 (ej: 80, 443, 22) para apps normales sin root.\n\n" +
+                                    "Para activarlo sin root:\n" +
+                                    "1. Ve a Opciones de Desarrollador ➜ Depuración inalámbrica y actívala.\n" +
+                                    "2. Toca 'Vincular dispositivo con código de sincronización'.\n" +
+                                    "3. En la terminal de la app corre 'adb-conectar' e ingresa el código.\n\n" +
+                                    "Una vez vinculado, el puerto se activará en 0.0.0.0 a través de espacio shell.\n\n" +
+                                    "¿Deseas guardar la regla?")
+                            .setPositiveButton("GUARDAR", (d, w) -> ejecutarGuardado.run())
+                            .setNegativeButton("CANCELAR", null)
+                            .show();
+                } else {
+                    ejecutarGuardado.run();
+                }
             } catch (Exception ex) {
                 Toast.makeText(this, "Puerto inválido", Toast.LENGTH_SHORT).show();
             }
@@ -1144,13 +1040,22 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         boxNuevoFwd.addView(btnAddFwd, lpBtnAdd);
 
         LinearLayout.LayoutParams lpBoxNuevoFwd = new LinearLayout.LayoutParams(-1, -2);
+        lpBoxNuevoFwd.topMargin = dp(6);
         lpBoxNuevoFwd.bottomMargin = dp(8);
         contTab2.addView(boxNuevoFwd, lpBoxNuevoFwd);
 
-        TextView titReglas = texto("❯ REGLAS DE REENVÍO ACTIVAS:", 11, true, ACCENTO_AMBAR);
-        LinearLayout.LayoutParams lpTitR = new LinearLayout.LayoutParams(-1, -2);
-        lpTitR.bottomMargin = dp(4);
-        contTab2.addView(titReglas, lpTitR);
+        LinearLayout filaHeaderReglas = new LinearLayout(this);
+        filaHeaderReglas.setOrientation(LinearLayout.HORIZONTAL);
+        filaHeaderReglas.setGravity(Gravity.CENTER_VERTICAL);
+        TextView titReglas = texto("❯ REGLAS DE REENVÍO:", 11, true, ACCENTO_AMBAR);
+        filaHeaderReglas.addView(titReglas, new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+        TextView btnRefrescarTodas = crearBotonChip("REVISAR ESTADOS", BORDE_BOTON, () -> recargarReglas[0].run());
+        filaHeaderReglas.addView(btnRefrescarTodas);
+
+        LinearLayout.LayoutParams lpFHR = new LinearLayout.LayoutParams(-1, -2);
+        lpFHR.bottomMargin = dp(4);
+        contTab2.addView(filaHeaderReglas, lpFHR);
 
         LinearLayout contReglas = new LinearLayout(this);
         contReglas.setOrientation(LinearLayout.VERTICAL);
@@ -1160,7 +1065,7 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
             contReglas.removeAllViews();
             List<RedManager.Regla> reglas = RedManager.listarReglas(this);
             if (reglas.isEmpty()) {
-                contReglas.addView(texto("  No hay reglas activas configuradas.", 11, false, TEXTO_MUTED));
+                contReglas.addView(texto("  No hay reglas configuradas.", 11, false, TEXTO_MUTED));
             } else {
                 for (RedManager.Regla r : reglas) {
                     LinearLayout fila = new LinearLayout(this);
@@ -1169,12 +1074,33 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
                     fila.setPadding(dp(8), dp(6), dp(8), dp(6));
                     fila.setBackground(crearFondo(0xff16202c, BORDE_NORMAL, dp(6), dp(1)));
 
+                    // Indicador individual reactivo
+                    TextView punto = texto(r.activa ? "○ " : "⊘ ", 12, true, TEXTO_MUTED);
+                    fila.addView(punto);
+
+                    if (r.activa) {
+                        RedManager.comprobarPuertoActivoAsync(r.puertoExterno, activo -> {
+                            punto.setText(activo ? "● " : "○ ");
+                            punto.setTextColor(activo ? ACCENTO_VERDE : ACCENTO_ROJO);
+                        });
+                    }
+
                     String ipInst = RedManager.ipParaInstancia(this, r.instanciaId);
                     String badgePriv = r.puertoExterno < 1024 ? " ⚡" : "";
-                    TextView info = texto(":" + r.puertoExterno + badgePriv + " ➜ " + r.instanciaId + " (" + ipInst + "):" + r.puertoInterno, 11, true, r.activa ? ACCENTO_VERDE : TEXTO_MUTED);
+                    TextView info = texto(":" + r.puertoExterno + badgePriv + " ➜ " + r.instanciaId + " (" + ipInst + "):" + r.puertoInterno, 11, true, r.activa ? TEXTO_CLARO : TEXTO_MUTED);
                     fila.addView(info, new LinearLayout.LayoutParams(0, -2, 1.0f));
 
-                    TextView btnDel = crearBotonChip("✕ BORRAR", ACCENTO_ROJO, () -> {
+                    TextView btnToggle = crearBotonChip(r.activa ? "ON" : "OFF", r.activa ? ACCENTO_VERDE : TEXTO_MUTED, () -> {
+                        r.activa = !r.activa;
+                        RedManager.guardarReglas(this, reglas);
+                        RedManager.actualizar(this);
+                        recargarReglas[0].run();
+                    });
+                    fila.addView(btnToggle);
+
+                    fila.addView(espacioHorizontal(dp(4)));
+
+                    TextView btnDel = crearBotonChip("✕", ACCENTO_ROJO, () -> {
                         reglas.remove(r);
                         RedManager.guardarReglas(this, reglas);
                         RedManager.actualizar(this);
