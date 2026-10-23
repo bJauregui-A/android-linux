@@ -172,7 +172,7 @@ final class SistemaLinux {
     }
 
     static synchronized Instancia crearInstancia(Context c, String nombre, String distroId) {
-        if (!ARCH.equals(distroId)) {
+        if (!ARCH.equals(distroId) && !DEBIAN.equals(distroId)) {
             throw new IllegalArgumentException("La distribución " + distroId + " aún no está disponible");
         }
         List<Instancia> lista = listarInstancias(c);
@@ -186,6 +186,10 @@ final class SistemaLinux {
         Instancia nueva = new Instancia(id, nombre, distroId, rutaRelativa, System.currentTimeMillis());
         lista.add(nueva);
         guardarInstancias(c, lista);
+        try {
+            AdaptadorInstalacion adp = adaptador(nueva);
+            adp.preparar(c, dir);
+        } catch (Exception ignorada) { }
         try {
             String ipSugerida = RedManager.ipParaInstancia(c, nueva.id);
             RedManager.asignarIp(c, nueva.id, "sub_default", ipSugerida);

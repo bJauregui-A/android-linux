@@ -485,7 +485,8 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         lpNombre.topMargin = dp(4);
         card.addView(nombre, lpNombre);
 
-        String distroStr = SistemaLinux.ARCH.equals(inst.distroId) ? "Arch Linux ARM" : inst.distroId;
+        String distroStr = SistemaLinux.DEBIAN.equals(inst.distroId) ? "Debian ARM64"
+                : SistemaLinux.ARCH.equals(inst.distroId) ? "Arch Linux ARM" : inst.distroId;
         TextView meta = texto("    files/" + inst.rutaRelativa + "  •  " + distroStr, 11, false, TEXTO_MUTED);
         card.addView(meta);
 
