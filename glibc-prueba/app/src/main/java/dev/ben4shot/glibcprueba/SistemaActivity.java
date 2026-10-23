@@ -922,6 +922,77 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         cbHabilitado.setOnCheckedChangeListener((bv, isChecked) -> RedManager.setHabilitado(this, isChecked));
         vistasTabs[2].addView(cbHabilitado);
 
+        // Sección especial: SSH Puerto 22 real (Wi-Fi directo sin root)
+        LinearLayout boxP22 = new LinearLayout(this);
+        boxP22.setOrientation(LinearLayout.VERTICAL);
+        boxP22.setPadding(dp(8), dp(6), dp(8), dp(6));
+        boxP22.setBackground(crearFondo(0xff131f2d, BORDE_NORMAL, dp(6), dp(1)));
+
+        LinearLayout filaP22Header = new LinearLayout(this);
+        filaP22Header.setOrientation(LinearLayout.HORIZONTAL);
+        filaP22Header.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView tituloP22 = texto("⚡ SSH PUERTO 22 (WI-FI SIN ROOT)", 11, true, ACCENTO_CIAN);
+        filaP22Header.addView(tituloP22, new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+        TextView badgeP22 = texto(RedManager.estaProxy22Activo() ? "● ACTIVO" : "○ INACTIVO", 10, true,
+                RedManager.estaProxy22Activo() ? ACCENTO_VERDE : TEXTO_MUTED);
+        filaP22Header.addView(badgeP22);
+        boxP22.addView(filaP22Header);
+
+        TextView descP22 = texto("Proxy shell UID 2000 en 0.0.0.0:22. Conecta directo: ssh user@<ip>", 10, false, TEXTO_MUTED);
+        LinearLayout.LayoutParams lpDescP22 = new LinearLayout.LayoutParams(-1, -2);
+        lpDescP22.topMargin = dp(2);
+        lpDescP22.bottomMargin = dp(4);
+        boxP22.addView(descP22, lpDescP22);
+
+        LinearLayout filaP22Acciones = new LinearLayout(this);
+        filaP22Acciones.setOrientation(LinearLayout.HORIZONTAL);
+        filaP22Acciones.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView lblDest = texto("Destino: ", 11, false, TEXTO_MUTED);
+        filaP22Acciones.addView(lblDest);
+
+        android.widget.Spinner spinP22 = new android.widget.Spinner(this);
+        List<SistemaLinux.Instancia> instsP22 = SistemaLinux.listarInstancias(this);
+        List<String> nombresP22 = new ArrayList<>();
+        int selIdx = 0;
+        String curTarget = RedManager.obtenerProxy22Target(this);
+        for (int i = 0; i < instsP22.size(); i++) {
+            SistemaLinux.Instancia inst = instsP22.get(i);
+            nombresP22.add(inst.nombre + " (" + RedManager.ipParaInstancia(this, inst.id) + ")");
+            if (inst.id.equals(curTarget)) selIdx = i;
+        }
+        android.widget.ArrayAdapter<String> adaptP22 = new android.widget.ArrayAdapter<>(
+                this, android.R.layout.simple_spinner_dropdown_item, nombresP22);
+        spinP22.setAdapter(adaptP22);
+        if (selIdx >= 0 && selIdx < nombresP22.size()) spinP22.setSelection(selIdx);
+        spinP22.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(android.widget.AdapterView<?> parent, View view, int position, long id) {
+                if (position >= 0 && position < instsP22.size()) {
+                    RedManager.setProxy22Target(SistemaActivity.this, instsP22.get(position).id);
+                }
+            }
+            @Override
+            public void onNothingSelected(android.widget.AdapterView<?> parent) { }
+        });
+        filaP22Acciones.addView(spinP22, new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+        TextView btnRefrescoP22 = crearBotonChip("REVISAR", BORDE_BOTON, () -> {
+            boolean activo = RedManager.estaProxy22Activo();
+            badgeP22.setText(activo ? "● ACTIVO" : "○ INACTIVO");
+            badgeP22.setTextColor(activo ? ACCENTO_VERDE : TEXTO_MUTED);
+        });
+        filaP22Acciones.addView(btnRefrescoP22);
+
+        boxP22.addView(filaP22Acciones);
+
+        LinearLayout.LayoutParams lpBoxP22 = new LinearLayout.LayoutParams(-1, -2);
+        lpBoxP22.topMargin = dp(4);
+        lpBoxP22.bottomMargin = dp(6);
+        vistasTabs[2].addView(boxP22, lpBoxP22);
+
         ScrollView scrollReglas = new ScrollView(this);
         LinearLayout contReglas = new LinearLayout(this);
         contReglas.setOrientation(LinearLayout.VERTICAL);

@@ -1,0 +1,130 @@
+#!/system/bin/sh
+# proxy-ssh-22-daemon: Demonio de reenvío en puerto 22 para UID shell (Android sin root)
+
+PID_FILE="/data/local/tmp/proxy-ssh-22.pid"
+TARGET_FILE="/data/local/tmp/ssh-proxy-target"
+WORKER_FILE="/data/local/tmp/ssh-proxy-worker.sh"
+LOG_FILE="/data/local/tmp/proxy-ssh-22.log"
+
+obtener_pid() {
+    if [ -f "$PID_FILE" ]; then
+        P=$(cat "$PID_FILE" 2>/dev/null)
+        if [ -n "$P" ] && kill -0 "$P" 2>/dev/null; then
+            echo "$P"
+            return 0
+        fi
+    fi
+    P=$(ps -ef | grep 'toybox nc -L -p 22' | grep -v grep | awk '{print $2}' | head -n1)
+    if [ -n "$P" ]; then
+        echo "$P"
+        return 0
+    fi
+    return 1
+}
+
+iniciar() {
+    P=$(obtener_pid)
+    if [ -n "$P" ]; then
+        echo "El proxy en puerto 22 ya está corriendo (PID $P)."
+        return 0
+    fi
+
+    if [ ! -f "$TARGET_FILE" ] || [ ! -s "$TARGET_FILE" ]; then
+        echo "127.0.0.1:8022" > "$TARGET_FILE"
+        chmod 666 "$TARGET_FILE" 2>/dev/null
+    fi
+
+    nohup /system/bin/toybox nc -L -p 22 /system/bin/sh "$WORKER_FILE" > "$LOG_FILE" 2>&1 &
+    NUEVO_PID=$!
+    echo "$NUEVO_PID" > "$PID_FILE"
+    chmod 666 "$PID_FILE" "$LOG_FILE" 2>/dev/null
+    sleep 0.3
+
+    P=$(obtener_pid)
+    if [ -n "$P" ]; then
+        TARGET=$(cat "$TARGET_FILE" 2>/dev/null)
+        echo "✔ Proxy SSH en puerto 22 iniciado (PID $P) -> $TARGET"
+    else
+        echo "✕ Error al iniciar proxy en puerto 22. Revisa $LOG_FILE"
+        cat "$LOG_FILE" 2>/dev/null
+        return 1
+    fi
+}
+
+detener() {
+    P=$(obtener_pid)
+    if [ -z "$P" ]; then
+        echo "El proxy en puerto 22 no está en ejecución."
+        rm -f "$PID_FILE"
+        return 0
+    fi
+    kill "$P" 2>/dev/null
+    sleep 0.2
+    for p in $(ps -ef | grep 'toybox nc -L -p 22' | grep -v grep | awk '{print $2}'); do
+        kill -9 "$p" 2>/dev/null
+    done
+    rm -f "$PID_FILE"
+    echo "✔ Proxy en puerto 22 detenido."
+}
+
+estado() {
+    P=$(obtener_pid)
+    TARGET=$(cat "$TARGET_FILE" 2>/dev/null)
+    TARGET=${TARGET:-127.0.0.1:8022}
+    if [ -n "$P" ]; then
+        echo "● Activo (PID $P) escuchando en 0.0.0.0:22"
+        echo "  Destino actual: $TARGET"
+    else
+        echo "○ Inactivo (puerto 22 libre)"
+        echo "  Destino configurado: $TARGET"
+    fi
+}
+
+set_target() {
+    if [ -z "$1" ]; then
+        echo "Uso: proxy-ssh-22 target <ip:puerto | ip | instancia>"
+        return 1
+    fi
+    T="$1"
+    # Si no tiene puerto y no contiene punto, asumir que puede ser ID de instancia
+    if [ "${T#*:}" = "$T" ] && [ "${T#*.}" = "$T" ]; then
+        VIP=$(run-as dev.ben4shot.glibcprueba.sdk36 cat "files/instancias/$T/etc/virtual-ip" 2>/dev/null | tr -d '\r\n')
+        if [ -n "$VIP" ]; then
+            T="$VIP:8022"
+        fi
+    fi
+    # Si viene como 10.0.0.X, mapear a 127.0.0.X
+    case "$T" in
+        10.*)
+            HOST_PART=${T%:*}
+            PORT_PART=${T#*:}
+            [ "$PORT_PART" = "$T" ] && PORT_PART=8022
+            B2=$(echo "$HOST_PART" | cut -d. -f2)
+            B3=$(echo "$HOST_PART" | cut -d. -f3)
+            B4=$(echo "$HOST_PART" | cut -d. -f4 | cut -d/ -f1)
+            T="127.$B2.$B3.$B4:$PORT_PART"
+            ;;
+        *:*) ;;
+        *)   T="$T:8022" ;;
+    esac
+
+    echo "$T" > "$TARGET_FILE"
+    chmod 666 "$TARGET_FILE" 2>/dev/null
+    echo "✔ Destino actualizado a: $T"
+    estado
+}
+
+case "$1" in
+    start|iniciar) iniciar ;;
+    stop|detener)   detener ;;
+    restart|reiniciar) detener; sleep 0.3; iniciar ;;
+    status|estado)  estado ;;
+    target|destino) set_target "$2" ;;
+    *)
+        if [ -n "$1" ]; then
+            set_target "$1"
+        else
+            echo "Uso: proxy-ssh-22 {start|stop|restart|status|target <destino>}"
+        fi
+        ;;
+esac

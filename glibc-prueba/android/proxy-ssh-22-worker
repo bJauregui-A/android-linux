@@ -1,0 +1,23 @@
+#!/system/bin/sh
+# Worker ejecutado por toybox nc en cada conexión entrante al puerto 22
+TARGET_FILE="/data/local/tmp/ssh-proxy-target"
+TARGET="$(cat "$TARGET_FILE" 2>/dev/null)"
+TARGET="${TARGET:-127.0.0.1:8022}"
+
+# Si solo viene una IP sin puerto, asumir 8022
+case "$TARGET" in
+    *:*) HOST="${TARGET%:*}"; PORT="${TARGET#*:}" ;;
+    *)   HOST="$TARGET"; PORT=8022 ;;
+esac
+
+# Mapear 10.0.0.X a 127.0.0.X si viene con formato de subred virtual
+case "$HOST" in
+    10.*)
+        B2=$(echo "$HOST" | cut -d. -f2)
+        B3=$(echo "$HOST" | cut -d. -f3)
+        B4=$(echo "$HOST" | cut -d. -f4 | cut -d/ -f1)
+        HOST="127.$B2.$B3.$B4"
+        ;;
+esac
+
+exec /system/bin/toybox nc "$HOST" "$PORT"

@@ -66,6 +66,9 @@ ARCHIVOS = [
     ("glibc/salida/usr/lib/libc.so.6", "usr/lib/libc.so.6", 0o755),
     ("trabajo/libudmabuf-shim.so", "usr/local/lib/libudmabuf-shim.so", 0o755),
     ("scripts/adb-conectar", "usr/local/bin/adb-conectar", 0o755),
+    ("android/proxy-ssh-22", "usr/local/bin/proxy-ssh-22", 0o755),
+    ("android/proxy-ssh-22-daemon", f"{D}/proxy-ssh-22-daemon", 0o755),
+    ("android/proxy-ssh-22-worker", f"{D}/proxy-ssh-22-worker", 0o755),
     ("apk/pacman-xfer", "usr/local/bin/pacman-xfer", 0o755),
     # escritorio elegido al instalar (escritorios/: uno por carpeta) y lo que arranca con todos
     ("escritorios/sesion-android", "usr/local/bin/sesion-android", 0o755),

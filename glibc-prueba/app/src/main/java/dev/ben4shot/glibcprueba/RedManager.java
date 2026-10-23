@@ -35,6 +35,9 @@ public final class RedManager {
     private static final String PREF_SUBRED = "subred_virtual";
     private static final String PREF_SUBREDES = "subredes_lista";
     private static final String PREF_ASIGNACIONES = "subred_asignaciones";
+    public static final String PREF_PROXY22_HABILITADO = "proxy22_habilitado";
+    public static final String PREF_PROXY22_TARGET = "proxy22_target";
+    public static final String ARCHIVO_TARGET_PROXY22 = "/data/local/tmp/ssh-proxy-target";
     public static final String DEFAULT_SUBRED = "10.0.0.0/24";
 
     public static class Subred {
@@ -427,6 +430,7 @@ public final class RedManager {
     }
 
     public static synchronized void actualizar(Context c) {
+        actualizarProxy22Target(c);
         if (poolPipes == null || poolPipes.isShutdown()) {
             poolPipes = new ThreadPoolExecutor(
                     2, 16, 60L, TimeUnit.SECONDS,
@@ -560,6 +564,85 @@ public final class RedManager {
         } finally {
             try { origen.close(); } catch (Exception ignored) { }
             try { destino.close(); } catch (Exception ignored) { }
+        }
+    }
+
+    public static boolean esProxy22Habilitado(Context c) {
+        return c.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+                .getBoolean(PREF_PROXY22_HABILITADO, false);
+    }
+
+    public static void setProxy22Habilitado(Context c, boolean hab) {
+        c.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(PREF_PROXY22_HABILITADO, hab)
+                .apply();
+        actualizarProxy22Target(c);
+    }
+
+    public static String obtenerProxy22Target(Context c) {
+        String t = c.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+                .getString(PREF_PROXY22_TARGET, null);
+        if (t == null || t.trim().isEmpty()) {
+            SistemaLinux.Instancia sel = SistemaLinux.instanciaSeleccionada(c);
+            if (sel != null) return sel.id;
+            List<SistemaLinux.Instancia> list = SistemaLinux.listarInstancias(c);
+            if (!list.isEmpty()) return list.get(0).id;
+            return "arch-principal";
+        }
+        return t.trim();
+    }
+
+    public static void setProxy22Target(Context c, String target) {
+        c.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putString(PREF_PROXY22_TARGET, target.trim())
+                .apply();
+        actualizarProxy22Target(c);
+    }
+
+    public static void actualizarProxy22Target(Context c) {
+        try {
+            String target = obtenerProxy22Target(c);
+            String hostDestino = "127.0.0.1";
+            int puertoDestino = 8022;
+
+            if (target.contains(":")) {
+                String[] partes = target.split(":");
+                hostDestino = partes[0].trim();
+                try { puertoDestino = Integer.parseInt(partes[1].trim()); } catch (Exception ignored) { }
+            } else {
+                String ipVirt = ipParaInstancia(c, target);
+                if (ipVirt.contains("/")) ipVirt = ipVirt.substring(0, ipVirt.indexOf('/'));
+                String[] partes = ipVirt.trim().split("\\.");
+                if (partes.length == 4) {
+                    try {
+                        int b2 = Integer.parseInt(partes[1]);
+                        int b3 = Integer.parseInt(partes[2]);
+                        int b4 = Integer.parseInt(partes[3]);
+                        hostDestino = "127." + b2 + "." + b3 + "." + b4;
+                    } catch (NumberFormatException ignorada) { }
+                }
+            }
+
+            java.io.File tf = new java.io.File(ARCHIVO_TARGET_PROXY22);
+            try (java.io.FileWriter fw = new java.io.FileWriter(tf, false)) {
+                fw.write(hostDestino + ":" + puertoDestino + "\n");
+            }
+            tf.setReadable(true, false);
+            tf.setWritable(true, false);
+            Log.i(TAG, "Proxy SSH puerto 22 actualizado a destino " + hostDestino + ":" + puertoDestino);
+        } catch (Exception e) {
+            Log.w(TAG, "Error actualizando target de proxy 22: " + e.getMessage());
+        }
+    }
+
+    public static boolean estaProxy22Activo() {
+        try (Socket s = new Socket()) {
+            s.connect(new java.net.InetSocketAddress("127.0.0.1", 22), 150);
+            return true;
+        } catch (Exception ignored) {
+            return false;
         }
     }
 

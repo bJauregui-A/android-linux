@@ -764,10 +764,27 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
    - **Mejora:** Modificados [apk/pacman-xfer](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/pacman-xfer) y [scripts/bootstrap.py](file:///media/ben4shot/E/Develop/Android/glibc-prueba/scripts/bootstrap.py) para imprimir el nombre de cada paquete en curso (`↓ <paquete>`) junto a una barra de progreso interactiva (`curl -#`), manteniendo silenciadas solo las comprobaciones de firmas (`*.sig`).
    - Reconstruidos `base.tgz` y `capa.tgz`, recompilado APK `sdk36Debug` e instalado en el Redmi vía `adb install -r`.
 
-**Siguiente sesión (71ª):**
+7. **Proxy en puerto 22 real de Wi-Fi sin root (Punto 2 ejecutado):**
+   - **Diagnóstico y capacidad:**
+     - En Android, aplicaciones estándar (UID >= 1024) no pueden enlazar puertos privilegiados (< 1024) por restricción del kernel (`ip_unprivileged_port_start = 1024`). Sin embargo, el usuario `shell` (UID 2000, ADB local) dispone de la capacidad `CAP_NET_BIND_SERVICE`.
+     - Se demostró que `toybox nc -L -p 22` en UID 2000 abre y escucha exitosamente en `0.0.0.0:22` sobre todas las interfaces del teléfono (Wi-Fi `wlan2`, datos y loopback) sin requerir root.
+   - **Arquitectura e implementación:**
+     - Creado `glibc-prueba/android/proxy-ssh-22-worker`: script worker ejecutado por `toybox nc` en cada conexión entrante. Lee `/data/local/tmp/ssh-proxy-target` y reenvía dinámicamente el tráfico TCP al host y puerto de la instancia correspondiente (`127.0.0.X:8022`).
+     - Creado `glibc-prueba/android/proxy-ssh-22-daemon`: demonio en espacio `shell` con control de ciclo de vida (`start`, `stop`, `restart`, `status`, `target <destino>`), archivo de PID (`/data/local/tmp/proxy-ssh-22.pid`) y registro de logs.
+     - Creado `glibc-prueba/android/proxy-ssh-22`: utilidad de consola para Arch Linux (`/usr/local/bin/proxy-ssh-22`). Permite al usuario consultar el estado (`proxy-ssh-22 status`) y reasignar la máquina de destino (`proxy-ssh-22 target <instancia|ip>`) de forma directa sin requerir ADB, y gestionar el inicio/parada del demonio vía `adb-conectar` / ADB local.
+     - Modificado `glibc-prueba/scripts/adb-conectar` para asegurar automáticamente la presencia y permisos de los scripts en `/data/local/tmp/` al vincularse.
+     - En `RedManager.java`: añadidos métodos `esProxy22Habilitado()`, `setProxy22Habilitado()`, `obtenerProxy22Target()`, `setProxy22Target()` y `actualizarProxy22Target()`. Escribe `/data/local/tmp/ssh-proxy-target` con la IP loopback virtual correspondiente (`127.0.0.X:8022`) al cambiar de instancia o actualizar la red.
+     - En `SistemaActivity.java`: añadida tarjeta visual en la pestaña `⇄ REENVÍO PUERTOS` (`⚡ SSH PUERTO 22 (WI-FI SIN ROOT)`) con badge en tiempo real `● ACTIVO` / `○ INACTIVO`, selector dinámico de instancia destino y botón de comprobación.
+   - **Validación en vivo:**
+     - Demonio iniciado en el Redmi 15 5G escuchando en `0.0.0.0:22` (PID 31883).
+     - Probado handshake criptográfico OpenSSH completo (`kex: mlkem768x25519-sha256`, `chacha20-poly1305@openssh.com`) desde el PC a través del puerto 22 del teléfono hacia el `sshd` de la instancia `test-18492` (`127.0.0.2:8022`).
+     - Verificado cambio de destino dinámico al vuelo sin reiniciar el demonio.
+   - **Empaquetado e integración:**
+     - Actualizado `apk/capa.py` incorporando `proxy-ssh-22`, `proxy-ssh-22-daemon` y `proxy-ssh-22-worker`.
+     - Regenerado `capa.tgz`, compilado APK `sdk36Debug` exitosamente y sincronizados los scripts en la instancia activa del teléfono.
+
+**Siguiente sesión (72ª):**
 1. **Inicialización de entornos basada en Dockerfile / OCI (`dockerfile-runner` / importador):**
    - Diseñar e implementar un generador o intérprete que cree e inicialice instancias aisladas a partir de un `Dockerfile` (soportando directivas clave: `FROM`, `ENV`, `COPY`, `RUN`, `WORKDIR`, `EXPOSE`, `CMD`), o mediante importación directa de rootfs OCI/Docker inyectando `libldp.so`/glibc propia.
-2. **Proxy en puerto 22 real de Wi-Fi:**
-   - Implementar y poner a prueba el script o daemon en espacio `shell` (UID 2000, con `CAP_NET_BIND_SERVICE`) vía `adb-conectar` para escuchar en `0.0.0.0:22` y redirigir el tráfico SSH directamente a la instancia seleccionada o configurada en la UI de Red.
-3. **Distribuciones adicionales (Punto 4: Debian y Ubuntu ARM64):**
-   - Creación de adaptadores (`AdaptadorDebianArm64.java`), bootstrap de rootfs y recetas.
+2. **Distribuciones adicionales (Punto 4: Debian y Ubuntu ARM64):**
+   - Creación de adaptadores (`AdaptadorDebianArm64.java`), bootstrap de rootfs (`base-debian.tgz`) y recetas apt sin root.

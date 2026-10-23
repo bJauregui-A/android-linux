@@ -69,21 +69,41 @@ def emparejar():
     return True
 
 
+def asegurar_proxy22():
+    try:
+        for base in ["/usr/local/share/linux-android", "/usr/local/share/arch-android"]:
+            daemon = os.path.join(base, "proxy-ssh-22-daemon")
+            worker = os.path.join(base, "proxy-ssh-22-worker")
+            if os.path.exists(daemon):
+                adb("push", daemon, "/data/local/tmp/proxy-ssh-22")
+                adb("shell", "chmod 755 /data/local/tmp/proxy-ssh-22")
+            if os.path.exists(worker):
+                adb("push", worker, "/data/local/tmp/ssh-proxy-worker.sh")
+                adb("shell", "chmod 755 /data/local/tmp/ssh-proxy-worker.sh")
+    except Exception:
+        pass
+
+
 def main():
     if conectado():
         print("ADB ya está conectado.")
+        asegurar_proxy22()
         return 0
     p = leer("/tmp/adb-puerto")
     if p and conectar(p):
+        asegurar_proxy22()
         return 0
     if any(conectar(p) for p in mdns()):
+        asegurar_proxy22()
         return 0
     # Antes de escanear: si hay diálogo de vinculación abierto, vincular primero
     if os.path.exists("/tmp/adb-emparejar") and emparejar():
         p = leer("/tmp/adb-puerto")
         if p and conectar(p):
+            asegurar_proxy22()
             return 0
     if any(conectar(p) for p in escanear()):
+        asegurar_proxy22()
         return 0
     emparejar()
     return 1
