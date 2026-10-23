@@ -5,8 +5,10 @@
 # Uso: recorrer-escritorios [segundos=10] [entorno1 entorno2 ...]
 set -u
 
-D=${LINUX_SESSION_PROFILES_DIR:-/usr/local/share/arch-android/escritorios}
-E=${LINUX_SESSION_STATE_DIR:-/var/lib/arch-android}
+D=${LINUX_SESSION_PROFILES_DIR:-/usr/local/share/linux-android/escritorios}
+[ -d "$D" ] || D=/usr/local/share/arch-android/escritorios
+E=${LINUX_SESSION_STATE_DIR:-/var/lib/linux-android}
+[ -d "$E" ] || E=/var/lib/arch-android
 if [ -z "${XDG_RUNTIME_DIR:-}" ] || [ ! -d "$XDG_RUNTIME_DIR" ]; then
     for d in /run/user/*; do
         [ -d "$d" ] && XDG_RUNTIME_DIR=$d && break

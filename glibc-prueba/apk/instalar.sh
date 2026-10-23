@@ -7,14 +7,15 @@ umask 022
 ARCH_PATH="/usr/local/bin:/usr/bin"
 PATH=/system/bin:$PATH
 P=$GLIBC_PREFIX
-E=$P/var/lib/arch-android
+E=$P/var/lib/linux-android
+mkdir -p "$E"
+[ -e "$P/var/lib/arch-android" ] || ln -sfn linux-android "$P/var/lib/arch-android" 2>/dev/null || mkdir -p "$P/var/lib/arch-android"
 LOG=$P/tmp/instalacion-extraccion.log
 mkdir -p "$P/tmp" "$P/dev/shm/.sysv" 2>/dev/null || true
 chmod 1777 "$P/dev/shm" "$P/dev/shm/.sysv" 2>/dev/null || true
 
 # Limpiar pantalla y mostrar banner
-mkdir -p "$E"
-ESCRITORIO_PREVIO=$(cat "$E/escritorio" 2>/dev/null || true)
+ESCRITORIO_PREVIO=$(cat "$E/escritorio" "$P/var/lib/arch-android/escritorio" 2>/dev/null | head -n 1 || true)
 printf '\033[2J\033[H'
 printf '\e[1;38;5;141m┌────────────────────────────────────────────────────────────┐\e[0m\n'
 printf '\e[1;38;5;141m│\e[0m  \e[1;38;5;51mINSTALADOR DE ARCH LINUX ARM\e[0m                             \e[1;38;5;141m│\e[0m\n'
@@ -74,11 +75,18 @@ if [ ! -e "$E/extraido" ]; then
             --exclude='usr/local/lib/libudmabuf-shim.so' \
             --exclude='opt/gtk2*' \
             --exclude='etc/skel/.config/kitty*' \
-            --exclude='usr/local/share/arch-android/juegos*'
+            --exclude='usr/local/share/*/juegos*'
     else
         extraer "$CAPA_OFF" "$CAPA_LEN" "Capa GPU (Turnip, Zink, Mesa, wlroots, configs)"
     fi
     touch "$E/extraido"
+    # Asegurar enlaces simbólicos de retrocompatibilidad
+    [ -e "$P/var/lib/arch-android" ] || ln -sfn linux-android "$P/var/lib/arch-android" 2>/dev/null || true
+    if [ -d "$P/usr/local/share/linux-android" ] && [ ! -e "$P/usr/local/share/arch-android" ]; then
+        ln -sfn linux-android "$P/usr/local/share/arch-android" 2>/dev/null || true
+    elif [ -d "$P/usr/local/share/arch-android" ] && [ ! -e "$P/usr/local/share/linux-android" ]; then
+        ln -sfn arch-android "$P/usr/local/share/linux-android" 2>/dev/null || true
+    fi
     # Normalizar permisos de directorios base a 755 para evitar warnings de pacman
     find "$P/usr" "$P/etc" "$P/var" "$P/opt" -type d -exec chmod 755 {} + 2>/dev/null || true
     mkdir -p "$P/etc/services.d" "$P/usr/lib/systemd/system" 2>/dev/null || true
@@ -90,9 +98,11 @@ rm -f "$P/etc/resolv.conf"
 for s in $ANDROID_DNS; do echo "nameserver $s"; done > "$P/etc/resolv.conf"
 cd "$P"
 echo ""
-echo "➜ Iniciando configuración del entorno Arch Linux..."
+echo "➜ Iniciando configuración del entorno Linux..."
 echo ""
 export GLIBC_PREFIX="$P"
 export GLIBC_LOADER="$GLIBC_LOADER"
 export PATH="/usr/local/bin:/usr/bin"
-exec "$GLIBC_LOADER" /usr/bin/bash /usr/local/share/arch-android/primer-arranque.sh
+PA_SCRIPT="/usr/local/share/linux-android/primer-arranque.sh"
+[ -f "$P/$PA_SCRIPT" ] || PA_SCRIPT="/usr/local/share/arch-android/primer-arranque.sh"
+exec "$GLIBC_LOADER" /usr/bin/bash "$PA_SCRIPT"

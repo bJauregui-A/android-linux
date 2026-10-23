@@ -7,7 +7,7 @@ hl.monitor({
 })
 
 hl.on("hyprland.start", function ()
-    hl.exec_cmd("waybar -c /usr/local/share/arch-android/escritorios/comun/waybar.jsonc")
+    hl.exec_cmd("waybar -c /usr/local/share/linux-android/escritorios/comun/waybar.jsonc")
 end)
 
 hl.env("XCURSOR_SIZE", "24")

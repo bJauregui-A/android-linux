@@ -11,9 +11,11 @@ if [ -z "${ARCH_ANDROID_DBUS_WRAPPED:-}" ]; then
         /usr/bin/bash "$0" "$@"
 fi
 
-D=${LINUX_SESSION_PROFILES_DIR:-/usr/local/share/arch-android/escritorios}
+D=${LINUX_SESSION_PROFILES_DIR:-/usr/local/share/linux-android/escritorios}
+[ -d "$D" ] || D=/usr/local/share/arch-android/escritorios
 P=$D/proveedores
-E=${LINUX_SESSION_STATE_DIR:-/var/lib/arch-android}
+E=${LINUX_SESSION_STATE_DIR:-/var/lib/linux-android}
+[ -d "$E" ] || E=/var/lib/arch-android
 rescate=${LINUX_SESSION_RECOVERY_PROFILE:-sway}
 [ -n "${XDG_RUNTIME_DIR:-}" ] || {
     echo "falta XDG_RUNTIME_DIR para la sesión gráfica" >&2
@@ -26,7 +28,7 @@ rm -f "$screen_file"
 taskset -p ff $$ > /dev/null 2>&1
 # Escala del teléfono (~400 dpi); otro dispositivo la cambia en ~/.config/entorno-android
 export ANDROID_ESCALA=${ANDROID_ESCALA:-2.5}
-id=${ARCH_ESCRITORIO:-$(cat "$E/escritorio" 2>/dev/null)}
+id=${ARCH_ESCRITORIO:-$(cat "$E/escritorio" /var/lib/arch-android/escritorio 2>/dev/null | head -n 1)}
 case "$id" in ''|*[!a-z0-9-]*) id=$rescate ;; esac
 [ -f "$D/$id/sesion" ] && [ -f "$D/$id/escritorio.conf" ] || id=$rescate
 . "$D/$id/escritorio.conf"

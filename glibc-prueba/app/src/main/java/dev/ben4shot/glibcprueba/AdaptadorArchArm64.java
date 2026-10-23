@@ -32,7 +32,8 @@ final class AdaptadorArchArm64 implements AdaptadorInstalacion {
     }
 
     @Override public String usuario(File raiz) {
-        File f = new File(raiz, "var/lib/arch-android/usuario");
+        File f = new File(raiz, "var/lib/linux-android/usuario");
+        if (!f.exists()) f = new File(raiz, "var/lib/arch-android/usuario");
         try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(f))) {
             String u = r.readLine();
             if (u != null && u.trim().matches("[a-z_][a-z0-9_-]*")) return u.trim();
@@ -48,9 +49,12 @@ final class AdaptadorArchArm64 implements AdaptadorInstalacion {
 
     @Override public String supervisorSesion() { return "/usr/local/bin/sesion-android"; }
 
-    @Override public String perfilesSesion() { return "/usr/local/share/arch-android/escritorios"; }
+    @Override public String perfilesSesion() {
+        File nuevo = new File("/usr/local/share/linux-android/escritorios");
+        return "/usr/local/share/linux-android/escritorios";
+    }
 
-    @Override public String estadoSesion() { return "/var/lib/arch-android"; }
+    @Override public String estadoSesion() { return "/var/lib/linux-android"; }
 
     @Override public String perfilRescate() { return "sway"; }
 
@@ -73,6 +77,27 @@ final class AdaptadorArchArm64 implements AdaptadorInstalacion {
 
     @Override public void preparar(Context contexto, File raiz) {
         new File(raiz, "dev/shm").mkdirs();
+        File estadoNuevo = new File(raiz, "var/lib/linux-android");
+        estadoNuevo.mkdirs();
+        File estadoViejo = new File(raiz, "var/lib/arch-android");
+        if (!estadoViejo.exists()) {
+            try {
+                android.system.Os.symlink("linux-android", estadoViejo.getAbsolutePath());
+            } catch (Exception e) {
+                estadoViejo.mkdirs();
+            }
+        }
+        File shareNuevo = new File(raiz, "usr/local/share/linux-android");
+        File shareViejo = new File(raiz, "usr/local/share/arch-android");
+        if (shareViejo.exists() && !shareNuevo.exists()) {
+            try {
+                android.system.Os.symlink("arch-android", shareNuevo.getAbsolutePath());
+            } catch (Exception ignorada) { }
+        } else if (shareNuevo.exists() && !shareViejo.exists()) {
+            try {
+                android.system.Os.symlink("linux-android", shareViejo.getAbsolutePath());
+            } catch (Exception ignorada) { }
+        }
         escribirSudo(raiz);
     }
 
@@ -118,7 +143,8 @@ final class AdaptadorArchArm64 implements AdaptadorInstalacion {
     }
 
     private static String usuarioLocal(File raiz) {
-        File f = new File(raiz, "var/lib/arch-android/usuario");
+        File f = new File(raiz, "var/lib/linux-android/usuario");
+        if (!f.exists()) f = new File(raiz, "var/lib/arch-android/usuario");
         try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(f))) {
             String u = r.readLine();
             if (u != null && u.trim().matches("[a-z_][a-z0-9_-]*")) return u.trim();

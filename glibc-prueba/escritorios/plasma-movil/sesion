@@ -8,7 +8,9 @@ kwin=$(command -v kwin_wayland) || {
     echo 'Plasma Mobile: no se encontró kwin_wayland en PATH' >&2
     exit 127
 }
-plasma_sesion=${LINUX_SESSION_PROFILES_DIR:-/usr/local/share/arch-android/escritorios}/kde/plasma-sesion
+_dir_perfiles=${LINUX_SESSION_PROFILES_DIR:-/usr/local/share/linux-android/escritorios}
+[ -d "$_dir_perfiles" ] || _dir_perfiles=/usr/local/share/arch-android/escritorios
+plasma_sesion=$_dir_perfiles/kde/plasma-sesion
 [ -x "$plasma_sesion" ] || {
     echo "Plasma Mobile: falta el lanzador de sesión Plasma: $plasma_sesion" >&2
     exit 127

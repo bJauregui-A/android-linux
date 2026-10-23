@@ -18,10 +18,11 @@ final class Instalador {
 
     private Instalador() { }
 
-    // Instalado = lo marcó primer-arranque.sh, o un Arch previo (con sway y sin instalación a medias).
+    // Instalado = lo marcó primer-arranque.sh, o un sistema previo (con sway y sin instalación a medias).
     static boolean instalada(File p) {
         if (p == null) return false;
-        File e = new File(p, "var/lib/arch-android");
+        File e = new File(p, "var/lib/linux-android");
+        if (!e.exists()) e = new File(p, "var/lib/arch-android");
         if (new File(e, "instalado").exists()) return true;
         return !new File(e, "instalando").exists() && new File(p, "usr/bin/sway").exists();
     }

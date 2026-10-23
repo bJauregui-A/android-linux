@@ -6,7 +6,8 @@
 #   - herramienta proton-directo en Steam y el Wine de Proton 11 ARM64 en Lutris
 # gtk2 (/opt/gtk2) y ~/turnip-x11 ya vienen en el APK.
 set -e
-J=/usr/local/share/arch-android/juegos
+J=/usr/local/share/linux-android/juegos
+[ -d "$J" ] || J=/usr/local/share/arch-android/juegos
 URL=https://client-update.steamstatic.com
 S=~/.local/share/Steam
 T=$(mktemp -d)

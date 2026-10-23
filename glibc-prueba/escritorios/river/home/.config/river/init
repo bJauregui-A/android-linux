@@ -16,4 +16,4 @@ for i in 1 2 3 4 5; do
 done
 riverctl default-layout rivertile
 rivertile -view-padding 1 -outer-padding 1 &
-waybar -c /usr/local/share/arch-android/escritorios/comun/waybar.jsonc > /tmp/waybar.log 2>&1 &
+waybar -c /usr/local/share/linux-android/escritorios/comun/waybar.jsonc > /tmp/waybar.log 2>&1 &

@@ -292,6 +292,63 @@ final class SistemaLinux {
         return adaptadorSeleccionado(c).raiz(c);
     }
 
+    static File estadoSesion(Context c, String id) {
+        File r = raiz(c, id);
+        File nuevo = new File(r, "var/lib/linux-android");
+        if (nuevo.exists()) return nuevo;
+        File antiguo = new File(r, "var/lib/arch-android");
+        if (antiguo.exists()) return antiguo;
+        return nuevo;
+    }
+
+    static File archivoEscritorio(Context c, String id) {
+        File r = raiz(c, id);
+        File fNuevo = new File(r, "var/lib/linux-android/escritorio");
+        if (fNuevo.exists()) return fNuevo;
+        File fAntiguo = new File(r, "var/lib/arch-android/escritorio");
+        if (fAntiguo.exists()) return fAntiguo;
+        return fNuevo;
+    }
+
+    static String leerEscritorio(Context c, String id) {
+        File f = archivoEscritorio(c, id);
+        if (f.isFile()) {
+            try (java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader(f))) {
+                String linea = br.readLine();
+                if (linea != null && !linea.trim().isEmpty()) return linea.trim();
+            } catch (Exception ignorada) { }
+        }
+        return "sway";
+    }
+
+    static void escribirEscritorio(Context c, String id, String escritorio) {
+        File r = raiz(c, id);
+        File dirNuevo = new File(r, "var/lib/linux-android");
+        dirNuevo.mkdirs();
+        File fNuevo = new File(dirNuevo, "escritorio");
+        try (java.io.FileWriter fw = new java.io.FileWriter(fNuevo)) {
+            fw.write(escritorio + "\n");
+        } catch (Exception e) {
+            Log.e(TAG, "error escribiendo escritorio", e);
+        }
+
+        // Compatibilidad: mantener sincronizado con var/lib/arch-android/escritorio
+        File dirViejo = new File(r, "var/lib/arch-android");
+        if (!dirViejo.exists()) {
+            try {
+                android.system.Os.symlink("linux-android", dirViejo.getAbsolutePath());
+                return;
+            } catch (Exception ignorada) {
+                dirViejo.mkdirs();
+            }
+        }
+        if (dirViejo.isDirectory() && !java.nio.file.Files.isSymbolicLink(dirViejo.toPath())) {
+            try (java.io.FileWriter fw = new java.io.FileWriter(new File(dirViejo, "escritorio"))) {
+                fw.write(escritorio + "\n");
+            } catch (Exception ignorada) { }
+        }
+    }
+
     static AdaptadorInstalacion adaptador(Instancia inst) {
         if (inst == null || ARCH.equals(inst.distroId)) {
             return new AdaptadorArchArm64(inst != null ? inst.rutaRelativa : "instancias/arch-principal");

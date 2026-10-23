@@ -141,16 +141,13 @@ public class WaylandActivity extends Activity {
             return;
         }
         // Si el entorno seleccionado es sin-entorno, redirigir directamente a la terminal interactiva
-        java.io.File fEsc = new java.io.File(SistemaLinux.raiz(this, instanciaId), "var/lib/arch-android/escritorio");
-        try {
-            if (fEsc.exists() && "sin-entorno".equals(java.nio.file.Files.readString(fEsc.toPath()).trim())) {
-                Intent i = new Intent(this, TerminalActivity.class);
-                i.putExtra(TerminalService.EXTRA_INSTANCIA_ID, instanciaId);
-                startActivity(i);
-                finish();
-                return;
-            }
-        } catch (Exception ignorada) { }
+        if ("sin-entorno".equals(SistemaLinux.leerEscritorio(this, instanciaId))) {
+            Intent i = new Intent(this, TerminalActivity.class);
+            i.putExtra(TerminalService.EXTRA_INSTANCIA_ID, instanciaId);
+            startActivity(i);
+            finish();
+            return;
+        }
         Wayland.iniciarPara(this, instanciaId);
         // El escritorio elegido arranca solo si aún no está corriendo.
         startForegroundService(new Intent(this, TerminalService.class)

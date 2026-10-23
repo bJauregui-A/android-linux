@@ -92,9 +92,13 @@ final class CapaSesion {
     private static File destino(File raiz, String perfiles, String nombre) {
         String relativo;
         if (nombre.equals("apk/primer-arranque.sh")) {
-            relativo = "usr/local/share/arch-android/primer-arranque.sh";
+            relativo = new File(raiz, "usr/local/share/linux-android").exists() || !new File(raiz, "usr/local/share/arch-android").exists()
+                    ? "usr/local/share/linux-android/primer-arranque.sh"
+                    : "usr/local/share/arch-android/primer-arranque.sh";
         } else if (nombre.equals("apk/paquetes-zsh.txt")) {
-            relativo = "usr/local/share/arch-android/paquetes-zsh.txt";
+            relativo = new File(raiz, "usr/local/share/linux-android").exists() || !new File(raiz, "usr/local/share/arch-android").exists()
+                    ? "usr/local/share/linux-android/paquetes-zsh.txt"
+                    : "usr/local/share/arch-android/paquetes-zsh.txt";
         } else if (nombre.equals("apk/instalar-aur.sh")) {
             relativo = "usr/local/bin/instalar-aur";
         } else if (nombre.equals("android/android-shm-limpiar")) {

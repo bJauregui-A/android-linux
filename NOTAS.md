@@ -179,11 +179,23 @@ Script de reconexión rápida creado en `~/.local/bin/adb-conectar` (escaneo de 
   4. Integrado `paquetes-zsh.txt` en `app/build.gradle.kts` (`packageSessionLayer`) y en `CapaSesion.java` para sincronización automática en instalaciones existentes.
 - **Compilación e instalación en el Redmi:** APK `sdk36Debug` compilada exitosamente (`BUILD SUCCESSFUL in 9s`) e instalada con `adb install -r` (Success; datos e instancias conservados).
 
-**Siguiente sesión (57ª):**
-1. Probar en el Redmi el nuevo botón `SALIR` en la barra inferior y el botón `✕ CERRAR SESIÓN` en la notificación Android.
-2. Probar la apertura y alternancia entre instancias independientes en segundo plano.
-3. Probar una instalación nueva para verificar la presencia del módulo `Zsh + Kitty` y sus configs en el home.
-4. Implementar el servidor/compositor X11 directo sin Wayland para entornos clásicos.
+**57ª sesión (2026-10-23, repo):**
+- **Validaciones de pruebas de la 56ª confirmadas por el usuario ✅:** botón `SALIR` en barra inferior, `✕ CERRAR SESIÓN` en la notificación persistente de Android, alternancia fluida entre instancias en segundo plano y módulo Zsh+Kitty validado.
+- **Generalización de rutas de estado y perfiles (distro-agnósticas):**
+  1. Estandarizadas las rutas canónicas a `/var/lib/linux-android` (estado y selección de escritorio) y `/usr/local/share/linux-android` (perfiles de escritorios y scripts comunes), eliminando la dependencia rígida de `arch-android`.
+  2. Implementada compatibilidad bidireccional automática con symlinks y fallbacks automáticos en tiempo de ejecución (`AdaptadorArchArm64.preparar`, `capa.py`, `instalar.sh`, `sesion-android` y `CapaSesion.java`), garantizando que ninguna instancia o script existente en el teléfono se rompa.
+  3. Centralizada la lectura y escritura del entorno de escritorio en `SistemaLinux.java` (`leerEscritorio`, `escribirEscritorio`, `archivoEscritorio`), eliminando accesos directos hardcodeados en `WaylandActivity.java`, `SistemaActivity.java` y `TerminalService.java`.
+- **Modularización del instalador interactivo (`primer-arranque.sh`):**
+  1. Creada capa de abstracción de gestor de paquetes (`detectar_backend`, `backend_nombre`, `backend_iniciar_base`, `backend_limpiar_lock`, `backend_instalar`, `backend_soporta_aur`, `resolver_archivo`).
+  2. `primer-arranque.sh` desacopla la UI de consola ANSI y los flujos de configuración del comando `pacman`, permitiendo resolver paquetes según el backend (`paquetes-<grupo>-<backend>.txt` con fallback a `paquetes-<grupo>.txt`, y soporte para `apt` de Debian/Ubuntu).
+  3. Módulo AUR condicionado automáticamente a backends que lo soportan.
+  4. Verificación de sintaxis con `bash -n` y compilación completa `:app:assembleSdk36Debug` exitosa en 1s.
+
+**Siguiente sesión (58ª):**
+1. Generar la imagen rootfs base para Debian ARM64 (`base-debian.tgz`).
+2. Implementar `AdaptadorDebianArm64.java` implementando `AdaptadorInstalacion`.
+3. Habilitar la selección de Debian en `SistemaLinux.java` y `SistemaActivity.java`.
+4. Validar el flujo de instalación y primer arranque con apt sin root.
 **Antes (26ª), hecho:** agy interactivo real ✅, android-tools instalado ✅, emparejamiento y conexión local ✅, permisos de shell obtenidos ✅, script adb-conectar ✅.
 **Antes (25ª), hecho solo lo de `agy` — en orden:**
 (1) **glibc 0019 (era 0018, la tomó la pila de SIGSYS): `ip a`/`ip r`** (bind netlink falso + `GETLINK` sintético, ver arriba). Probar libc aislada antes de instalar (`instalar-glibc.sh`).

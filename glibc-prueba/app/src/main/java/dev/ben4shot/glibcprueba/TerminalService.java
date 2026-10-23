@@ -328,7 +328,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
             try {
                 String[] cmd = new String[]{
                     "/system/bin/sh", "-c",
-                    "rm -f " + path + "/tmp/arch-android-display " + path + "/run/user/*/wayland-[1-9]* " + path + "/run/user/*/sway-ipc.*.sock 2>/dev/null"
+                    "rm -f " + path + "/tmp/linux-session-display " + path + "/tmp/arch-android-display " + path + "/run/user/*/wayland-[1-9]* " + path + "/run/user/*/sway-ipc.*.sock 2>/dev/null"
                 };
                 Runtime.getRuntime().exec(cmd).waitFor();
             } catch (Exception ignorada) { }
@@ -364,7 +364,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
                 "    case \"$cwd\" in \"" + path + "\"*) kill -9 $pid 2>/dev/null; continue;; esac; " +
                 "  fi; " +
                 "done; " +
-                "rm -f " + path + "/tmp/arch-android-display " + path + "/run/user/*/wayland-[1-9]* " + path + "/run/user/*/sway-ipc.*.sock 2>/dev/null; " +
+                "rm -f " + path + "/tmp/linux-session-display " + path + "/tmp/arch-android-display " + path + "/run/user/*/wayland-[1-9]* " + path + "/run/user/*/sway-ipc.*.sock 2>/dev/null; " +
                 "rm -rf " + path + "/dev/shm/.sysv " + path + "/dev/shm/* 2>/dev/null; " +
                 "mkdir -p " + path + "/dev/shm/.sysv 2>/dev/null; " +
                 "chmod 1777 " + path + "/dev/shm " + path + "/dev/shm/.sysv 2>/dev/null"
@@ -815,14 +815,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
                     if (vista != null && s == sesionVisible && vista.getContext() instanceof android.app.Activity) {
                         ((android.app.Activity) vista.getContext()).finish();
                     }
-                    File fEsc = new File(SistemaLinux.raiz(this, dueña.id), "var/lib/arch-android/escritorio");
-                    boolean esSinEntorno = false;
-                    try {
-                        if (fEsc.exists()) {
-                            String e = java.nio.file.Files.readString(fEsc.toPath()).trim();
-                            if ("sin-entorno".equals(e)) esSinEntorno = true;
-                        }
-                    } catch (Exception ignorada) { }
+                    boolean esSinEntorno = "sin-entorno".equals(SistemaLinux.leerEscritorio(this, dueña.id));
                     if (esSinEntorno) {
                         Intent i = new Intent(this, TerminalActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                         i.putExtra(EXTRA_INSTANCIA_ID, dueña.id);

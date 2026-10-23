@@ -10,7 +10,7 @@ output "winit" {
     scale @ESCALA@
 }
 prefer-no-csd
-spawn-at-startup "waybar" "-c" "/usr/local/share/arch-android/escritorios/comun/waybar.jsonc"
+spawn-at-startup "waybar" "-c" "/usr/local/share/linux-android/escritorios/comun/waybar.jsonc"
 binds {
     Mod+Return { spawn "kitty"; }
     Mod+T { spawn "kitty"; }

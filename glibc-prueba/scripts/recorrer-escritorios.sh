@@ -21,7 +21,7 @@ else
 fi
 
 ANTERIOR=$("${ADB[@]}" shell run-as "$PKG" sh <<'EOF' | tr -d '\r '
-cat files/archlinux/var/lib/arch-android/escritorio 2>/dev/null || echo sway
+cat files/archlinux/var/lib/linux-android/escritorio files/archlinux/var/lib/arch-android/escritorio 2>/dev/null | head -n 1 || echo sway
 EOF
 )
 case "$ANTERIOR" in ''|*[!a-z0-9-]*) ANTERIOR=sway ;; esac
@@ -31,7 +31,9 @@ restaurar() {
     printf '\n==> Restaurando escritorio (%s) y abriendo la app...\n' "$ANTERIOR"
     "${ADB[@]}" shell am force-stop "$PKG" </dev/null >/dev/null 2>&1 || true
     "${ADB[@]}" shell run-as "$PKG" sh <<EOF
-printf '%s\n' "$ANTERIOR" > files/archlinux/var/lib/arch-android/escritorio
+mkdir -p files/archlinux/var/lib/linux-android files/archlinux/var/lib/arch-android 2>/dev/null || true
+printf '%s\n' "$ANTERIOR" > files/archlinux/var/lib/linux-android/escritorio
+printf '%s\n' "$ANTERIOR" > files/archlinux/var/lib/arch-android/escritorio 2>/dev/null || true
 EOF
     "${ADB[@]}" shell am start -n "$PKG/dev.ben4shot.glibcprueba.WaylandActivity" </dev/null >/dev/null 2>&1 || true
 }
@@ -55,7 +57,9 @@ for id in "${IDS[@]}"; do
 UID_APP=\$(id -u)
 mkdir -p "files/archlinux/run/user/\$UID_APP"
 printf 'PENDIENTE:%s\n' "$id" > "files/archlinux/run/user/\$UID_APP/linux-session.estado"
-printf '%s\n' "$id" > files/archlinux/var/lib/arch-android/escritorio
+mkdir -p files/archlinux/var/lib/linux-android files/archlinux/var/lib/arch-android 2>/dev/null || true
+printf '%s\n' "$id" > files/archlinux/var/lib/linux-android/escritorio
+printf '%s\n' "$id" > files/archlinux/var/lib/arch-android/escritorio 2>/dev/null || true
 EOF
 
     "${ADB[@]}" shell am start -n "$PKG/dev.ben4shot.glibcprueba.WaylandActivity" </dev/null >/dev/null

@@ -23,7 +23,7 @@ import time
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # glibc-prueba/
 H = "etc/skel"  # → /home/<usuario>
-D = "usr/local/share/arch-android"
+D = "usr/local/share/linux-android"
 STRIP = os.path.expanduser("~/Android/Sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip")
 # Respaldos de bibliotecas (libgallium...so.0001) y documentación: no van
 SALTAR = re.compile(r"\.\d{4}$|/share/(gtk-doc|man|doc)/")
@@ -178,6 +178,14 @@ def main():
     for src, dst in PLANTILLAS:
         texto = open(os.path.join(RAIZ, src)).read().replace("@P@", f"{paquete}/files/archlinux")
         out.archivo(dst, texto.encode(), 0o644)
+    # Enlace simbólico de retrocompatibilidad para scripts o configuraciones previas
+    out.directorio("usr/local/share")
+    ti = tarfile.TarInfo("usr/local/share/arch-android")
+    ti.type = tarfile.SYMTYPE
+    ti.linkname = "linux-android"
+    ti.mode = 0o777
+    ti.mtime = int(time.time())
+    out.t.addfile(ti)
     out.t.close()
 
 

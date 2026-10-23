@@ -452,16 +452,7 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
 
-        File fEsc = new File(SistemaLinux.raiz(this, inst.id), "var/lib/arch-android/escritorio");
-        String idEsc = "";
-        try {
-            if (fEsc.exists()) {
-                try (java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader(fEsc))) {
-                    idEsc = br.readLine();
-                    if (idEsc != null) idEsc = idEsc.trim();
-                }
-            }
-        } catch (Exception ignorada) { }
+        String idEsc = SistemaLinux.leerEscritorio(this, inst.id);
         boolean esSinEntorno = "sin-entorno".equals(idEsc);
 
         if (esSinEntorno) {
@@ -556,15 +547,12 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
     private void activarYEjecutar(String id, boolean escritorio) {
         SistemaLinux.seleccionarInstancia(this, id);
         if (escritorio) {
-            File fEsc = new File(SistemaLinux.raiz(this, id), "var/lib/arch-android/escritorio");
-            try {
-                if (fEsc.exists() && "sin-entorno".equals(java.nio.file.Files.readString(fEsc.toPath()).trim())) {
-                    Intent i = new Intent(this, TerminalActivity.class);
-                    i.putExtra(TerminalService.EXTRA_INSTANCIA_ID, id);
-                    startActivity(i);
-                    return;
-                }
-            } catch (Exception ignorada) { }
+            if ("sin-entorno".equals(SistemaLinux.leerEscritorio(this, id))) {
+                Intent i = new Intent(this, TerminalActivity.class);
+                i.putExtra(TerminalService.EXTRA_INSTANCIA_ID, id);
+                startActivity(i);
+                return;
+            }
             Intent i = new Intent(this, WaylandActivity.class);
             i.putExtra(TerminalService.EXTRA_INSTANCIA_ID, id);
             startActivity(i);
@@ -686,11 +674,7 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
             try {
                 SistemaLinux.Instancia nueva = SistemaLinux.crearInstancia(this, nom, SistemaLinux.ARCH);
                 if (esConsola) {
-                    File fEsc = new File(SistemaLinux.raiz(this, nueva.id), "var/lib/arch-android/escritorio");
-                    fEsc.getParentFile().mkdirs();
-                    try (java.io.FileWriter fw = new java.io.FileWriter(fEsc)) {
-                        fw.write("sin-entorno\n");
-                    }
+                    SistemaLinux.escribirEscritorio(this, nueva.id, "sin-entorno");
                 }
                 actualizarLista();
                 activarYEjecutar(nueva.id, false);
