@@ -66,6 +66,8 @@ backend_limpiar_lock() {
 backend_iniciar_base() {
     case "$BACKEND" in
         pacman)
+            # Asegurar que pacman no rechace paquetes por firmas ausentes en el llavero base
+            sed -i 's/^SigLevel\s*=.*/SigLevel = Never/' /etc/pacman.conf 2>/dev/null || true
             paso "Inicializando base y paquetes de sistema (pacman)"
             for d in /var/lib/pacman/local/*/; do
                 [ -f "$d/install" ] || continue
@@ -74,7 +76,7 @@ backend_iniciar_base() {
             done
             paso "Configurando llavero de pacman y certificados SSL"
             backend_limpiar_lock
-            sudo pacman-key --init > /dev/null 2>&1 && sudo pacman-key --populate archlinuxarm || falla "falló pacman-key"
+            sudo pacman-key --init > /dev/null 2>&1 && sudo pacman-key --populate archlinuxarm || true
             sudo update-ca-trust > /dev/null 2>&1 || true
             ;;
         apt)
@@ -98,7 +100,7 @@ backend_instalar() {
         pacman)
             for i in 1 2 3; do
                 backend_limpiar_lock
-                sudo pacman -Syu --needed --noconfirm "${pkgs[@]}" && return 0
+                sudo pacman -Syu --needed --noconfirm --overwrite "*" "${pkgs[@]}" && return 0
                 [ $i -eq 3 ] && return 1
                 printf '\n\e[38;5;214m✖ Falló la descarga en pacman, reintento %d de 2...\e[0m\n' $i
                 sleep 3

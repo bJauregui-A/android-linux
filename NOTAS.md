@@ -746,6 +746,15 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
      - Reconfigurado `shared_prefs/instalacion-linux.xml` con `srvtest-91001` activo.
      - APK `sdk36Debug` recompilada e instalada en el dispositivo vía `adb install -r`, verificando su arranque limpio y enfocado en primer plano.
      - **Prueba de regresión en runtime ART:** ejecutada la clase de test `PruebaInstancia` con `app_process` en el teléfono invocando `SistemaLinux.adaptador()` y `SistemaLinux.raiz()` para `server1-25913`, IDs inexistentes y `null`. Verificada resolución limpia a `AdaptadorArchArm64` y ruta correspondiente sin lanzar excepciones (código de salida 0). Limpiados archivos temporales de prueba.
+5. **Diagnóstico y solución del atasco en "Retrieving packages..." al crear nuevas instancias:**
+   - **Causa raíz:** Tras el commit `350a6eb` (integración de repos SteamOS Holo y `pacman-xfer`), el archivo `/etc/pacman.conf` generado en `base.tgz` mantenía `SigLevel = Required DatabaseOptional`. Dado que el servidor de SteamOS Cloud no publica archivos `.sig` sueltos para los paquetes individuales (404), `pacman` lanzaba peticiones `curl` secuenciales con handshake TLS buscando `.sig.part` para los ~88 paquetes, ralentizando enormemente la descarga. Al recibir 404, pacman descartaba los paquetes. Asimismo, al intentar instalar `base-devel`, se producía un conflicto en `/usr/lib/libgcc_s.so` (propiedad de `libgcc` en `base.tgz` vs `gcc-libs`). Al fallar la transacción, pacman borraba la caché y `primer-arranque.sh` reintentaba en bucle infinito.
+   - **Corrección:**
+     - En [scripts/bootstrap.py](file:///media/ben4shot/E/Develop/Android/glibc-prueba/scripts/bootstrap.py): configurado `SigLevel = Never` por defecto en la generación de `pacman.conf` para `base.tgz`.
+     - En [apk/instalar.sh](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/instalar.sh): forzado `SigLevel = Never` en `/etc/pacman.conf` inmediatamente tras la extracción de las capas.
+     - En [apk/primer-arranque.sh](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/primer-arranque.sh): asegurado `SigLevel = Never` en `backend_iniciar_base()` y agregado `--overwrite "*"` a `pacman -Syu --needed --noconfirm` en `backend_instalar()` para resolver pacíficamente conflictos de bibliotecas base.
+     - Reempaquetados `base.tgz` y `capa.tgz` en `trabajo/assets-sdk36/` con `apk/armar.sh sdk36`.
+     - Compilado APK `sdk36Debug` con Gradle e instalado en el Redmi mediante `adb install -r`.
+     - Saneada la configuración de `SigLevel` y eliminado `db.lck` en la instancia `server2-59361` existente en el teléfono.
 
 **Siguiente sesión (71ª):**
 1. **Inicialización de entornos basada en Dockerfile / OCI (`dockerfile-runner` / importador):**
