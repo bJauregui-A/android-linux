@@ -477,8 +477,22 @@ public final class RedManager {
 
     private static void iniciarServidorParaRegla(Context c, Regla r) {
         int destinoPort = (r.puertoInterno == 22 ? 8022 : r.puertoInterno);
-        if (r.puertoExterno == destinoPort) {
-            Log.w(TAG, "Regla omitida para evitar bucle infinito: puerto externo (" + r.puertoExterno + ") coincide con destino");
+        String hostDestino = "127.0.0.1";
+        if (r.instanciaId != null && !r.instanciaId.isEmpty()) {
+            String ipVirt = ipParaInstancia(c, r.instanciaId);
+            if (ipVirt.contains("/")) ipVirt = ipVirt.substring(0, ipVirt.indexOf('/'));
+            String[] partes = ipVirt.trim().split("\\.");
+            if (partes.length == 4) {
+                try {
+                    int b2 = Integer.parseInt(partes[1]);
+                    int b3 = Integer.parseInt(partes[2]);
+                    int b4 = Integer.parseInt(partes[3]);
+                    hostDestino = "127." + b2 + "." + b3 + "." + b4;
+                } catch (NumberFormatException ignorada) { }
+            }
+        }
+        if ("127.0.0.1".equals(hostDestino) && r.puertoExterno == destinoPort) {
+            Log.w(TAG, "Regla omitida para evitar bucle infinito: puerto externo (" + r.puertoExterno + ") coincide con destino local 127.0.0.1");
             return;
         }
         // Puertos privilegiados (< 1024, ej. 80, 443, 22, 21) se delegan al proxy shell UID 2000
@@ -517,11 +531,6 @@ public final class RedManager {
 
     private static void procesarConexion(Context c, Regla r, Socket cliente) {
         int puertoDestino = (r.puertoInterno == 22 ? 8022 : r.puertoInterno);
-        if (puertoDestino == r.puertoExterno) {
-            Log.w(TAG, "Bucle evitado: puerto externo y destino son " + puertoDestino);
-            try { cliente.close(); } catch (Exception ignored) { }
-            return;
-        }
         Socket destino = null;
         try {
             // Resolver IP de loopback virtual destino para la instancia
@@ -538,6 +547,11 @@ public final class RedManager {
                         hostDestino = "127." + b2 + "." + b3 + "." + b4;
                     } catch (NumberFormatException ignorada) { }
                 }
+            }
+            if ("127.0.0.1".equals(hostDestino) && puertoDestino == r.puertoExterno) {
+                Log.w(TAG, "Bucle evitado: puerto externo y destino son " + puertoDestino + " en 127.0.0.1");
+                try { cliente.close(); } catch (Exception ignored) { }
+                return;
             }
             Log.i(TAG, "Conexión aceptada en :" + r.puertoExterno + ", reenviando a " + hostDestino + ":" + puertoDestino);
             destino = new Socket(hostDestino, puertoDestino);
@@ -693,9 +707,16 @@ public final class RedManager {
         }, "shell-port-starter").start();
     }
 
+    public static void comprobarPuertoActivoAsync(int puerto, java.util.function.Consumer<Boolean> callback) {
+        new Thread(() -> {
+            boolean act = estaPuertoActivo(puerto);
+            new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> callback.accept(act));
+        }, "check-port-" + puerto).start();
+    }
+
     public static boolean estaPuertoActivo(int puerto) {
         try (Socket s = new Socket()) {
-            s.connect(new java.net.InetSocketAddress("127.0.0.1", puerto), 120);
+            s.connect(new java.net.InetSocketAddress("127.0.0.1", puerto), 350);
             return true;
         } catch (Exception ignored) {
             return false;

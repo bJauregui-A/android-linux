@@ -71,6 +71,7 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        PuertoAdb.iniciar(this);
 
         FrameLayout raiz = new FrameLayout(this);
         raiz.setBackgroundColor(FONDO_OSCURO);
@@ -703,7 +704,7 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         layout.addView(barraTabs, lpTabs);
 
         final int[] tabActiva = {0}; // 0: Maquinas/IPs, 1: Subredes, 2: Forwarding
-        final LinearLayout[] vistasTabs = new LinearLayout[3];
+        final View[] vistasTabs = new View[3];
 
         Runnable[] actualizarTabs = new Runnable[1];
 
@@ -731,17 +732,18 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         // Contenedor principal de pestañas
         LinearLayout contPestañas = new LinearLayout(this);
         contPestañas.setOrientation(LinearLayout.VERTICAL);
-        layout.addView(contPestañas, new LinearLayout.LayoutParams(-1, dp(260)));
+        layout.addView(contPestañas, new LinearLayout.LayoutParams(-1, dp(460)));
 
         // --- PESTAÑA 0: MÁQUINAS E IPS ---
-        vistasTabs[0] = new LinearLayout(this);
-        vistasTabs[0].setOrientation(LinearLayout.VERTICAL);
+        LinearLayout tab0 = new LinearLayout(this);
+        tab0.setOrientation(LinearLayout.VERTICAL);
+        vistasTabs[0] = tab0;
 
         ScrollView scrollIps = new ScrollView(this);
         LinearLayout contIps = new LinearLayout(this);
         contIps.setOrientation(LinearLayout.VERTICAL);
         scrollIps.addView(contIps);
-        vistasTabs[0].addView(scrollIps, new LinearLayout.LayoutParams(-1, -1));
+        tab0.addView(scrollIps, new LinearLayout.LayoutParams(-1, -1));
 
         Runnable recargarIps = () -> {
             contIps.removeAllViews();
@@ -820,14 +822,15 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         };
 
         // --- PESTAÑA 1: SUBREDES ---
-        vistasTabs[1] = new LinearLayout(this);
-        vistasTabs[1].setOrientation(LinearLayout.VERTICAL);
+        LinearLayout tab1 = new LinearLayout(this);
+        tab1.setOrientation(LinearLayout.VERTICAL);
+        vistasTabs[1] = tab1;
 
         ScrollView scrollSubs = new ScrollView(this);
         LinearLayout contSubs = new LinearLayout(this);
         contSubs.setOrientation(LinearLayout.VERTICAL);
         scrollSubs.addView(contSubs);
-        vistasTabs[1].addView(scrollSubs, new LinearLayout.LayoutParams(-1, dp(150)));
+        tab1.addView(scrollSubs, new LinearLayout.LayoutParams(-1, dp(150)));
 
         Runnable[] recargarSubs = new Runnable[1];
         recargarSubs[0] = () -> {
@@ -861,7 +864,7 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         TextView titNuevaSub = texto("❯ Crear nueva subred:", 12, true, ACCENTO_AMBAR);
         LinearLayout.LayoutParams lpTNS = new LinearLayout.LayoutParams(-1, -2);
         lpTNS.topMargin = dp(6);
-        vistasTabs[1].addView(titNuevaSub, lpTNS);
+        tab1.addView(titNuevaSub, lpTNS);
 
         LinearLayout formSub = new LinearLayout(this);
         formSub.setOrientation(LinearLayout.HORIZONTAL);
@@ -908,11 +911,15 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
 
         LinearLayout.LayoutParams lpFSub = new LinearLayout.LayoutParams(-1, -2);
         lpFSub.topMargin = dp(4);
-        vistasTabs[1].addView(formSub, lpFSub);
+        tab1.addView(formSub, lpFSub);
 
         // --- PESTAÑA 2: PORT FORWARDING ---
-        vistasTabs[2] = new LinearLayout(this);
-        vistasTabs[2].setOrientation(LinearLayout.VERTICAL);
+        ScrollView scrollTab2 = new ScrollView(this);
+        scrollTab2.setFillViewport(true);
+        LinearLayout contTab2 = new LinearLayout(this);
+        contTab2.setOrientation(LinearLayout.VERTICAL);
+        scrollTab2.addView(contTab2, new FrameLayout.LayoutParams(-1, -2));
+        vistasTabs[2] = scrollTab2;
 
         android.widget.CheckBox cbHabilitado = new android.widget.CheckBox(this);
         cbHabilitado.setText("Habilitar reenvío activo");
@@ -920,7 +927,50 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         cbHabilitado.setTypeface(Typeface.MONOSPACE);
         cbHabilitado.setChecked(RedManager.esHabilitado(this));
         cbHabilitado.setOnCheckedChangeListener((bv, isChecked) -> RedManager.setHabilitado(this, isChecked));
-        vistasTabs[2].addView(cbHabilitado);
+        contTab2.addView(cbHabilitado);
+
+        // Sección: Depuración Inalámbrica (ADB mDNS)
+        LinearLayout boxAdb = new LinearLayout(this);
+        boxAdb.setOrientation(LinearLayout.VERTICAL);
+        boxAdb.setPadding(dp(8), dp(6), dp(8), dp(6));
+        boxAdb.setBackground(crearFondo(0xff131f2d, BORDE_NORMAL, dp(6), dp(1)));
+
+        LinearLayout filaAdbHeader = new LinearLayout(this);
+        filaAdbHeader.setOrientation(LinearLayout.HORIZONTAL);
+        filaAdbHeader.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView tituloAdb = texto("⚡ DEPURACIÓN INALÁMBRICA (ADB)", 11, true, ACCENTO_CIAN);
+        filaAdbHeader.addView(tituloAdb, new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+        int pAdbActual = PuertoAdb.obtenerPuerto();
+        TextView badgeAdb = texto(pAdbActual > 0 ? "● ACTIVO (:" + pAdbActual + ")" : "○ BUSCANDO...", 10, true,
+                pAdbActual > 0 ? ACCENTO_VERDE : TEXTO_MUTED);
+        filaAdbHeader.addView(badgeAdb);
+        boxAdb.addView(filaAdbHeader);
+
+        TextView descAdb = texto("Android mDNS TLS. Permite vincular y correr proxy-ports sin PC.", 10, false, TEXTO_MUTED);
+        LinearLayout.LayoutParams lpDescAdb = new LinearLayout.LayoutParams(-1, -2);
+        lpDescAdb.topMargin = dp(2);
+        lpDescAdb.bottomMargin = dp(4);
+        boxAdb.addView(descAdb, lpDescAdb);
+
+        LinearLayout filaAdbAcciones = new LinearLayout(this);
+        filaAdbAcciones.setOrientation(LinearLayout.HORIZONTAL);
+        filaAdbAcciones.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView btnRefrescoAdb = crearBotonChip("REVISAR / RECONECTAR", BORDE_BOTON, () -> {
+            PuertoAdb.iniciar(this);
+            int p = PuertoAdb.obtenerPuerto();
+            badgeAdb.setText(p > 0 ? "● ACTIVO (:" + p + ")" : "○ BUSCANDO...");
+            badgeAdb.setTextColor(p > 0 ? ACCENTO_VERDE : TEXTO_MUTED);
+        });
+        filaAdbAcciones.addView(btnRefrescoAdb);
+        boxAdb.addView(filaAdbAcciones);
+
+        LinearLayout.LayoutParams lpBoxAdb = new LinearLayout.LayoutParams(-1, -2);
+        lpBoxAdb.topMargin = dp(4);
+        lpBoxAdb.bottomMargin = dp(6);
+        contTab2.addView(boxAdb, lpBoxAdb);
 
         // Sección especial: SSH Puerto 22 real (Wi-Fi directo sin root)
         LinearLayout boxP22 = new LinearLayout(this);
@@ -935,10 +985,14 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         TextView tituloP22 = texto("⚡ SSH PUERTO 22 (WI-FI SIN ROOT)", 11, true, ACCENTO_CIAN);
         filaP22Header.addView(tituloP22, new LinearLayout.LayoutParams(0, -2, 1.0f));
 
-        TextView badgeP22 = texto(RedManager.estaProxy22Activo() ? "● ACTIVO" : "○ INACTIVO", 10, true,
-                RedManager.estaProxy22Activo() ? ACCENTO_VERDE : TEXTO_MUTED);
+        TextView badgeP22 = texto("○ REVISANDO...", 10, true, TEXTO_MUTED);
         filaP22Header.addView(badgeP22);
         boxP22.addView(filaP22Header);
+
+        RedManager.comprobarPuertoActivoAsync(22, activo -> {
+            badgeP22.setText(activo ? "● ACTIVO" : "○ INACTIVO");
+            badgeP22.setTextColor(activo ? ACCENTO_VERDE : TEXTO_MUTED);
+        });
 
         TextView descP22 = texto("Proxy shell UID 2000 en 0.0.0.0:22. Conecta directo: ssh user@<ip>", 10, false, TEXTO_MUTED);
         LinearLayout.LayoutParams lpDescP22 = new LinearLayout.LayoutParams(-1, -2);
@@ -979,10 +1033,16 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         });
         filaP22Acciones.addView(spinP22, new LinearLayout.LayoutParams(0, -2, 1.0f));
 
-        TextView btnRefrescoP22 = crearBotonChip("REVISAR", BORDE_BOTON, () -> {
-            boolean activo = RedManager.estaProxy22Activo();
-            badgeP22.setText(activo ? "● ACTIVO" : "○ INACTIVO");
-            badgeP22.setTextColor(activo ? ACCENTO_VERDE : TEXTO_MUTED);
+        TextView btnRefrescoP22 = crearBotonChip("ACTIVAR / REVISAR", BORDE_BOTON, () -> {
+            badgeP22.setText("○ REVISANDO...");
+            badgeP22.setTextColor(TEXTO_MUTED);
+            RedManager.activarPuertoEnShell(22);
+            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                RedManager.comprobarPuertoActivoAsync(22, activo -> {
+                    badgeP22.setText(activo ? "● ACTIVO" : "○ INACTIVO");
+                    badgeP22.setTextColor(activo ? ACCENTO_VERDE : TEXTO_MUTED);
+                });
+            }, 600);
         });
         filaP22Acciones.addView(btnRefrescoP22);
 
@@ -990,52 +1050,24 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
 
         LinearLayout.LayoutParams lpBoxP22 = new LinearLayout.LayoutParams(-1, -2);
         lpBoxP22.topMargin = dp(4);
-        lpBoxP22.bottomMargin = dp(6);
-        vistasTabs[2].addView(boxP22, lpBoxP22);
+        lpBoxP22.bottomMargin = dp(8);
+        contTab2.addView(boxP22, lpBoxP22);
 
-        ScrollView scrollReglas = new ScrollView(this);
-        LinearLayout contReglas = new LinearLayout(this);
-        contReglas.setOrientation(LinearLayout.VERTICAL);
-        scrollReglas.addView(contReglas);
-        vistasTabs[2].addView(scrollReglas, new LinearLayout.LayoutParams(-1, dp(130)));
+        // Caja destacada para AGREGAR NUEVO REENVÍO
+        LinearLayout boxNuevoFwd = new LinearLayout(this);
+        boxNuevoFwd.setOrientation(LinearLayout.VERTICAL);
+        boxNuevoFwd.setPadding(dp(10), dp(8), dp(10), dp(8));
+        boxNuevoFwd.setBackground(crearFondo(0xff121d28, ACCENTO_VERDE, dp(6), dp(1)));
 
-        Runnable[] recargarReglas = new Runnable[1];
-        recargarReglas[0] = () -> {
-            contReglas.removeAllViews();
-            List<RedManager.Regla> reglas = RedManager.listarReglas(this);
-            if (reglas.isEmpty()) {
-                contReglas.addView(texto("  No hay reglas de reenvío activas.", 11, false, TEXTO_MUTED));
-            } else {
-                for (RedManager.Regla r : reglas) {
-                    LinearLayout fila = new LinearLayout(this);
-                    fila.setOrientation(LinearLayout.HORIZONTAL);
-                    fila.setGravity(Gravity.CENTER_VERTICAL);
-                    fila.setPadding(dp(8), dp(6), dp(8), dp(6));
-                    fila.setBackground(crearFondo(0xff16202c, BORDE_NORMAL, dp(6), dp(1)));
-
-                    String ipInst = RedManager.ipParaInstancia(this, r.instanciaId);
-                    String badgePriv = r.puertoExterno < 1024 ? " ⚡" : "";
-                    TextView info = texto(":" + r.puertoExterno + badgePriv + " ➜ " + r.instanciaId + " (" + ipInst + "):" + r.puertoInterno, 11, true, r.activa ? ACCENTO_VERDE : TEXTO_MUTED);
-                    fila.addView(info, new LinearLayout.LayoutParams(0, -2, 1.0f));
-
-                    TextView btnDel = crearBotonChip("✕", ACCENTO_ROJO, () -> {
-                        reglas.remove(r);
-                        RedManager.guardarReglas(this, reglas);
-                        RedManager.actualizar(this);
-                        recargarReglas[0].run();
-                    });
-                    fila.addView(btnDel);
-
-                    LinearLayout.LayoutParams lpFila = new LinearLayout.LayoutParams(-1, -2);
-                    lpFila.bottomMargin = dp(4);
-                    contReglas.addView(fila, lpFila);
-                }
-            }
-        };
+        TextView titNuevoFwd = texto("＋ AGREGAR NUEVO REENVÍO DE PUERTO", 11, true, ACCENTO_VERDE);
+        boxNuevoFwd.addView(titNuevoFwd);
 
         LinearLayout formFwd = new LinearLayout(this);
         formFwd.setOrientation(LinearLayout.HORIZONTAL);
         formFwd.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams lpFFwdIn = new LinearLayout.LayoutParams(-1, -2);
+        lpFFwdIn.topMargin = dp(6);
+        boxNuevoFwd.addView(formFwd, lpFFwdIn);
 
         EditText inExt = new EditText(this);
         inExt.setHint("Ext(80)");
@@ -1046,7 +1078,7 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         inExt.setInputType(InputType.TYPE_CLASS_NUMBER);
         inExt.setBackground(crearFondo(0xff16202c, BORDE_BOTON, dp(6), dp(1)));
         inExt.setPadding(dp(6), dp(6), dp(6), dp(6));
-        formFwd.addView(inExt, new LinearLayout.LayoutParams(dp(80), -2));
+        formFwd.addView(inExt, new LinearLayout.LayoutParams(dp(75), -2));
 
         TextView flecha = texto(" ➜ ", 12, true, TEXTO_MUTED);
         formFwd.addView(flecha);
@@ -1061,7 +1093,7 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         formFwd.addView(spinInst, new LinearLayout.LayoutParams(0, -2, 1.0f));
 
         EditText inInt = new EditText(this);
-        inInt.setHint("Int(22)");
+        inInt.setHint("Int(80)");
         inInt.setHintTextColor(0xff556272);
         inInt.setTextColor(TEXTO_CLARO);
         inInt.setTypeface(Typeface.MONOSPACE);
@@ -1069,19 +1101,31 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         inInt.setInputType(InputType.TYPE_CLASS_NUMBER);
         inInt.setBackground(crearFondo(0xff16202c, BORDE_BOTON, dp(6), dp(1)));
         inInt.setPadding(dp(6), dp(6), dp(6), dp(6));
-        formFwd.addView(inInt, new LinearLayout.LayoutParams(dp(70), -2));
+        formFwd.addView(inInt, new LinearLayout.LayoutParams(dp(75), -2));
 
-        TextView btnAddFwd = crearBotonChip("＋ AGREGAR", ACCENTO_VERDE, () -> {
+        Runnable[] recargarReglas = new Runnable[1];
+
+        TextView btnAddFwd = crearBotonChip("＋ GUARDAR REGLA", ACCENTO_VERDE, () -> {
             String sExt = inExt.getText().toString().trim();
             String sInt = inInt.getText().toString().trim();
             int idx = spinInst.getSelectedItemPosition();
-            if (sExt.isEmpty() || sInt.isEmpty() || idx < 0 || idx >= insts.size()) {
-                Toast.makeText(this, "Completa los campos", Toast.LENGTH_SHORT).show();
+            if (sExt.isEmpty() && !sInt.isEmpty()) sExt = sInt;
+            if (sInt.isEmpty() && !sExt.isEmpty()) sInt = sExt;
+            if (sExt.isEmpty() || idx < 0 || idx >= insts.size()) {
+                if (insts.isEmpty()) {
+                    Toast.makeText(this, "No hay instancias creadas", Toast.LENGTH_SHORT).show();
+                } else {
+                    Toast.makeText(this, "Ingresa al menos un puerto", Toast.LENGTH_SHORT).show();
+                }
                 return;
             }
             try {
                 int pExt = Integer.parseInt(sExt);
                 int pInt = Integer.parseInt(sInt);
+                if (pExt <= 0 || pExt > 65535 || pInt <= 0 || pInt > 65535) {
+                    Toast.makeText(this, "Puertos deben ser entre 1 y 65535", Toast.LENGTH_SHORT).show();
+                    return;
+                }
                 String instId = insts.get(idx).id;
                 List<RedManager.Regla> reglas = RedManager.listarReglas(this);
                 reglas.add(new RedManager.Regla(String.valueOf(System.currentTimeMillis()), pExt, instId, pInt, true));
@@ -1095,11 +1139,55 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
                 Toast.makeText(this, "Puerto inválido", Toast.LENGTH_SHORT).show();
             }
         });
-        formFwd.addView(btnAddFwd);
+        LinearLayout.LayoutParams lpBtnAdd = new LinearLayout.LayoutParams(-1, -2);
+        lpBtnAdd.topMargin = dp(6);
+        boxNuevoFwd.addView(btnAddFwd, lpBtnAdd);
 
-        LinearLayout.LayoutParams lpFFwd = new LinearLayout.LayoutParams(-1, -2);
-        lpFFwd.topMargin = dp(6);
-        vistasTabs[2].addView(formFwd, lpFFwd);
+        LinearLayout.LayoutParams lpBoxNuevoFwd = new LinearLayout.LayoutParams(-1, -2);
+        lpBoxNuevoFwd.bottomMargin = dp(8);
+        contTab2.addView(boxNuevoFwd, lpBoxNuevoFwd);
+
+        TextView titReglas = texto("❯ REGLAS DE REENVÍO ACTIVAS:", 11, true, ACCENTO_AMBAR);
+        LinearLayout.LayoutParams lpTitR = new LinearLayout.LayoutParams(-1, -2);
+        lpTitR.bottomMargin = dp(4);
+        contTab2.addView(titReglas, lpTitR);
+
+        LinearLayout contReglas = new LinearLayout(this);
+        contReglas.setOrientation(LinearLayout.VERTICAL);
+        contTab2.addView(contReglas, new LinearLayout.LayoutParams(-1, -2));
+
+        recargarReglas[0] = () -> {
+            contReglas.removeAllViews();
+            List<RedManager.Regla> reglas = RedManager.listarReglas(this);
+            if (reglas.isEmpty()) {
+                contReglas.addView(texto("  No hay reglas activas configuradas.", 11, false, TEXTO_MUTED));
+            } else {
+                for (RedManager.Regla r : reglas) {
+                    LinearLayout fila = new LinearLayout(this);
+                    fila.setOrientation(LinearLayout.HORIZONTAL);
+                    fila.setGravity(Gravity.CENTER_VERTICAL);
+                    fila.setPadding(dp(8), dp(6), dp(8), dp(6));
+                    fila.setBackground(crearFondo(0xff16202c, BORDE_NORMAL, dp(6), dp(1)));
+
+                    String ipInst = RedManager.ipParaInstancia(this, r.instanciaId);
+                    String badgePriv = r.puertoExterno < 1024 ? " ⚡" : "";
+                    TextView info = texto(":" + r.puertoExterno + badgePriv + " ➜ " + r.instanciaId + " (" + ipInst + "):" + r.puertoInterno, 11, true, r.activa ? ACCENTO_VERDE : TEXTO_MUTED);
+                    fila.addView(info, new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+                    TextView btnDel = crearBotonChip("✕ BORRAR", ACCENTO_ROJO, () -> {
+                        reglas.remove(r);
+                        RedManager.guardarReglas(this, reglas);
+                        RedManager.actualizar(this);
+                        recargarReglas[0].run();
+                    });
+                    fila.addView(btnDel);
+
+                    LinearLayout.LayoutParams lpFila = new LinearLayout.LayoutParams(-1, -2);
+                    lpFila.bottomMargin = dp(4);
+                    contReglas.addView(fila, lpFila);
+                }
+            }
+        };
 
         // Coordinador de visibilidad de pestañas
         actualizarTabs[0] = () -> {

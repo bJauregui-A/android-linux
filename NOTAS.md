@@ -786,7 +786,26 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
      - Actualizado `apk/capa.py` con `proxy-puertos`, `proxy-ports`, `proxy-ports-daemon`, `proxy-port-worker.sh` y wrappers.
      - Regenerado `capa.tgz`, compilado APK `sdk36Debug` y sincronizados los scripts en el teléfono.
 
-**Siguiente sesión (72ª):**
+72ª sesión (2026-10-23):
+- **Diagnóstico y corrección visual del diálogo de Port Forwarding:**
+  - A partir de la captura de pantalla del usuario (`Screenshot_2026-10-23-05-55-35`), se identificó la causa exacta por la cual no se podían crear ni ver las reglas de reenvío: `contPestañas` en [SistemaActivity.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/SistemaActivity.java) tenía una altura fija de solo `260 dp`, y la pestaña `vistasTabs[2]` era un `LinearLayout` rígido sin scroll. Todo el bloque inferior (`formFwd` y la lista de reglas) quedaba cortado por debajo del límite de la vista y oculto tras el botón `CERRAR`.
+  - **Corrección:**
+    - Se transformó la pestaña 2 en un `ScrollView` (`scrollTab2`) con `fillViewport = true`.
+    - Se amplió la altura de `contPestañas` a `460 dp` para aprovechar adecuadamente la pantalla del Redmi sin recortar contenido.
+    - Se estructuró una tarjeta destacada: `＋ AGREGAR NUEVO REENVÍO DE PUERTO` con campos `Ext`, selector de máquina, `Int` y botón verde `[ ＋ GUARDAR REGLA ]`.
+    - Se agregó el listado scrollable de reglas activas con botón `[✕ BORRAR]`.
+- **Diagnóstico y solución de `SSH PUERTO 22` en estado `○ INACTIVO` falso:**
+  - El puerto `22` estaba en realidad escuchando perfectamente en `0.0.0.0:22` (`[::]:22 LISTEN`), pero la UI mostraba `○ INACTIVO`.
+  - **Causa raíz:** En Android, invocar `new Socket().connect()` en el hilo principal (Main/UI Thread) lanza inmediatamente `android.os.NetworkOnMainThreadException`. El método `estaPuertoActivo()` capturaba cualquier excepción y retornaba `false`.
+  - **Solución:** En [RedManager.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/RedManager.java) se implementó `comprobarPuertoActivoAsync(puerto, callback)` ejecutando el sondeo en un hilo en segundo plano con notificación reactiva al MainLooper, y se aumentó el timeout a 350 ms.
+- **Sincronización robusta de depuración inalámbrica (ADB mDNS TLS):**
+  - En [PuertoAdb.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/PuertoAdb.java): el resolutor mDNS escribe automáticamente el puerto detectado en todas las instancias (`files/instancias/*/tmp/adb-puerto`), en `files/tmp/adb-puerto` y en `/data/local/tmp/adb-puerto`.
+  - En el dispositivo se estableció permiso 666 en `/data/local/tmp/adb-puerto` para eliminar el error `EACCES (Permission denied)` de la aplicación.
+- **Recompilación y validación:**
+  - APK `sdk36Debug` recompilada exitosamente (`BUILD SUCCESSFUL in 1s`) e instalada en el Redmi 15 5G con `adb install -r`.
+  - Verificada la detección mDNS en vivo (`puerto 42241`), proxy escuchando en `[::]:22` y diálogo con navegación scrollable completa.
+
+**Siguiente sesión (73ª):**
 1. **Inicialización de entornos basada en Dockerfile / OCI (`dockerfile-runner` / importador):**
    - Diseñar e implementar un generador o intérprete que cree e inicialice instancias aisladas a partir de un `Dockerfile` (soportando directivas clave: `FROM`, `ENV`, `COPY`, `RUN`, `WORKDIR`, `EXPOSE`, `CMD`), o mediante importación directa de rootfs OCI/Docker inyectando `libldp.so`/glibc propia.
 2. **Distribuciones adicionales (Punto 4: Debian y Ubuntu ARM64):**
