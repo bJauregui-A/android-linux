@@ -153,6 +153,13 @@ Acquire::Languages "none";
 Acquire::Check-Valid-Until "false";
 EOF
 
+    # Repositorios oficiales de Debian con validacion directa de llave GPG
+    cat <<'EOF' > "$P/etc/apt/sources.list"
+deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware
+deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] http://deb.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
+deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] http://deb.debian.org/debian bookworm-updates main contrib non-free non-free-firmware
+EOF
+
     # Grupos y usuarios esenciales para servicios como ssh
     if [ -f "$P/etc/group" ]; then
         grep -q "^_ssh:" "$P/etc/group" || echo "_ssh:x:101:" >> "$P/etc/group"

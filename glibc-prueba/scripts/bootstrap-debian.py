@@ -75,9 +75,9 @@ Acquire::Languages "none";
 Acquire::Check-Valid-Until "false";
 """
 
-SOURCES_LIST = b"""deb http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware
-deb http://deb.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
-deb http://deb.debian.org/debian bookworm-updates main contrib non-free non-free-firmware
+SOURCES_LIST = b"""deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware
+deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] http://deb.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
+deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] http://deb.debian.org/debian bookworm-updates main contrib non-free non-free-firmware
 """
 
 # Paquetes base esenciales para tener un sistema Debian mínimo con apt funcional
@@ -98,6 +98,7 @@ PAQUETES_OBJETIVO = [
     "apt",
     "debian-archive-keyring",
     "gpgv",
+    "gpg",
     "openssl",
     "mawk",
     "libc-bin",
