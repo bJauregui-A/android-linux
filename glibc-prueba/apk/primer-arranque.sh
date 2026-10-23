@@ -86,10 +86,16 @@ backend_iniciar_base() {
             paso "Inicializando base y repositorios (apt)"
             backend_limpiar_lock
             # Prevenir que scripts de paquetes intenten iniciar servicios con policy-rc.d
-            printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d 2>/dev/null || true
-            chmod +x /usr/sbin/policy-rc.d 2>/dev/null || true
+            printf '#!/bin/sh\nexit 101\n' | sudo tee /usr/sbin/policy-rc.d >/dev/null 2>&1 || true
+            sudo chmod +x /usr/sbin/policy-rc.d 2>/dev/null || true
             paso "Actualizando índices de paquetes de Debian (apt-get update)"
-            sudo apt-get update || true
+            for i in 1 2 3; do
+                backend_limpiar_lock
+                sudo env DEBIAN_FRONTEND=noninteractive apt-get update && break
+                [ $i -eq 3 ] && falla "falló apt-get update al sincronizar repositorios oficiales (comprueba la conexión a internet)"
+                printf '\n\e[38;5;214m✖ Falló apt-get update, reintento %d de 2...\e[0m\n' $i
+                sleep 3
+            done
             ;;
         *)
             backend_limpiar_lock
@@ -262,7 +268,7 @@ cd ~
 
 if [ ! -e $E/base-lista ]; then
     backend_iniciar_base
-    touch $E/base-lista
+    sudo touch "$E/base-lista" 2>/dev/null || touch "$E/base-lista" 2>/dev/null || true
 fi
 
 # Escritorio: uno, elegido una vez ($E/escritorio; lo arranca /usr/local/bin/sesion-android)

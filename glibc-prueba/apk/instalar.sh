@@ -117,6 +117,43 @@ if [ -f "$P/usr/share/keyrings/debian-archive-keyring.gpg" ]; then
     cp "$P/usr/share/keyrings/debian-archive-keyring.gpg" "$P/etc/apt/trusted.gpg.d/debian-archive-keyring.gpg" 2>/dev/null || true
 fi
 
+# Escribir siempre el wrapper robusto de sudo
+mkdir -p "$P/usr/local/bin"
+cat <<'EOF' > "$P/usr/local/bin/sudo"
+#!/bin/bash
+export GLIBC_FAKEROOT=1
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -E|--preserve-env|-s|-i)
+            shift ;;
+        -u)
+            shift 2 ;;
+        --)
+            shift; break ;;
+        *=*)
+            export "$1"; shift ;;
+        *)
+            break ;;
+    esac
+done
+exec "$@"
+EOF
+chmod 755 "$P/usr/local/bin/sudo" 2>/dev/null || true
+
+# Configuración de APT para Android sin root si es backend apt
+if [ "$GLIBC_PKG_BACKEND" = "apt" ]; then
+    mkdir -p "$P/etc/apt/apt.conf.d"
+    cat <<'EOF' > "$P/etc/apt/apt.conf.d/99android"
+APT::Sandbox::User "root";
+DPkg::Options {
+   "--force-not-root";
+   "--force-bad-path";
+};
+Acquire::Languages "none";
+Acquire::Check-Valid-Until "false";
+EOF
+fi
+
 # DNS de Android (el tar trae uno de respaldo)
 rm -f "$P/etc/resolv.conf"
 for s in $ANDROID_DNS; do echo "nameserver $s"; done > "$P/etc/resolv.conf"
