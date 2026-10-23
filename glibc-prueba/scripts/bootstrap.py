@@ -36,7 +36,7 @@ LDCONFIG = b"""#!/usr/bin/bash
 # de la app) y la glibc propia no usa /etc/ld.so.cache.  No hace nada.
 exit 0
 """
-PACMAN_XFER = b"""#!/bin/sh
+PACMAN_XFER = """#!/bin/sh
 # Wrapper de descarga para pacman:
 # Mapea las bases de datos de holo-core y holo-extra a core.db y extra.db del servidor SteamOS.
 url="$1"
@@ -49,8 +49,20 @@ case "$url" in
     */holo-core.files*)  url="${url%holo-core.files*}core.files${url#*holo-core.files}" ;;
     */holo-extra.files*) url="${url%holo-extra.files*}extra.files${url#*holo-extra.files}" ;;
 esac
-exec /usr/bin/curl -q -s -f -L -C - --connect-timeout 15 -o "$out" "$url"
-"""
+
+archivo="${out##*/}"
+archivo="${archivo%.part}"
+
+case "$archivo" in
+    *.sig)
+        exec /usr/bin/curl -q -s -f -L -C - --connect-timeout 15 -o "$out" "$url"
+        ;;
+    *)
+        printf '  \\033[38;5;111m↓\\033[0m %s\\n' "$archivo"
+        exec /usr/bin/curl -q -f -L -C - --connect-timeout 15 -# -o "$out" "$url"
+        ;;
+esac
+""".encode("utf-8")
 
 
 def bajar(url, dest):

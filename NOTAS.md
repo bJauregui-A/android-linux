@@ -759,6 +759,10 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
    - **Prueba en vivo en el teléfono:**
      - Probada la instalación completa de 79 paquetes (`fastfetch`, `yyjson`, `starship`, `git`, `python`, etc.) en la instancia `server2-59361`.
      - Verificada la comprobación exitosa del llavero (`checking keyring...`) e integridad de paquetes (`checking package integrity...`) para paquetes de Arch ARM con código de salida `0` sin demoras.
+6. **Visualización en tiempo real de descargas en `pacman-xfer`:**
+   - **Problema de UX resuelto:** Dado que pacman delega a `XferCommand` desactivando su propia barra interna interactiva, el wrapper previo invocaba `curl -s` (silencioso), dejando la pantalla congelada en `:: Retrieving packages...` durante los ~250 MB de descarga.
+   - **Mejora:** Modificados [apk/pacman-xfer](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/pacman-xfer) y [scripts/bootstrap.py](file:///media/ben4shot/E/Develop/Android/glibc-prueba/scripts/bootstrap.py) para imprimir el nombre de cada paquete en curso (`↓ <paquete>`) junto a una barra de progreso interactiva (`curl -#`), manteniendo silenciadas solo las comprobaciones de firmas (`*.sig`).
+   - Reconstruidos `base.tgz` y `capa.tgz`, recompilado APK `sdk36Debug` e instalado en el Redmi vía `adb install -r`.
 
 **Siguiente sesión (71ª):**
 1. **Inicialización de entornos basada en Dockerfile / OCI (`dockerfile-runner` / importador):**
