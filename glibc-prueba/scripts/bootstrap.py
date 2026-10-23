@@ -294,7 +294,6 @@ def main():
     conf = re.sub(r"(?m)^#?DisableSandbox.*$", "", conf)
     conf = re.sub(r"(?m)^#?HoldPkg\s*=.*$", "HoldPkg     = pacman glibc sway wlroots mesa", conf, count=1)
     conf = re.sub(r"(?m)^#?IgnorePkg\s*=.*$", "IgnorePkg   = glibc sway wlroots mesa", conf, count=1)
-    conf = re.sub(r"(?m)^#?SigLevel\s*=.*$", "SigLevel = Never", conf, count=1)
     conf = re.sub(r"(?m)^#?NoExtract\s*=.*$",
                   "NoExtract   = usr/bin/ldconfig " + " ".join(f"usr/lib/{f}" for f in libs),
                   conf, count=1)
@@ -304,14 +303,14 @@ def main():
         conf = conf.replace("[options]\n", "[options]\nXferCommand = /usr/local/bin/pacman-xfer %u %o\n", 1)
     conf = conf.replace("[options]\n", "[options]\nDisableSandbox\n", 1)
 
-    # Repositorios: holo-core y holo-extra como principales (SteamOS cloud),
-    # y core/extra de Arch ARM como fallback para lo que no esté en holo
+    # Repositorios: holo-core y holo-extra como principales (SteamOS cloud, sin firmas de Valve),
+    # y core/extra de Arch ARM con firmas requeridas incrustadas (%PGPSIG%)
     repos_holo = """[holo-core]
-SigLevel = Optional TrustAll
+SigLevel = Never
 Server = https://holo-packages.steamos.cloud/holo-core-aarch64-preview/mash-20251118.3/core/os/$arch
 
 [holo-extra]
-SigLevel = Optional TrustAll
+SigLevel = Never
 Server = https://holo-packages.steamos.cloud/holo-core-aarch64-preview/mash-20251118.3/extra/os/$arch
 
 """

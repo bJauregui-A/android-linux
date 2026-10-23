@@ -90,7 +90,10 @@ if [ ! -e "$E/extraido" ]; then
     # Normalizar permisos de directorios base a 755 para evitar warnings de pacman
     find "$P/usr" "$P/etc" "$P/var" "$P/opt" -type d -exec chmod 755 {} + 2>/dev/null || true
     mkdir -p "$P/etc/services.d" "$P/usr/lib/systemd/system" 2>/dev/null || true
-    [ -f "$P/etc/pacman.conf" ] && sed -i 's/^SigLevel\s*=.*/SigLevel = Never/' "$P/etc/pacman.conf" 2>/dev/null || true
+    if [ -f "$P/etc/pacman.conf" ] && grep -q '\[holo-core\]' "$P/etc/pacman.conf" 2>/dev/null; then
+        sed -i '/\[holo-core\]/{n;s/^#\?SigLevel\s*=.*/SigLevel = Never/}' "$P/etc/pacman.conf" 2>/dev/null || true
+        sed -i '/\[holo-extra\]/{n;s/^#\?SigLevel\s*=.*/SigLevel = Never/}' "$P/etc/pacman.conf" 2>/dev/null || true
+    fi
     printf '\e[1;38;5;111m└────────────────────────────────────────────────────────────┘\e[0m\n'
 fi
 

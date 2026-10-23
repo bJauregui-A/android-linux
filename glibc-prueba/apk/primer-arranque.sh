@@ -66,8 +66,11 @@ backend_limpiar_lock() {
 backend_iniciar_base() {
     case "$BACKEND" in
         pacman)
-            # Asegurar que pacman no rechace paquetes por firmas ausentes en el llavero base
-            sed -i 's/^SigLevel\s*=.*/SigLevel = Never/' /etc/pacman.conf 2>/dev/null || true
+            # Asegurar SigLevel = Never para repositorios de SteamOS sin firmas individuales
+            if grep -q '\[holo-core\]' /etc/pacman.conf 2>/dev/null; then
+                sed -i '/\[holo-core\]/{n;s/^#\?SigLevel\s*=.*/SigLevel = Never/}' /etc/pacman.conf 2>/dev/null || true
+                sed -i '/\[holo-extra\]/{n;s/^#\?SigLevel\s*=.*/SigLevel = Never/}' /etc/pacman.conf 2>/dev/null || true
+            fi
             paso "Inicializando base y paquetes de sistema (pacman)"
             for d in /var/lib/pacman/local/*/; do
                 [ -f "$d/install" ] || continue

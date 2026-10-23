@@ -746,15 +746,19 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
      - Reconfigurado `shared_prefs/instalacion-linux.xml` con `srvtest-91001` activo.
      - APK `sdk36Debug` recompilada e instalada en el dispositivo vía `adb install -r`, verificando su arranque limpio y enfocado en primer plano.
      - **Prueba de regresión en runtime ART:** ejecutada la clase de test `PruebaInstancia` con `app_process` en el teléfono invocando `SistemaLinux.adaptador()` y `SistemaLinux.raiz()` para `server1-25913`, IDs inexistentes y `null`. Verificada resolución limpia a `AdaptadorArchArm64` y ruta correspondiente sin lanzar excepciones (código de salida 0). Limpiados archivos temporales de prueba.
-5. **Diagnóstico y solución del atasco en "Retrieving packages..." al crear nuevas instancias:**
-   - **Causa raíz:** Tras el commit `350a6eb` (integración de repos SteamOS Holo y `pacman-xfer`), el archivo `/etc/pacman.conf` generado en `base.tgz` mantenía `SigLevel = Required DatabaseOptional`. Dado que el servidor de SteamOS Cloud no publica archivos `.sig` sueltos para los paquetes individuales (404), `pacman` lanzaba peticiones `curl` secuenciales con handshake TLS buscando `.sig.part` para los ~88 paquetes, ralentizando enormemente la descarga. Al recibir 404, pacman descartaba los paquetes. Asimismo, al intentar instalar `base-devel`, se producía un conflicto en `/usr/lib/libgcc_s.so` (propiedad de `libgcc` en `base.tgz` vs `gcc-libs`). Al fallar la transacción, pacman borraba la caché y `primer-arranque.sh` reintentaba en bucle infinito.
-   - **Corrección:**
-     - En [scripts/bootstrap.py](file:///media/ben4shot/E/Develop/Android/glibc-prueba/scripts/bootstrap.py): configurado `SigLevel = Never` por defecto en la generación de `pacman.conf` para `base.tgz`.
-     - En [apk/instalar.sh](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/instalar.sh): forzado `SigLevel = Never` en `/etc/pacman.conf` inmediatamente tras la extracción de las capas.
-     - En [apk/primer-arranque.sh](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/primer-arranque.sh): asegurado `SigLevel = Never` en `backend_iniciar_base()` y agregado `--overwrite "*"` a `pacman -Syu --needed --noconfirm` en `backend_instalar()` para resolver pacíficamente conflictos de bibliotecas base.
-     - Reempaquetados `base.tgz` y `capa.tgz` en `trabajo/assets-sdk36/` con `apk/armar.sh sdk36`.
-     - Compilado APK `sdk36Debug` con Gradle e instalado en el Redmi mediante `adb install -r`.
-     - Saneada la configuración de `SigLevel` y eliminado `db.lck` en la instancia `server2-59361` existente en el teléfono.
+5. **Diagnóstico, solución y modelo granular de firmas para SteamOS y Arch Linux ARM:**
+   - **Causa raíz y análisis técnico:**
+     - Arch Linux ARM incluye las firmas PGP incrustadas directamente dentro del campo `%PGPSIG%` de sus bases de datos (`core.db`/`extra.db`), por lo que `pacman` no descarga archivos `.sig` externos para Arch upstream.
+     - SteamOS Cloud (`holo-packages.steamos.cloud`), al ser una compilación interna (mash CI) para un sistema operativo inmutable (Steam Deck se actualiza vía imágenes A/B con `rauc`, no por pacman), genera repositorios sin el flag `-s` en `repo-add`. Por ello, `core.db` no contiene `%PGPSIG%` ni el servidor web aloja archivos `.sig` sueltos (HTTP 404).
+     - Si `[options]` tiene `SigLevel = Required DatabaseOptional` de manera global sin discriminar por repositorio, pacman asume que los paquetes de SteamOS deben tener un archivo `.sig.part` en el servidor, desencadenando 88 peticiones HTTP secuenciales fallidas con handshake TLS completo y bloqueando la instalación.
+   - **Implementación del modelo granular de firmas:**
+     - **Arch Linux ARM (`[core]`, `[extra]`):** Mantiene `SigLevel = Required DatabaseOptional` activo heredado de `[options]`. Las firmas criptográficas PGP oficiales se comprueban obligatoriamente contra el llavero (`archlinuxarm-keyring`).
+     - **SteamOS Cloud (`[holo-core]`, `[holo-extra]`):** Configurado específicamente con `SigLevel = Never` para evitar solicitudes 404 al servidor de Valve, validando su integridad mediante suma de verificación SHA-256.
+     - Modificados [scripts/bootstrap.py](file:///media/ben4shot/E/Develop/Android/glibc-prueba/scripts/bootstrap.py), [apk/instalar.sh](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/instalar.sh) y [apk/primer-arranque.sh](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/primer-arranque.sh).
+     - Reconstruidos `base.tgz` y `capa.tgz` con `apk/armar.sh sdk36`, recompilado APK `sdk36Debug` e instalado en el Redmi (`adb install -r`).
+   - **Prueba en vivo en el teléfono:**
+     - Probada la instalación completa de 79 paquetes (`fastfetch`, `yyjson`, `starship`, `git`, `python`, etc.) en la instancia `server2-59361`.
+     - Verificada la comprobación exitosa del llavero (`checking keyring...`) e integridad de paquetes (`checking package integrity...`) para paquetes de Arch ARM con código de salida `0` sin demoras.
 
 **Siguiente sesión (71ª):**
 1. **Inicialización de entornos basada en Dockerfile / OCI (`dockerfile-runner` / importador):**
