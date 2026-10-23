@@ -862,6 +862,7 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
   - **Resolución de dependencias esenciales (`mawk`):** Añadido `mawk` a `PAQUETES_OBJETIVO` en [bootstrap-debian.py](file:///media/ben4shot/E/Develop/Android/glibc-prueba/scripts/bootstrap-debian.py) para satisfacer `base-files : PreDepends: awk`, permitiendo a `apt` ejecutar instalaciones sin bloqueos por dependencias rotas.
   - **Llavero GPG oficial:** Enlazado `/usr/share/keyrings/debian-archive-keyring.gpg` en `/etc/apt/trusted.gpg.d/` para verificación exitosa de firmas en `apt-get update`.
   - **Mapeo de paquetes oficiales para Debian (`apk/paquetes-*-apt.txt`):** Creadas listas de paquetes específicas para APT (`openssh-server`, `adb`, `fonts-jetbrains-mono`, etc.), eliminando fallos de paquetes con nombres exclusivos de Arch.
+  - **Soporte de variables y flags en sudo wrapper para APT:** Corregido `/usr/local/bin/sudo` en `AdaptadorDebianArm64.java` y `scripts/bootstrap-debian.py` para parsear y exportar asignaciones (`VAR=VAL`) y flags (`-E`, `-u`, `--`) antes de `exec "$@"`, y adaptada la invocación en `primer-arranque.sh` a `sudo env DEBIAN_FRONTEND=noninteractive apt-get ...`, resolviendo el error `exec: DEBIAN_FRONTEND=noninteractive: not found`.
   - **Regenerados y empaquetados:** `base-debian.tgz` (54 MB) y `capa.tgz`, compilada APK e instalada con `adb install -r`.
 
 **Siguiente sesión (76ª):**
