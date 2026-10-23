@@ -7,7 +7,6 @@ HOST=""
 PORT=""
 
 if [ -f "$CONF" ]; then
-    # Buscar línea exacta que empiece por EXT_PORT
     LINEA=$(grep -E "^[[:space:]]*${EXT_PORT}[[:space:]]+" "$CONF" 2>/dev/null | head -n1)
     if [ -n "$LINEA" ]; then
         HOST=$(echo "$LINEA" | awk '{print $2}')
@@ -36,4 +35,19 @@ case "$HOST" in
         ;;
 esac
 
-exec /system/bin/toybox nc "$HOST" "$PORT"
+# PREVENCIÓN CRÍTICA DE BUCLES RECURSIVOS:
+if [ "$EXT_PORT" = "$PORT" ]; then
+    case "$HOST" in
+        127.0.0.1|localhost|::1)
+            exit 1
+            ;;
+        127.*)
+            # Solo conectar si hay un servicio escuchando específicamente en esa IP
+            if ! netstat -tln 2>/dev/null | grep -E "^tcp[[:space:]]+.*[[:space:]]+${HOST}:${PORT}[[:space:]]" >/dev/null 2>&1; then
+                exit 1
+            fi
+            ;;
+    esac
+fi
+
+exec /system/bin/toybox nc -w 5 "$HOST" "$PORT"
