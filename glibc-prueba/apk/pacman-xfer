@@ -1,0 +1,14 @@
+#!/bin/sh
+# Wrapper de descarga para pacman:
+# Mapea las bases de datos de holo-core y holo-extra a core.db y extra.db del servidor SteamOS.
+url="$1"
+out="$2"
+case "$url" in
+    */holo-core.db*)     url="${url%holo-core.db*}core.db${url#*holo-core.db}" ;;
+    */holo-extra.db*)    url="${url%holo-extra.db*}extra.db${url#*holo-extra.db}" ;;
+    */holo-core.db.sig*) url="${url%holo-core.db.sig*}core.db.sig${url#*holo-core.db.sig}" ;;
+    */holo-extra.db.sig*) url="${url%holo-extra.db.sig*}extra.db.sig${url#*holo-extra.db.sig}" ;;
+    */holo-core.files*)  url="${url%holo-core.files*}core.files${url#*holo-core.files}" ;;
+    */holo-extra.files*) url="${url%holo-extra.files*}extra.files${url#*holo-extra.files}" ;;
+esac
+exec /usr/bin/curl -q -s -f -L -C - --connect-timeout 15 -o "$out" "$url"

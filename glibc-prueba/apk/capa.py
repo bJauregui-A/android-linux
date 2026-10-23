@@ -66,6 +66,7 @@ ARCHIVOS = [
     ("glibc/salida/usr/lib/libc.so.6", "usr/lib/libc.so.6", 0o755),
     ("trabajo/libudmabuf-shim.so", "usr/local/lib/libudmabuf-shim.so", 0o755),
     ("scripts/adb-conectar", "usr/local/bin/adb-conectar", 0o755),
+    ("apk/pacman-xfer", "usr/local/bin/pacman-xfer", 0o755),
     # escritorio elegido al instalar (escritorios/: uno por carpeta) y lo que arranca con todos
     ("escritorios/sesion-android", "usr/local/bin/sesion-android", 0o755),
     ("escritorios/autostart-android", "usr/local/bin/autostart-android", 0o755),

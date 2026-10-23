@@ -36,6 +36,21 @@ LDCONFIG = b"""#!/usr/bin/bash
 # de la app) y la glibc propia no usa /etc/ld.so.cache.  No hace nada.
 exit 0
 """
+PACMAN_XFER = b"""#!/bin/sh
+# Wrapper de descarga para pacman:
+# Mapea las bases de datos de holo-core y holo-extra a core.db y extra.db del servidor SteamOS.
+url="$1"
+out="$2"
+case "$url" in
+    */holo-core.db*)     url="${url%holo-core.db*}core.db${url#*holo-core.db}" ;;
+    */holo-extra.db*)    url="${url%holo-extra.db*}extra.db${url#*holo-extra.db}" ;;
+    */holo-core.db.sig*) url="${url%holo-core.db.sig*}core.db.sig${url#*holo-core.db.sig}" ;;
+    */holo-extra.db.sig*) url="${url%holo-extra.db.sig*}extra.db.sig${url#*holo-extra.db.sig}" ;;
+    */holo-core.files*)  url="${url%holo-core.files*}core.files${url#*holo-core.files}" ;;
+    */holo-extra.files*) url="${url%holo-extra.files*}extra.files${url#*holo-extra.files}" ;;
+esac
+exec /usr/bin/curl -q -s -f -L -C - --connect-timeout 15 -o "$out" "$url"
+"""
 
 
 def bajar(url, dest):
@@ -267,6 +282,7 @@ def main():
     # ldconfig de Arch es estático: no se puede ejecutar (W^X) y la glibc propia
     # no usa /etc/ld.so.cache (busca directo en /usr/lib del prefijo).
     out.archivo("usr/bin/ldconfig", LDCONFIG, 0o755)
+    out.archivo("usr/local/bin/pacman-xfer", PACMAN_XFER, 0o755)
 
     # pacman.conf: sin CheckSpace (miraría los puntos de montaje de Android),
     # sin DownloadUser (no hay setuid) y sin sandbox (landlock no está
@@ -276,11 +292,29 @@ def main():
     conf = re.sub(r"(?m)^CheckSpace", "#CheckSpace", conf)
     conf = re.sub(r"(?m)^DownloadUser", "#DownloadUser", conf)
     conf = re.sub(r"(?m)^#?DisableSandbox.*$", "", conf)
-    conf = re.sub(r"(?m)^#?IgnorePkg\s*=.*$", "IgnorePkg   = glibc", conf, count=1)
+    conf = re.sub(r"(?m)^#?HoldPkg\s*=.*$", "HoldPkg     = pacman glibc sway wlroots mesa", conf, count=1)
+    conf = re.sub(r"(?m)^#?IgnorePkg\s*=.*$", "IgnorePkg   = glibc sway wlroots mesa", conf, count=1)
     conf = re.sub(r"(?m)^#?NoExtract\s*=.*$",
                   "NoExtract   = usr/bin/ldconfig " + " ".join(f"usr/lib/{f}" for f in libs),
                   conf, count=1)
+    if "XferCommand" in conf:
+        conf = re.sub(r"(?m)^#?XferCommand\s*=.*$", "XferCommand = /usr/local/bin/pacman-xfer %u %o", conf, count=1)
+    else:
+        conf = conf.replace("[options]\n", "[options]\nXferCommand = /usr/local/bin/pacman-xfer %u %o\n", 1)
     conf = conf.replace("[options]\n", "[options]\nDisableSandbox\n", 1)
+
+    # Repositorios: holo-core y holo-extra como principales (SteamOS cloud),
+    # y core/extra de Arch ARM como fallback para lo que no esté en holo
+    repos_holo = """[holo-core]
+SigLevel = Optional TrustAll
+Server = https://holo-packages.steamos.cloud/holo-core-aarch64-preview/mash-20251118.3/core/os/$arch
+
+[holo-extra]
+SigLevel = Optional TrustAll
+Server = https://holo-packages.steamos.cloud/holo-core-aarch64-preview/mash-20251118.3/extra/os/$arch
+
+"""
+    conf = conf.replace("[core]\n", repos_holo + "[core]\n", 1)
     out.archivo("etc/pacman.conf", conf.encode())
     out.archivo("etc/resolv.conf", b"nameserver 1.1.1.1\nnameserver 8.8.8.8\n")
     out.t.close()

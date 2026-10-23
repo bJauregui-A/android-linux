@@ -715,6 +715,15 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
    - Sincronizado `ld-linux-aarch64.so.1` a `app/src/main/jniLibs/arm64-v8a/libldp.so`.
    - Reempaquetados `base.tgz` y `capa.tgz` en `trabajo/assets-sdk36/` con `apk/armar.sh sdk36`.
    - Compilado APK `sdk36Debug` con Gradle (`BUILD SUCCESSFUL in 3s`).
+3. **Integración de SteamOS Holo (`holo-core` / `holo-extra`) como repositorios principales por defecto en Arch:**
+   - **Configuración de repositorios prioritarios:** añadidos `[holo-core]` y `[holo-extra]` con `SigLevel = Optional TrustAll` apuntando a `https://holo-packages.steamos.cloud/holo-core-aarch64-preview/mash-20251118.3/{core,extra}/os/$arch` antes de `[core]` y `[extra]` de Arch ARM. Pacman prioriza los paquetes de SteamOS Cloud y usa Arch ARM como fallback para lo que no esté en Holo.
+   - **Solución al mapeo de base de datos (`pacman-xfer`):** En el servidor de Valve los archivos se llaman `core.db` y `extra.db`, mientras pacman solicita `<repo-name>.db` (`holo-core.db` / `holo-extra.db`) arrojando 404. Se implementó el wrapper [apk/pacman-xfer](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/pacman-xfer) configurado vía `XferCommand = /usr/local/bin/pacman-xfer %u %o`, el cual traduce dinámicamente las solicitudes de metadatos de pacman hacia los endpoints correspondientes de forma transparente con `curl`.
+   - **Blindaje de paquetes parchados:** configurado `IgnorePkg = glibc sway wlroots mesa` y `HoldPkg = pacman glibc sway wlroots mesa` en `pacman.conf` para evitar que `pacman -Syu` sobrescriba las versiones nativas parchadas con las upstream.
+   - **Generación y sincronización:**
+     - Modificado [scripts/bootstrap.py](file:///media/ben4shot/E/Develop/Android/glibc-prueba/scripts/bootstrap.py) y [apk/capa.py](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/capa.py) para que `base.tgz` y `capa.tgz` incluyan `/usr/local/bin/pacman-xfer` y la nueva configuración por defecto en toda instalación limpia.
+     - Actualizadas en caliente las instancias activas en el teléfono (`server1-25913`, `client-16767`, `srvtest-91001`).
+     - Sincronización probada en vivo con `pacman -Sy` (código de salida 0) y validada prioridad con `pacman -Si bash` (mostrando `holo-core` prioritario) y verificación de paquetes excluidos.
+     - Reconstruidos `base.tgz` y `capa.tgz` y compilado el APK `sdk36Debug` con Gradle.
 
 **Siguiente sesión (71ª):**
 1. **Inicialización de entornos basada en Dockerfile / OCI (`dockerfile-runner` / importador):**
