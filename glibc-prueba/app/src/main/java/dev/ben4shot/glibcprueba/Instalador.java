@@ -43,7 +43,15 @@ final class Instalador {
     // Comando de la sesión de terminal: sh -c <instalar.sh>. Agrega a env lo que necesita.
     static String[] comando(Context c, File p, List<String> env) throws IOException {
         env.add("APK=" + c.getApplicationInfo().sourceDir);
-        ubicar(c, "base.tgz", "BASE", env);
+        String baseAsset = "base.tgz";
+        SistemaLinux.Instancia inst = SistemaLinux.instanciaSeleccionada(c);
+        if (inst != null && SistemaLinux.DEBIAN.equals(inst.distroId)) {
+            baseAsset = "base-debian.tgz";
+            env.add("GLIBC_PKG_BACKEND=apt");
+        } else {
+            env.add("GLIBC_PKG_BACKEND=pacman");
+        }
+        ubicar(c, baseAsset, "BASE", env);
         ubicar(c, "capa.tgz", "CAPA", env);
         env.add("ANDROID_DNS=" + String.join(" ", TerminalService.servidoresDns(c)));
         String script;

@@ -18,7 +18,11 @@ chmod 1777 "$P/dev/shm" "$P/dev/shm/.sysv" 2>/dev/null || true
 ESCRITORIO_PREVIO=$(cat "$E/escritorio" "$P/var/lib/arch-android/escritorio" 2>/dev/null | head -n 1 || true)
 printf '\033[2J\033[H'
 printf '\e[1;38;5;141m┌────────────────────────────────────────────────────────────┐\e[0m\n'
-printf '\e[1;38;5;141m│\e[0m  \e[1;38;5;51mINSTALADOR DE ARCH LINUX ARM\e[0m                             \e[1;38;5;141m│\e[0m\n'
+if [ "$GLIBC_PKG_BACKEND" = "apt" ]; then
+    printf '\e[1;38;5;141m│\e[0m  \e[1;38;5;51mINSTALADOR DE DEBIAN ARM64\e[0m                                 \e[1;38;5;141m│\e[0m\n'
+else
+    printf '\e[1;38;5;141m│\e[0m  \e[1;38;5;51mINSTALADOR DE ARCH LINUX ARM\e[0m                             \e[1;38;5;141m│\e[0m\n'
+fi
 if [ "$ESCRITORIO_PREVIO" = "sin-entorno" ]; then
     printf '\e[1;38;5;141m│\e[0m  \e[38;5;250mExtracción del sistema base ligero (modo consola/servidor)\e[0m  \e[1;38;5;141m│\e[0m\n'
 else
@@ -65,7 +69,11 @@ mkdir -p "$E"
 touch "$E/instalando"
 if [ ! -e "$E/extraido" ]; then
     printf '\n\e[1;38;5;111m┌─ [2/2] Extracción de Capas y Binarios Nativos ─────────────┐\e[0m\n'
-    extraer "$BASE_OFF" "$BASE_LEN" "Arch Linux ARM base (pacman + glibc propia)"
+    if [ "$GLIBC_PKG_BACKEND" = "apt" ]; then
+        extraer "$BASE_OFF" "$BASE_LEN" "Debian ARM64 base (dpkg/apt + glibc propia)"
+    else
+        extraer "$BASE_OFF" "$BASE_LEN" "Arch Linux ARM base (pacman + glibc propia)"
+    fi
     if [ "$ESCRITORIO_PREVIO" = "sin-entorno" ]; then
         extraer "$CAPA_OFF" "$CAPA_LEN" "Scripts y utilidades base (sin capa GPU)" \
             --exclude='usr/local/turnip*' \

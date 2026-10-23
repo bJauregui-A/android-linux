@@ -58,7 +58,7 @@ final class AdaptadorDebianArm64 implements AdaptadorInstalacion {
     @Override public String perfilRescate() { return "openbox"; }
 
     @Override public String[] comandoTerminal(Context contexto) {
-        return new String[]{"libldp.so", "/bin/bash", "-l"};
+        return new String[]{"bash", "-l"};
     }
 
     @Override public boolean instalada(Context contexto) {
@@ -67,13 +67,17 @@ final class AdaptadorDebianArm64 implements AdaptadorInstalacion {
     }
 
     @Override public boolean instaladorDisponible(Context contexto) {
-        return new File(contexto.getFilesDir(), "trabajo/base-debian.tar").exists()
-                || new File(contexto.getFilesDir(), "trabajo/base-debian.tgz").exists();
+        try (java.io.InputStream i = contexto.getAssets().open("base-debian.tgz")) {
+            return true;
+        } catch (java.io.IOException e) {
+            return new File(contexto.getFilesDir(), "trabajo/base-debian.tar").exists()
+                    || new File(contexto.getFilesDir(), "trabajo/base-debian.tgz").exists();
+        }
     }
 
     @Override public String[] comandoInstalacion(Context contexto, List<String> entorno)
             throws java.io.IOException {
-        return new String[]{"libldp.so", "/bin/bash", "-c", "echo 'Debian bootstrap disponible'"};
+        return Instalador.comando(contexto, raiz(contexto), entorno);
     }
 
     @Override public void preparar(Context contexto, File raiz) {

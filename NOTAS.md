@@ -838,8 +838,26 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
   - Regenerados `base.tgz` y `capa.tgz` con `apk/armar.sh sdk36`.
   - Compilada APK `sdk36Debug` con Gradle (`BUILD SUCCESSFUL in 6s`). No se instaló en el dispositivo para no interrumpir la sesión activa sin presencia del usuario.
 
-**Siguiente sesión (75ª):**
-1. **Bootstrap y rootfs base de Debian ARM64 (`scripts/bootstrap-debian.py` / `base-debian.tgz`):**
-   - Script para descargar y desempacar paquetes esenciales (coreutils, dpkg, apt, debian-archive-keyring, bash) inyectando `libldp.so` y glibc propia.
-2. **Inicialización de entornos basada en Dockerfile / OCI (`dockerfile-runner` / importador):**
+75ª sesión (2026-10-23):
+- **Bootstrap y rootfs base de Debian ARM64 (`scripts/bootstrap-debian.py` / `base-debian.tgz`):**
+  - Implementado [scripts/bootstrap-debian.py](file:///media/ben4shot/E/Develop/Android/glibc-prueba/scripts/bootstrap-debian.py) para descargar, resolver dependencias y empaquetar un rootfs base Debian bookworm ARM64 a partir de los repositorios oficiales de Debian.
+  - Resueltos y desempacados 64 paquetes esenciales oficiales (base-files, base-passwd, bash, dash, coreutils, diffutils, findutils, grep, sed, tar, gzip, xz-utils, dpkg, apt, debian-archive-keyring, gpgv y bibliotecas de enlace).
+  - Enlaces duros convertidos en copias regulares y enlaces simbólicos adaptados al prefijo de Android.
+  - Inyección de la glibc propia (`libldp.so`, `libc.so.6` con destraducción AF_UNIX 0024) en `/usr/lib` y `/usr/lib/aarch64-linux-gnu/`.
+  - Generación de base de datos local de DPKG (`/var/lib/dpkg/status` con `Status: install ok installed` y listas de archivos `/var/lib/dpkg/info/*.list`).
+  - Configuración nativa de APT sin root (`APT::Sandbox::User "root"`, `DPkg::Options {"--force-not-root"; "--force-bad-path";}`) y stub `/usr/sbin/policy-rc.d` (`exit 101`).
+  - Generado [base-debian.tgz](file:///media/ben4shot/E/Develop/Android/glibc-prueba/trabajo/assets-sdk36/base-debian.tgz) (50 MB comprimido, 140 MB sin comprimir).
+- **Habilitación completa de creación de instancias Debian en la aplicación:**
+  - En [SistemaActivity.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/SistemaActivity.java): activado el selector `Debian ARM64 (APT sin root)` en el diálogo modal de nueva instancia, pasando dinámicamente `SistemaLinux.DEBIAN` a `SistemaLinux.crearInstancia`.
+  - En [Instalador.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/Instalador.java): soporte multi-distro para ubicar `base-debian.tgz` en assets cuando la instancia seleccionada es Debian, y exportación de `GLIBC_PKG_BACKEND=apt`.
+  - En [AdaptadorDebianArm64.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/AdaptadorDebianArm64.java): corregido comando terminal a `{"bash", "-l"}` y enrutado `comandoInstalacion` a `Instalador.comando`.
+  - En [apk/instalar.sh](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/instalar.sh): banner dinámico y extracción adaptada para Debian ARM64.
+- **Compilación e instalación:**
+  - APK `sdk36Debug` recompilada exitosamente (`BUILD SUCCESSFUL in 2s`) con ambos rootfs (`base.tgz` y `base-debian.tgz`) e instalada en el Redmi 15 5G con `adb install -r`.
+  - `SistemaActivity` abierta en pantalla en el dispositivo lista para crear instancias Debian.
+
+**Siguiente sesión (76ª):**
+1. **Inicialización de entornos basada en Dockerfile / OCI (`dockerfile-runner` / importador):**
    - Intérprete para inicializar instancias aisladas desde `Dockerfile` (`FROM`, `ENV`, `COPY`, `RUN`, etc.) o tarballs OCI.
+2. **Pruebas de compilación nativa y utilidades en Debian ARM64:**
+   - Probar `apt-get update` y `apt-get install` de paquetes de desarrollo (build-essential, git, python3) dentro del entorno Debian sin root.

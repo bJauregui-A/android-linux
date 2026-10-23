@@ -15,6 +15,12 @@ OUT=trabajo/assets-$V
 [ -f trabajo/compilados.tar ] || { echo "falta trabajo/compilados.tar: apk/traer-compilados.sh"; exit 1; }
 mkdir -p $OUT
 python3 scripts/bootstrap.py --prefix $PREFIJO --glibc glibc/salida/usr/lib --out trabajo/base-$V.tar pacman
+if [ ! -f "$OUT/base-debian.tgz" ] || [ "${REHACER_DEBIAN:-0}" = "1" ]; then
+    echo "==> Generando base de Debian ARM64..."
+    python3 scripts/bootstrap-debian.py --prefix $PREFIJO --glibc glibc/salida/usr/lib --out trabajo/base-debian-$V.tar
+    $Z -9 -c trabajo/base-debian-$V.tar > $OUT/base-debian.tgz
+    rm trabajo/base-debian-$V.tar
+fi
 python3 apk/capa.py --prefix $PREFIJO --compilados trabajo/compilados.tar --out trabajo/capa-$V.tar
 Z=gzip; command -v pigz > /dev/null && Z=pigz
 $Z -9 -c trabajo/base-$V.tar > $OUT/base.tgz

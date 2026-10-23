@@ -602,10 +602,10 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
 
         RadioButton rbDebian = new RadioButton(this);
         rbDebian.setId(View.generateViewId());
-        rbDebian.setText("Debian ARM64 (Próximamente)");
-        rbDebian.setTextColor(TEXTO_MUTED);
+        rbDebian.setText("Debian ARM64 (APT sin root)");
+        rbDebian.setTextColor(TEXTO_CLARO);
         rbDebian.setTypeface(Typeface.MONOSPACE);
-        rbDebian.setEnabled(false);
+        rbDebian.setEnabled(true);
         rg.addView(rbDebian);
 
         RadioButton rbUbuntu = new RadioButton(this);
@@ -673,7 +673,8 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
             boolean esConsola = rbConsola.isChecked();
             dialog.dismiss();
             try {
-                SistemaLinux.Instancia nueva = SistemaLinux.crearInstancia(this, nom, SistemaLinux.ARCH);
+                String distro = rbDebian.isChecked() ? SistemaLinux.DEBIAN : SistemaLinux.ARCH;
+                SistemaLinux.Instancia nueva = SistemaLinux.crearInstancia(this, nom, distro);
                 if (esConsola) {
                     SistemaLinux.escribirEscritorio(this, nueva.id, "sin-entorno");
                 }
