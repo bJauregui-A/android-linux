@@ -197,11 +197,16 @@ if [ ! -s /etc/hostname ]; then
     printf '\e[1;38;5;111m└────────────────────────────────────────────────────────────┘\e[0m\n'
 fi
 U=$(id -u); G=$(id -g)
-grep -q "^$N:" /etc/passwd || echo "$N:x:$U:$G:$N:/home/$N:/usr/bin/zsh" >> /etc/passwd
+DEFAULT_SHELL="/bin/bash"
+[ -x /usr/bin/zsh ] && DEFAULT_SHELL="/usr/bin/zsh"
+[ -x /bin/zsh ] && DEFAULT_SHELL="/bin/zsh"
+grep -q "^$N:" /etc/passwd || echo "$N:x:$U:$G:$N:/home/$N:$DEFAULT_SHELL" >> /etc/passwd
 grep -q "^$N:" /etc/group || echo "$N:x:$G:" >> /etc/group
-# Registrar zsh en /etc/shells para que PAM y login no rechacen la shell
+# Registrar shells en /etc/shells para que PAM y login no las rechacen
 grep -q "^/usr/bin/zsh$" /etc/shells 2>/dev/null || echo "/usr/bin/zsh" >> /etc/shells
 grep -q "^/bin/zsh$" /etc/shells 2>/dev/null || echo "/bin/zsh" >> /etc/shells
+grep -q "^/bin/bash$" /etc/shells 2>/dev/null || echo "/bin/bash" >> /etc/shells
+grep -q "^/usr/bin/bash$" /etc/shells 2>/dev/null || echo "/usr/bin/bash" >> /etc/shells
 # Normalizar permisos de directorios del sistema para evitar advertencias de pacman
 umask 022
 find /usr /etc /var /opt -maxdepth 3 -type d -exec chmod 755 {} + 2>/dev/null || true
@@ -227,7 +232,13 @@ pedir_contrasena() {
         [ "$p1" = "$p2" ] && break
         printf '\e[1;38;5;111m│\e[0m  \e[38;5;214m✖ No coinciden, intenta nuevamente\e[0m\n'
     done
-    h=$(printf '%s' "$p1" | openssl passwd -6 -stdin) && [ -n "$h" ] || return 1
+    h=""
+    if command -v openssl >/dev/null 2>&1; then
+        h=$(printf '%s' "$p1" | openssl passwd -6 -stdin 2>/dev/null)
+    elif command -v python3 >/dev/null 2>&1; then
+        h=$(python3 -c "import crypt; print(crypt.crypt('''$p1''', crypt.mksalt(crypt.METHOD_SHA512)))" 2>/dev/null)
+    fi
+    [ -n "$h" ] || return 1
     touch /etc/shadow && chmod 600 /etc/shadow
     if grep -q "^$N:" /etc/shadow; then
         H=$h D=$(( $(date +%s) / 86400 )) awk -F: -v OFS=: -v n="$N" \

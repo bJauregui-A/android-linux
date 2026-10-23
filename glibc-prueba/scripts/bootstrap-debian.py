@@ -82,7 +82,8 @@ PAQUETES_OBJETIVO = [
     "dpkg",
     "apt",
     "debian-archive-keyring",
-    "gpgv"
+    "gpgv",
+    "openssl"
 ]
 
 
@@ -360,6 +361,17 @@ def main():
     out.archivo("etc/apt/apt.conf.d/99android", APT_CONF_ANDROID, 0o644)
     out.archivo("etc/apt/sources.list", SOURCES_LIST, 0o644)
     out.archivo("etc/resolv.conf", b"nameserver 1.1.1.1\nnameserver 8.8.8.8\n", 0o644)
+
+    # Enlaces de compatibilidad usrmerge (binarios esenciales en /usr/bin)
+    for b in ["bash", "sh", "dash", "tar", "grep", "sed", "gzip", "cat", "ls", "cp",
+              "mv", "rm", "mkdir", "uname", "date", "sleep", "readlink", "mktemp",
+              "sync", "stty", "echo", "false", "true", "pwd", "ln", "df"]:
+        ti = tarfile.TarInfo(f"usr/bin/{b}")
+        ti.type = tarfile.SYMTYPE
+        ti.linkname = f"../../bin/{b}"
+        ti.mode = 0o777
+        ti.mtime = int(time.time())
+        out.t.addfile(ti)
 
     # Configuración de usuarios básica
     out.archivo("etc/passwd",

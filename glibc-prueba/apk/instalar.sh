@@ -105,6 +105,11 @@ if [ ! -e "$E/extraido" ]; then
     printf '\e[1;38;5;111m└────────────────────────────────────────────────────────────┘\e[0m\n'
 fi
 
+# Enlaces de compatibilidad para bash y binarios base entre /bin y /usr/bin
+[ -e "$P/bin/bash" ] && [ ! -e "$P/usr/bin/bash" ] && ln -sfn /bin/bash "$P/usr/bin/bash" 2>/dev/null || true
+[ -e "$P/usr/bin/bash" ] && [ ! -e "$P/bin/bash" ] && ln -sfn /usr/bin/bash "$P/bin/bash" 2>/dev/null || true
+[ -e "$P/bin/sh" ] && [ ! -e "$P/usr/bin/sh" ] && ln -sfn /bin/sh "$P/usr/bin/sh" 2>/dev/null || true
+
 # DNS de Android (el tar trae uno de respaldo)
 rm -f "$P/etc/resolv.conf"
 for s in $ANDROID_DNS; do echo "nameserver $s"; done > "$P/etc/resolv.conf"
@@ -114,7 +119,12 @@ echo "➜ Iniciando configuración del entorno Linux..."
 echo ""
 export GLIBC_PREFIX="$P"
 export GLIBC_LOADER="$GLIBC_LOADER"
-export PATH="/usr/local/bin:/usr/bin"
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+BASH_BIN="/bin/bash"
+[ -x "$P/usr/bin/bash" ] && BASH_BIN="/usr/bin/bash"
+[ -x "$P/bin/bash" ] && BASH_BIN="/bin/bash"
+
 PA_SCRIPT="/usr/local/share/linux-android/primer-arranque.sh"
 [ -f "$P/$PA_SCRIPT" ] || PA_SCRIPT="/usr/local/share/arch-android/primer-arranque.sh"
-exec "$GLIBC_LOADER" /usr/bin/bash "$PA_SCRIPT"
+exec "$GLIBC_LOADER" "$BASH_BIN" "$PA_SCRIPT"

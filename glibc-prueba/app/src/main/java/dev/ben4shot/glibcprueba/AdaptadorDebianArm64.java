@@ -63,7 +63,7 @@ final class AdaptadorDebianArm64 implements AdaptadorInstalacion {
 
     @Override public boolean instalada(Context contexto) {
         File r = raiz(contexto);
-        return new File(r, "bin/bash").exists() || new File(r, "usr/bin/bash").exists();
+        return new File(r, "var/lib/linux-android/instalado").exists();
     }
 
     @Override public boolean instaladorDisponible(Context contexto) {
