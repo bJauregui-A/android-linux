@@ -872,6 +872,7 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
     - En Debian 12 Bookworm, si `/etc/apt/sources.list` no incluye la etiqueta `[signed-by=...]`, APT recurre al script legado `/usr/bin/apt-key`.
     - `apt-key` invoca el binario `gpg` (paquete completo GnuPG). Al disponer únicamente de `gpgv`, fallaba con `Unknown error executing apt-key` y marcaba los repositorios como `not signed`, deshabilitándolos por seguridad.
     - Se solucionó adoptando la sintaxis oficial moderna con `[signed-by=/usr/share/keyrings/debian-archive-keyring.gpg]` en `sources.list` (haciendo que APT use directamente `gpgv` sin llamar a `apt-key`), e incorporando además el paquete `gpg` (`gnupg`) y sus dependencias (`gpgconf`, `libassuan0`, `libsqlite3-0`, `libreadline8`) en el rootfs base.
+  - **Implementación de `apt-key` en la capa (`apk/apt-key`):** Se implementó un wrapper propio y liviano de `apt-key` adaptado al entorno sin root de Android en [`apk/apt-key`](file:///media/ben4shot/E/Develop/Android/glibc-prueba/apk/apt-key). Maneja directamente `verify` delegando a `gpgv` con los keyrings de `/usr/share/keyrings/` y `/etc/apt/trusted.gpg.d/`, y gestiona `add` y `list` sin invocar scripts temporales ni requerir demonios gpg-agent. Integrado en `capa.tgz` (`usr/local/bin/apt-key`), enlazado en `instalar.sh` y validado con `apt-get update` descargando 9.4 MB con código de salida 0.
   - **Regenerados y empaquetados:** `base-debian.tgz` (176.8 MB), `capa.tgz` y APK recompilada e instalada con `adb install -r`.
 
 **Siguiente sesión (76ª):**
