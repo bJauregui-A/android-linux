@@ -47,7 +47,22 @@ exit 101
 
 SUDO_WRAPPER = b"""#!/bin/bash
 # Wrapper de sudo con GLIBC_FAKEROOT para Debian sin root
-GLIBC_FAKEROOT=1 exec "$@"
+export GLIBC_FAKEROOT=1
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -E|--preserve-env|-s|-i)
+            shift ;;
+        -u)
+            shift 2 ;;
+        --)
+            shift; break ;;
+        *=*)
+            export "$1"; shift ;;
+        *)
+            break ;;
+    esac
+done
+exec "$@"
 """
 
 APT_CONF_ANDROID = b"""// Configuracion de APT para Android sin root

@@ -113,7 +113,7 @@ backend_instalar() {
         apt)
             for i in 1 2 3; do
                 backend_limpiar_lock
-                sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${pkgs[@]}" && return 0
+                DEBIAN_FRONTEND=noninteractive sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${pkgs[@]}" && return 0
                 [ $i -eq 3 ] && return 1
                 printf '\n\e[38;5;214m✖ Falló la descarga en apt, reintento %d de 2...\e[0m\n' $i
                 sleep 3

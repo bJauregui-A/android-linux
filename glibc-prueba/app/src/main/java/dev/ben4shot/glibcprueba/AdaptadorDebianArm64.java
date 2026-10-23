@@ -110,10 +110,26 @@ final class AdaptadorDebianArm64 implements AdaptadorInstalacion {
 
     private static void escribirSudo(File raiz) {
         File f = new File(raiz, "usr/local/bin/sudo");
-        if (f.exists()) return;
         f.getParentFile().mkdirs();
         try (FileWriter w = new FileWriter(f)) {
-            w.write("#!/bin/bash\n# fakeroot de la glibc propia para Debian sin root\nGLIBC_FAKEROOT=1 exec \"$@\"\n");
+            w.write("#!/bin/bash\n"
+                  + "# fakeroot de la glibc propia para Debian sin root\n"
+                  + "export GLIBC_FAKEROOT=1\n"
+                  + "while [ $# -gt 0 ]; do\n"
+                  + "    case \"$1\" in\n"
+                  + "        -E|--preserve-env|-s|-i)\n"
+                  + "            shift ;;\n"
+                  + "        -u)\n"
+                  + "            shift 2 ;;\n"
+                  + "        --)\n"
+                  + "            shift; break ;;\n"
+                  + "        *=*) \n"
+                  + "            export \"$1\"; shift ;;\n"
+                  + "        *)\n"
+                  + "            break ;;\n"
+                  + "    esac\n"
+                  + "done\n"
+                  + "exec \"$@\"\n");
             f.setExecutable(true, false);
         } catch (Exception e) {
             Log.e(TAG, "sudo", e);
