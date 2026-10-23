@@ -153,10 +153,25 @@ Acquire::Languages "none";
 Acquire::Check-Valid-Until "false";
 EOF
 
-    # Grupos esenciales para servicios como ssh
+    # Grupos y usuarios esenciales para servicios como ssh
     if [ -f "$P/etc/group" ]; then
         grep -q "^_ssh:" "$P/etc/group" || echo "_ssh:x:101:" >> "$P/etc/group"
         grep -q "^ssh:" "$P/etc/group" || echo "ssh:x:102:" >> "$P/etc/group"
+    fi
+    if [ -f "$P/etc/passwd" ]; then
+        grep -q "^sshd:" "$P/etc/passwd" || echo "sshd:x:100:65534::/run/sshd:/usr/sbin/nologin" >> "$P/etc/passwd"
+        mkdir -p "$P/run/sshd" 2>/dev/null || true
+    fi
+
+    # Enlaces de compatibilidad awk y nologin
+    [ -x "$P/usr/bin/mawk" ] && [ ! -e "$P/usr/bin/awk" ] && ln -sfn mawk "$P/usr/bin/awk" 2>/dev/null || true
+    [ -e "$P/usr/bin/awk" ] && [ ! -e "$P/bin/awk" ] && ln -sfn /usr/bin/awk "$P/bin/awk" 2>/dev/null || true
+    [ ! -e "$P/usr/sbin/nologin" ] && ln -sfn /bin/false "$P/usr/sbin/nologin" 2>/dev/null || true
+
+    # Stubs para herramientas init de paquetes deb
+    if [ ! -x "$P/usr/sbin/update-rc.d" ]; then
+        printf '#!/bin/sh\nexit 0\n' > "$P/usr/sbin/update-rc.d" 2>/dev/null || true
+        chmod +x "$P/usr/sbin/update-rc.d" 2>/dev/null || true
     fi
 
     # Stub de mountpoint para paquetes que lo comprueban

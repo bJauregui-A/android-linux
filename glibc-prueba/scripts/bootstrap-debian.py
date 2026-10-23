@@ -102,7 +102,8 @@ PAQUETES_OBJETIVO = [
     "mawk",
     "libc-bin",
     "util-linux",
-    "usr-is-merged"
+    "usr-is-merged",
+    "perl-base"
 ]
 
 
@@ -391,7 +392,7 @@ def main():
     ti_key.mtime = int(time.time())
     out.t.addfile(ti_key)
 
-    # Enlaces de compatibilidad usrmerge (binarios esenciales en /usr/bin)
+    # Enlaces de compatibilidad usrmerge y utilidades esenciales en /usr/bin y /usr/sbin
     for b in ["bash", "sh", "dash", "tar", "grep", "sed", "gzip", "cat", "ls", "cp",
               "mv", "rm", "mkdir", "uname", "date", "sleep", "readlink", "mktemp",
               "sync", "stty", "echo", "false", "true", "pwd", "ln", "df"]:
@@ -402,9 +403,31 @@ def main():
         ti.mtime = int(time.time())
         out.t.addfile(ti)
 
+    # Enlace awk hacia mawk
+    ti_awk = tarfile.TarInfo("usr/bin/awk")
+    ti_awk.type = tarfile.SYMTYPE
+    ti_awk.linkname = "mawk"
+    ti_awk.mode = 0o777
+    ti_awk.mtime = int(time.time())
+    out.t.addfile(ti_awk)
+
+    # Stub de update-rc.d para evitar fallos de demonios init/systemd en Android
+    out.archivo("usr/sbin/update-rc.d", b"#!/bin/sh\nexit 0\n", 0o755)
+
+    # nologin -> false
+    ti_nologin = tarfile.TarInfo("usr/sbin/nologin")
+    ti_nologin.type = tarfile.SYMTYPE
+    ti_nologin.linkname = "../bin/false"
+    ti_nologin.mode = 0o777
+    ti_nologin.mtime = int(time.time())
+    out.t.addfile(ti_nologin)
+
+    out.directorio("run/sshd")
+
     # Configuración de usuarios y grupos estándar de Debian
     out.archivo("etc/passwd",
                 b"root:x:0:0:root:/root:/bin/bash\n"
+                b"sshd:x:100:65534::/run/sshd:/usr/sbin/nologin\n"
                 b"user:x:10478:10478:user:/home/user:/bin/bash\n", 0o644)
     out.archivo("etc/group",
                 b"root:x:0:\n"
