@@ -110,6 +110,13 @@ fi
 [ -e "$P/usr/bin/bash" ] && [ ! -e "$P/bin/bash" ] && ln -sfn /usr/bin/bash "$P/bin/bash" 2>/dev/null || true
 [ -e "$P/bin/sh" ] && [ ! -e "$P/usr/bin/sh" ] && ln -sfn /bin/sh "$P/usr/bin/sh" 2>/dev/null || true
 
+# Asegurar llavero de firmas GPG de Debian para apt
+if [ -f "$P/usr/share/keyrings/debian-archive-keyring.gpg" ]; then
+    mkdir -p "$P/etc/apt/trusted.gpg.d"
+    rm -f "$P/etc/apt/trusted.gpg.d/debian-archive-keyring.gpg"
+    cp "$P/usr/share/keyrings/debian-archive-keyring.gpg" "$P/etc/apt/trusted.gpg.d/debian-archive-keyring.gpg" 2>/dev/null || true
+fi
+
 # DNS de Android (el tar trae uno de respaldo)
 rm -f "$P/etc/resolv.conf"
 for s in $ANDROID_DNS; do echo "nameserver $s"; done > "$P/etc/resolv.conf"

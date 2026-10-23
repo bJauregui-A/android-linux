@@ -368,7 +368,7 @@ def main():
     # Enlace de la llave GPG oficial de Debian en trusted.gpg.d para verificacion de firmas en apt
     ti_key = tarfile.TarInfo("etc/apt/trusted.gpg.d/debian-archive-keyring.gpg")
     ti_key.type = tarfile.SYMTYPE
-    ti_key.linkname = "../../usr/share/keyrings/debian-archive-keyring.gpg"
+    ti_key.linkname = "../../../usr/share/keyrings/debian-archive-keyring.gpg"
     ti_key.mode = 0o777
     ti_key.mtime = int(time.time())
     out.t.addfile(ti_key)
