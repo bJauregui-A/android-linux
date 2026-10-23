@@ -724,6 +724,15 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
      - Actualizadas en caliente las instancias activas en el teléfono (`server1-25913`, `client-16767`, `srvtest-91001`).
      - Sincronización probada en vivo con `pacman -Sy` (código de salida 0) y validada prioridad con `pacman -Si bash` (mostrando `holo-core` prioritario) y verificación de paquetes excluidos.
      - Reconstruidos `base.tgz` y `capa.tgz` y compilado el APK `sdk36Debug` con Gradle.
+4. **Diagnóstico y corrección del crash fatal al eliminar instancias (`IllegalArgumentException`):**
+   - **Causa raíz:** En [SistemaLinux.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/SistemaLinux.java), al eliminar una instancia, se borraba primero de `instancias_json` en `shared_prefs`. Cuando [TerminalService.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/TerminalService.java) recibía el intent `CERRAR_INSTANCIA` de forma asíncrona, llamaba a `SistemaLinux.raiz(this, id)` y `SistemaLinux.adaptador(this, id)`. Al no existir ya en la lista, `adaptador(id)` arrojaba `IllegalArgumentException("Sin adaptador registrado para " + id)` en el hilo principal de Android, provocando la caída inmediata de la aplicación (`FATAL EXCEPTION: main`).
+   - **Corrección:**
+     - En [SistemaLinux.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/SistemaLinux.java): se eliminaron los lanzamientos de `IllegalArgumentException` en `raiz()` y `adaptador()`. Si el ID solicitado no está en la lista activa (ej. durante el proceso de cierre/eliminación), se resuelve dinámicamente hacia la ruta `instancias/<id>` con fallback seguro a `AdaptadorArchArm64`.
+     - En [TerminalService.java](file:///media/ben4shot/E/Develop/Android/glibc-prueba/app/src/main/java/dev/ben4shot/glibcprueba/TerminalService.java): protegida con `try-catch` la rutina de limpieza de procesos en `cerrarInstancia()`.
+   - **Saneamiento en el teléfono:**
+     - Terminados los procesos residuales de `server1` (`service-daemon` y `nginx`) y eliminado su directorio huérfano en disco.
+     - Reconfigurado `shared_prefs/instalacion-linux.xml` con `srvtest-91001` activo.
+     - APK `sdk36Debug` recompilada e instalada en el dispositivo vía `adb install -r`, verificando su arranque limpio y enfocado en primer plano.
 
 **Siguiente sesión (71ª):**
 1. **Inicialización de entornos basada en Dockerfile / OCI (`dockerfile-runner` / importador):**

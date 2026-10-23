@@ -281,9 +281,11 @@ final class SistemaLinux {
     }
 
     static File raiz(Context c, String id) {
+        if (id == null || id.isEmpty()) return adaptadorSeleccionado(c).raiz(c);
         Instancia inst = instancia(c, id);
         if (inst != null) return new File(c.getFilesDir(), inst.rutaRelativa);
-        return adaptador(id).raiz(c);
+        String ruta = id.startsWith("instancias/") ? id : "instancias/" + id;
+        return new File(c.getFilesDir(), ruta);
     }
 
     static File raizSeleccionada(Context c) {
@@ -291,10 +293,10 @@ final class SistemaLinux {
     }
 
     static AdaptadorInstalacion adaptador(Instancia inst) {
-        if (ARCH.equals(inst.distroId)) {
-            return new AdaptadorArchArm64(inst.rutaRelativa);
+        if (inst == null || ARCH.equals(inst.distroId)) {
+            return new AdaptadorArchArm64(inst != null ? inst.rutaRelativa : "instancias/arch-principal");
         }
-        throw new IllegalArgumentException("Sin adaptador implementado para " + inst.distroId);
+        return new AdaptadorArchArm64(inst.rutaRelativa);
     }
 
     static AdaptadorInstalacion adaptador(Context c, Instancia inst) {
@@ -302,15 +304,18 @@ final class SistemaLinux {
     }
 
     static AdaptadorInstalacion adaptador(Context c, String id) {
+        if (id == null || id.isEmpty()) return adaptadorSeleccionado(c);
         Instancia inst = instancia(c, id);
         if (inst != null) return adaptador(inst);
-        if (ARCH.equals(id)) return adaptador(instanciaSeleccionada(c));
-        throw new IllegalArgumentException("Sin adaptador para " + id);
+        if (ARCH.equals(id)) return adaptadorSeleccionado(c);
+        String ruta = id.startsWith("instancias/") ? id : "instancias/" + id;
+        return new AdaptadorArchArm64(ruta);
     }
 
     static AdaptadorInstalacion adaptador(String id) {
-        if (ARCH.equals(id)) return new AdaptadorArchArm64();
-        throw new IllegalArgumentException("Sin adaptador registrado para " + id);
+        if (id == null || id.isEmpty() || ARCH.equals(id)) return new AdaptadorArchArm64();
+        String ruta = id.startsWith("instancias/") ? id : "instancias/" + id;
+        return new AdaptadorArchArm64(ruta);
     }
 
     static AdaptadorInstalacion adaptadorSeleccionado(Context c) {

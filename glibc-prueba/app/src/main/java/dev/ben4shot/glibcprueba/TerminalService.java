@@ -257,9 +257,13 @@ public class TerminalService extends Service implements TerminalSessionClient {
                 s.sesionTerminal = null;
             }
         }
-        AdaptadorInstalacion adp = SistemaLinux.adaptador(this, id);
-        if (adp != null) {
-            limpiarProcesosLinux(adp.raiz(this));
+        try {
+            AdaptadorInstalacion adp = SistemaLinux.adaptador(this, id);
+            if (adp != null) {
+                limpiarProcesosLinux(adp.raiz(this));
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "error al limpiar procesos para " + id, e);
         }
         if (id.equals(instanciaEnfocadaId)) {
             instanciaEnfocadaId = null;
