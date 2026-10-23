@@ -119,6 +119,7 @@ echo "➜ Iniciando configuración del entorno Linux..."
 echo ""
 export GLIBC_PREFIX="$P"
 export GLIBC_LOADER="$GLIBC_LOADER"
+export LD_LIBRARY_PATH="/usr/lib/aarch64-linux-gnu:/lib/aarch64-linux-gnu:/usr/lib:/lib:${LD_LIBRARY_PATH:-}"
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 BASH_BIN="/bin/bash"

@@ -48,6 +48,7 @@ final class Instalador {
         if (inst != null && SistemaLinux.DEBIAN.equals(inst.distroId)) {
             baseAsset = "base-debian.tgz";
             env.add("GLIBC_PKG_BACKEND=apt");
+            env.add("LD_LIBRARY_PATH=/usr/lib/aarch64-linux-gnu:/lib/aarch64-linux-gnu:/usr/lib:/lib");
         } else {
             env.add("GLIBC_PKG_BACKEND=pacman");
         }

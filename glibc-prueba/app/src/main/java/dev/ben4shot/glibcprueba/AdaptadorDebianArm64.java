@@ -99,6 +99,7 @@ final class AdaptadorDebianArm64 implements AdaptadorInstalacion {
         entorno.add("LOGNAME=" + usuario(raiz));
         entorno.add("SHELL=" + shell(raiz));
         entorno.add("PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
+        entorno.add("LD_LIBRARY_PATH=/usr/lib/aarch64-linux-gnu:/lib/aarch64-linux-gnu:/usr/lib:/lib");
         entorno.add("LANG=C.UTF-8");
         entorno.add("TMPDIR=/tmp");
         entorno.add("DEBIAN_FRONTEND=noninteractive");
