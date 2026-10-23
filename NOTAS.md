@@ -681,11 +681,14 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
      - HTTP desde `srvtest` a Nginx en `server1:80`: `HTTP/1.1 200 OK`.
      - HTTP desde `srvtest` a servidor Python temporal en `server1:9000`: `HTTP/1.0 200 OK`.
    - Registrada la instancia `srvtest-91001` en `shared_prefs/instalacion-linux.xml` y `shared_prefs/red_config.xml`.
+4. **Optimización definitiva del supervisor (`service-daemon` y `service`):**
+   - Eliminado por completo el límite fijo `MAX_SERVICES`: la tabla de servicios en memoria ahora crece dinámicamente con `realloc` según sea necesario.
+   - Búsqueda bajo demanda de unidades de Pacman/systemd: si se solicita cualquier servicio (ej. `service nginx start`), se busca y parsea ese archivo específico en disco sin precargar 300 unidades innecesarias en RAM.
+   - Refresco en caliente: si se edita un archivo `.service` en `/etc/services.d/`, el supervisor re-parsea la nueva definición automáticamente al reiniciar o invocar el servicio.
+   - Listado inteligente y buffer de 64 KB: `service list` muestra de forma limpia los servicios activos y configurados; `service list -a` muestra todas las unidades del sistema sin truncamiento.
 
 **Siguiente sesión (70ª):**
-1. **Optimización de `service-daemon.c`:**
-   - Ampliar `MAX_SERVICES` a 512 o cargar dinámicamente unidades bajo demanda para no truncar la lista de systemd.
-2. **Inicialización de entornos basada en Dockerfile / OCI (`dockerfile-runner` / importador):**
+1. **Inicialización de entornos basada en Dockerfile / OCI (`dockerfile-runner` / importador):**
    - Diseñar e implementar un generador o intérprete que cree e inicialice instancias aisladas a partir de un `Dockerfile` (soportando directivas clave: `FROM`, `ENV`, `COPY`, `RUN`, `WORKDIR`, `EXPOSE`, `CMD`), o mediante importación directa de rootfs OCI/Docker inyectando `libldp.so`/glibc propia.
 3. **Proxy en puerto 22 real de Wi-Fi:**
    - Implementar y poner a prueba el script o daemon en espacio `shell` (UID 2000, con `CAP_NET_BIND_SERVICE`) vía `adb-conectar` para escuchar en `0.0.0.0:22` y redirigir el tráfico SSH directamente a la instancia seleccionada o configurada en la UI de Red.
