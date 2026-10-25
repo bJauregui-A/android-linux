@@ -1,0 +1,551 @@
+--- a/sysdeps/unix/sysv/linux/aarch64/android-path.c
++++ b/sysdeps/unix/sysv/linux/aarch64/android-path.c
+@@ -255,6 +255,24 @@
+   "system_ext", "storage", "sdcard", "linkerconfig", NULL
+ };
+ 
++/* C es una ruta absoluta sin la barra inicial: ¿cae en una carpeta de
++   Android?  /dev/shm y /dev/input van al prefijo (memoria compartida; mandos
++   de la app, ver evdev_open).  */
++static int
++pasa_android (const char *c)
++{
++  if ((starts (c, "dev/shm", 7) && (c[7] == '/' || c[7] == '\0'))
++      || (starts (c, "dev/input", 9) && (c[9] == '/' || c[9] == '\0')))
++    return 0;
++  for (int i = 0; passthrough[i] != NULL; i++)
++    {
++      size_t n = slen (passthrough[i]);
++      if (starts (c, passthrough[i], n) && (c[n] == '/' || c[n] == '\0'))
++	return 1;
++    }
++  return 0;
++}
++
+ /* Devuelve la ruta a usar: IN sin cambios u OUT con el prefijo.  NULL si no
+    cabe en PATH_MAX.  */
+ static const char *
+@@ -266,16 +284,8 @@
+   while (p[1] == '/')
+     p++;
+   const char *c = p + 1;
+-  /* /dev/shm y /dev/input van al prefijo (memoria compartida; mandos de la
+-     app, ver evdev_open).  */
+-  if (!(starts (c, "dev/shm", 7) && (c[7] == '/' || c[7] == '\0'))
+-      && !(starts (c, "dev/input", 9) && (c[9] == '/' || c[9] == '\0')))
+-    for (int i = 0; passthrough[i] != NULL; i++)
+-      {
+-	size_t n = slen (passthrough[i]);
+-	if (starts (c, passthrough[i], n) && (c[n] == '/' || c[n] == '\0'))
+-	  return in;
+-      }
++  if (pasa_android (c))
++    return in;
+   size_t n = slen (p);
+   if (plen + n + 1 > PATH_MAX)
+     return NULL;
+@@ -284,6 +294,66 @@
+   return out;
+ }
+ 
++/* Raíz cerrada (B26): los ".." se resuelven sobre el árbol real sin salir de
++   la instancia (android-raiz.c).  */
++#include "android-raiz.h"
++#include "android-raiz.c"
++
++static long int
++raiz_op_readlinkat (void *ctx, int dirfd, const char *p, char *b, size_t n)
++{
++  return RAW (__NR_readlinkat, dirfd, p, b, n);
++}
++
++static long int
++raiz_op_getcwd (void *ctx, char *b, size_t n)
++{
++  long int r = RAW (__NR_getcwd, b, n);
++  return r > 0 ? r - 1 : r;
++}
++
++static int
++raiz_op_pasa (void *ctx, const char *vista)
++{
++  return pasa_android (vista + 1);
++}
++
++static const struct raiz_ops raiz_ops =
++{ raiz_op_readlinkat, raiz_op_getcwd, raiz_op_pasa, NULL };
++
++/* Como xlat, pero para IN relativa a DIRFD y con "..": primero se resuelve
++   dentro de la instancia.  Las rutas sin ".." van directo a xlat.  OUT debe
++   tener PATH_MAX.  Devuelve 0 (ruta en *RES) o -errno.  */
++static long int
++xlatd (int dirfd, const char *in, char *out, const char **res)
++{
++  if (in == NULL)
++    {
++      *res = in;
++      return 0;
++    }
++  int rc = raiz_resolver (&raiz_ops, PREFIX, real_prefix, dirfd, in, out,
++			  PATH_MAX);
++  if (rc == RAIZ_INTACTA)
++    {
++      *res = xlat (in, out);
++      return *res == NULL ? -ENAMETOOLONG : 0;
++    }
++  if (rc < 0)
++    return rc;
++  if (!pasa_android (out + 1))
++    {
++      size_t n = slen (out);
++      if (plen + n + 1 > PATH_MAX)
++	return -ENAMETOOLONG;
++      for (size_t i = n + 1; i-- > 0;)
++	out[i + plen] = out[i];
++      mcopy (out, PREFIX, plen);
++    }
++  *res = out;
++  return 0;
++}
++
+ static size_t
+ strip (char *buf, size_t n, const char *pre, size_t len)
+ {
+@@ -401,7 +471,10 @@
+ {
+   if (depth > 4)
+     return -ELOOP;
+-  const char *t = xlat (path, buf);
++  const char *t;
++  long int e = xlatd (AT_FDCWD, path, buf, &t);
++  if (e < 0)
++    return e;
+   if (t == NULL)
+     return -ENAMETOOLONG;
+ 
+@@ -811,6 +884,19 @@
+       }									\
+   while (0)
+ 
++/* Igual que XL para una ruta relativa a FD (AT_FDCWD si no hay).  */
++#define XLD(fd, a, b)							\
++  do									\
++    if ((a) != 0)							\
++      {									\
++	const char *t_;							\
++	long int e_ = xlatd ((int) (fd), (const char *) (a), b, &t_);	\
++	if (e_ < 0)							\
++	  return e_;							\
++	(a) = (long int) t_;						\
++      }									\
++  while (0)
++
+ /* set*id: el seccomp de las apps no deja usar setuid/setgid & co. (SIGSYS,
+    ENOSYS aquí), pero muchos programas "bajan privilegios" a los ids que ya
+    tienen antes de lanzar un hijo (Xwayland con xkbcomp) y abortan si falla.
+@@ -2187,7 +2273,7 @@
+     case __NR_llistxattr:
+     case __NR_removexattr:
+     case __NR_lremovexattr:
+-      XL (a0, b1);
++      XLD (AT_FDCWD, a0, b1);
+       break;
+ 
+     /* Bloqueadas por el seccomp de apps (bionic no las usa): ENOSYS sin
+@@ -2196,7 +2282,7 @@
+     case __NR_faccessat2:
+       if (a3 == 0)
+ 	{
+-	  XL (a1, b1);
++	  XLD (a0, a1, b1);
+ 	  return raw (__NR_faccessat, a0, a1, a2, 0, 0, 0);
+ 	}
+       return -ENOSYS;
+@@ -2211,7 +2297,7 @@
+ 	  return r == -EACCES ? proc_falso ((const char *) a1, a2, r) : r;
+ 	}
+ #endif
+-      XL (a1, b1);
++      XLD (a0, a1, b1);
+       if ((const char *) a1 == b1)
+ 	{
+ 	  long int r = evdev_open (b1, a2);
+@@ -2228,22 +2314,24 @@
+     case __NR_unlinkat:
+     case __NR_fchmodat:
+     case __NR_utimensat:
+-    case __NR_inotify_add_watch:
+     case __NR_name_to_handle_at:
+-      XL (a1, b1);
++      XLD (a0, a1, b1);
++      break;
++    case __NR_inotify_add_watch:
++      XLD (AT_FDCWD, a1, b1);
+       break;
+ 
+     case __NR_fchownat:
+       {
+-	XL (a1, b1);
++	XLD (a0, a1, b1);
+ 	long int r = raw (nr, a0, a1, a2, a3, a4, a5);
+ 	return fakeroot && r == -EPERM ? 0 : r;
+       }
+ 
+     case __NR_linkat:
+       {
+-	XL (a1, b1);
+-	XL (a3, b2);
++	XLD (a0, a1, b1);
++	XLD (a2, a3, b2);
+ 	long int r = raw (nr, a0, a1, a2, a3, a4, a5);
+ 	if (r == -EACCES || r == -EPERM)
+ 	  r = link_copy (a0, (const char *) a1, a2, (const char *) a3, a4);
+@@ -2252,15 +2340,15 @@
+ 
+     case __NR_renameat:
+     case __NR_renameat2:
+-      XL (a1, b1);
+-      XL (a3, b2);
++      XLD (a0, a1, b1);
++      XLD (a2, a3, b2);
+       break;
+ 
+     case __NR_symlinkat:
+       /* El destino absoluto también: lo resuelve el kernel.  readlinkat
+ 	 le quita el prefijo al leerlo.  */
+       XL (a0, b1);
+-      XL (a2, b2);
++      XLD (a1, a2, b2);
+       break;
+ 
+     case __NR_readlinkat:
+@@ -2274,7 +2362,7 @@
+ 	  }
+ 	else
+ 	  {
+-	    XL (a1, b1);
++	    XLD (a0, a1, b1);
+ 	    r = raw (nr, a0, a1, (long int) b2, PATH_MAX, 0, 0);
+ 	    if (r < 0)
+ 	      return r;
+@@ -2373,6 +2461,18 @@
+ 	    /* Relativo a un descriptor: se ejecuta vía /proc/self/fd/N.  */
+ 	    if (p[0] == '\0' && !(a4 & AT_EMPTY_PATH))
+ 	      return -ENOENT;
++	    if (p[0] != '\0')
++	      {
++		/* Con '..': se resuelve dentro de la instancia (el de /proc no
++		   se encierra); b2 queda con la ruta de la vista.  */
++		int rc = raiz_resolver (&raiz_ops, PREFIX, real_prefix, a0, p,
++					b2, PATH_MAX);
++		if (rc < 0)
++		  return rc;
++		if (rc == 0)
++		  return execve_x (b2, (char *const *) a2, (char *const *) a3,
++				   b1);
++	      }
+ 	    char *q = b2;
+ 	    mcopy (q, "/proc/self/fd/", 14);
+ 	    q = utoa (q + 14, (unsigned int) a0);
+--- /dev/null
++++ b/sysdeps/unix/sysv/linux/aarch64/android-raiz.c
+@@ -0,0 +1,250 @@
++/* Raíz cerrada (B26): ver android-raiz.h.  Código puro, sin macros de glibc.  */
++#include <errno.h>
++#include <fcntl.h>
++#include <limits.h>
++#include <stddef.h>
++#include "android-raiz.h"
++
++#define MAX_ENLACES 40
++
++static size_t
++rz_len (const char *s)
++{
++  size_t n = 0;
++  while (s[n] != '\0')
++    n++;
++  return n;
++}
++
++/* S empieza con PRE y termina ahí o en '/'.  Devuelve el resto o NULL.  */
++static const char *
++rz_quita (const char *s, const char *pre)
++{
++  if (pre == NULL || pre[0] == '\0')
++    return NULL;
++  size_t n = rz_len (pre);
++  for (size_t i = 0; i < n; i++)
++    if (s[i] != pre[i])
++      return NULL;
++  if (s[n] != '\0' && s[n] != '/')
++    return NULL;
++  return s + n;
++}
++
++static int
++rz_tiene_punto_punto (const char *p)
++{
++  while (*p != '\0')
++    {
++      while (*p == '/')
++	p++;
++      if (p[0] == '.' && p[1] == '.' && (p[2] == '/' || p[2] == '\0'))
++	return 1;
++      while (*p != '\0' && *p != '/')
++	p++;
++    }
++  return 0;
++}
++
++/* Agrega "/NOMBRE" (N bytes) a CUR (largo *L).  */
++static int
++rz_agrega (char *cur, size_t *l, const char *nom, size_t n)
++{
++  if (*l + 1 + n + 1 > PATH_MAX)
++    return -ENAMETOOLONG;
++  cur[(*l)++] = '/';
++  for (size_t i = 0; i < n; i++)
++    cur[(*l)++] = nom[i];
++  cur[*l] = '\0';
++  return 0;
++}
++
++/* Quita el último componente de CUR (en la raíz no hace nada).  */
++static void
++rz_sube (char *cur, size_t *l)
++{
++  while (*l > 0 && cur[*l - 1] != '/')
++    (*l)--;
++  if (*l > 0)
++    (*l)--;
++  cur[*l] = '\0';
++}
++
++/* PEND (largo *PL) = DESTINO + "/" + PEND.  */
++static int
++rz_antepone (char *pend, size_t *pl, const char *dst, size_t n)
++{
++  if (n + 1 + *pl + 1 > PATH_MAX)
++    return -ENAMETOOLONG;
++  for (size_t i = *pl + 1; i-- > 0;)
++    pend[i + n + 1] = pend[i];
++  for (size_t i = 0; i < n; i++)
++    pend[i] = dst[i];
++  pend[n] = '/';
++  *pl += n + 1;
++  return 0;
++}
++
++static int
++rz_termina (char *out, size_t outsz, const char *cur, size_t l,
++	    const char *resto)
++{
++  while (resto != NULL && *resto == '/')
++    resto++;
++  size_t n = l == 0 ? 1 : l, r = resto ? rz_len (resto) : 0;
++  if (n + (r ? r + 1 : 0) + 1 > outsz)
++    return -ENAMETOOLONG;
++  size_t o = 0;
++  if (l == 0)
++    out[o++] = '/';
++  for (size_t i = 0; i < l; i++)
++    out[o++] = cur[i];
++  if (r)
++    {
++      out[o++] = '/';
++      for (size_t i = 0; i < r; i++)
++	out[o++] = resto[i];
++    }
++  out[o] = '\0';
++  return 0;
++}
++
++int
++raiz_resolver (const struct raiz_ops *ops, const char *prefix,
++	       const char *real_prefix, int dirfd, const char *in, char *out,
++	       size_t outsz)
++{
++  if (in == NULL || !rz_tiene_punto_punto (in))
++    return RAIZ_INTACTA;
++  if (outsz < PATH_MAX)
++    return -ENAMETOOLONG;
++
++  char cur[PATH_MAX];		/* vista de la instancia; "" es la raíz */
++  char pend[PATH_MAX];	/* lo que falta por recorrer */
++  char tmp[PATH_MAX];
++  size_t l = 0, pl;
++  cur[0] = '\0';
++
++  if (in[0] != '/')
++    {
++      long int r;
++      if (dirfd == AT_FDCWD)
++	r = ops->getcwd (ops->ctx, tmp, sizeof tmp - 1);
++      else
++	{
++	  char fd[32] = "/proc/self/fd/";
++	  size_t o = 14;
++	  char dig[12];
++	  int nd = 0;
++	  unsigned int v = (unsigned int) dirfd;
++	  do
++	    dig[nd++] = '0' + v % 10;
++	  while ((v /= 10) != 0);
++	  while (nd > 0)
++	    fd[o++] = dig[--nd];
++	  fd[o] = '\0';
++	  r = ops->readlinkat (ops->ctx, AT_FDCWD, fd, tmp, sizeof tmp - 1);
++	}
++      if (r <= 0)
++	return RAIZ_INTACTA;
++      tmp[r] = '\0';
++      const char *resto = rz_quita (tmp, prefix);
++      if (resto == NULL)
++	resto = rz_quita (tmp, real_prefix);
++      if (resto == NULL)
++	return RAIZ_INTACTA;	/* cwd fuera de la instancia: ruta de Android */
++      for (; *resto != '\0'; resto++)
++	cur[l++] = *resto;
++      cur[l] = '\0';
++    }
++
++  size_t n = rz_len (in);
++  if (n >= sizeof pend)
++    return -ENAMETOOLONG;
++  for (size_t i = 0; i <= n; i++)
++    pend[i] = in[i];
++  pl = n;
++
++  const char *p = pend;
++  int enlaces = 0;
++  for (;;)
++    {
++      while (*p == '/')
++	p++;
++      if (*p == '\0')
++	break;
++      const char *c = p;
++      while (*p != '\0' && *p != '/')
++	p++;
++      size_t cl = p - c;
++      /* Último componente: sin barra final detrás.  */
++      int ultimo = *p == '\0';
++
++      if (cl == 1 && c[0] == '.')
++	continue;
++      if (cl == 2 && c[0] == '.' && c[1] == '.')
++	{
++	  rz_sube (cur, &l);
++	  continue;
++	}
++      int rc = rz_agrega (cur, &l, c, cl);
++      if (rc < 0)
++	return rc;
++      if (l > 1 && ops->pasa != NULL)
++	{
++	  /* Solo hace falta mirar al entrar en la primera carpeta.  */
++	  size_t k = 1;
++	  while (k < l && cur[k] != '/')
++	    k++;
++	  if (k == l && ops->pasa (ops->ctx, cur))
++	    {
++	      return rz_termina (out, outsz, cur, l, p);
++	    }
++	}
++      if (ultimo)
++	break;
++
++      /* Carpeta intermedia: si es un enlace, se sigue.  */
++      size_t pl_real = 0;
++      const char *pre = prefix;
++      size_t np = rz_len (pre);
++      if (np + l + 1 > sizeof tmp)
++	return -ENAMETOOLONG;
++      for (size_t i = 0; i < np; i++)
++	tmp[pl_real++] = pre[i];
++      for (size_t i = 0; i < l; i++)
++	tmp[pl_real++] = cur[i];
++      tmp[pl_real] = '\0';
++      char *dst = out;		/* OUT sirve de espacio hasta el final */
++      long int r = ops->readlinkat (ops->ctx, AT_FDCWD, tmp, dst,
++				    PATH_MAX - 1);
++      if (r <= 0)
++	continue;		/* no es enlace (o no existe): queda en cur */
++      dst[r] = '\0';
++      if (++enlaces > MAX_ENLACES)
++	return -ELOOP;
++
++      /* Se descarta el componente y se recorre el destino antes que el resto.  */
++      rz_sube (cur, &l);
++      size_t off = p - pend, i = 0;
++      while ((pend[i] = pend[off + i]) != '\0')
++	i++;
++      pl = i;
++      p = pend;
++      const char *d = dst;
++      if (dst[0] == '/')
++	{
++	  const char *resto = rz_quita (dst, prefix);
++	  if (resto == NULL)
++	    resto = rz_quita (dst, real_prefix);
++	  if (resto != NULL)
++	    d = resto;
++	  l = 0;
++	  cur[0] = '\0';
++	}
++      rc = rz_antepone (pend, &pl, d, rz_len (d));
++      if (rc < 0)
++	return rc;
++    }
++  return rz_termina (out, outsz, cur, l, NULL);
++}
+--- /dev/null
++++ b/sysdeps/unix/sysv/linux/aarch64/android-raiz.h
+@@ -0,0 +1,46 @@
++/* Raíz cerrada (B26): resuelve los ".." de una ruta sobre el árbol real sin
++   subir nunca por encima de la raíz de la instancia, como un chroot.
++
++   Código puro: sin macros de glibc.  Las operaciones del sistema llegan por
++   OPS (en la glibc son RAW(...); en las pruebas del PC, syscalls normales).  */
++#ifndef ANDROID_RAIZ_H
++#define ANDROID_RAIZ_H
++
++#include <stddef.h>
++
++struct raiz_ops
++{
++  /* Como readlinkat(2): largo copiado (sin '\0') o -errno.  */
++  long int (*readlinkat) (void *ctx, int dirfd, const char *path, char *buf,
++			  size_t n);
++  /* Como getcwd(2): largo copiado (sin '\0') o -errno.  */
++  long int (*getcwd) (void *ctx, char *buf, size_t n);
++  /* Distinto de 0 si la ruta de la vista (absoluta, ej. "/sdcard/x") cae en
++     una carpeta de Android que se ve tal cual (passthrough).  Puede ser NULL.
++     Ahí el resolvedor se detiene y deja el resto sin tocar.  */
++  int (*pasa) (void *ctx, const char *vista);
++  void *ctx;
++};
++
++/* Resultado de raiz_resolver.  */
++#define RAIZ_INTACTA 1		/* usar la ruta original sin cambios */
++
++/* Resuelve IN (absoluta, o relativa a DIRFD; AT_FDCWD = cwd).
++   PREFIX es la raíz de la instancia en el sistema real, REAL_PREFIX la misma
++   ya resuelta por el kernel (puede ser NULL).
++
++   Devuelve:
++     0             OUT tiene la ruta en la vista de la instancia (absoluta,
++		   "/" es la raíz); el llamador le aplica xlat().
++     RAIZ_INTACTA  IN no tiene ".." o parte de fuera de la instancia
++		   (ej. cwd en /sdcard): usar IN tal cual.
++     -errno        ELOOP (más de 40 enlaces), ENAMETOOLONG.
++
++   Las rutas sin ".." devuelven RAIZ_INTACTA sin llamar a OPS.  El último
++   componente no se sigue si es un enlace (lo trata el kernel), salvo que sea
++   ".." o ".".  */
++int raiz_resolver (const struct raiz_ops *ops, const char *prefix,
++		   const char *real_prefix, int dirfd, const char *in,
++		   char *out, size_t outsz);
++
++#endif
