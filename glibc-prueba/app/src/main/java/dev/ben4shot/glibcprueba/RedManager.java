@@ -15,6 +15,7 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -314,20 +315,63 @@ public final class RedManager {
         actualizar(c);
     }
 
-    /** Primera IP libre de la subred por defecto (sub_default, o la primera de la lista). */
-    public static synchronized String ipLibreEnSubredPorDefecto(Context c) {
+    private static Subred subredPorDefecto(Context c) {
         List<Subred> subredes = listarSubredes(c);
         Subred destino = subredes.get(0);
         for (Subred s : subredes) {
             if ("sub_default".equals(s.id)) destino = s;
         }
+        return destino;
+    }
+
+    private static String sinMascara(String ip) {
+        ip = ip == null ? "" : ip.trim();
+        return ip.contains("/") ? ip.substring(0, ip.indexOf('/')) : ip;
+    }
+
+    /** Primera IP libre de la subred por defecto (sub_default, o la primera de la lista). */
+    public static synchronized String ipLibreEnSubredPorDefecto(Context c) {
         List<String> ocupadas = new ArrayList<>();
         for (AsignacionIp asig : listarAsignaciones(c).values()) {
-            String ip = asig.ip == null ? "" : asig.ip.trim();
-            if (ip.contains("/")) ip = ip.substring(0, ip.indexOf('/'));
+            String ip = sinMascara(asig.ip);
             if (!ip.isEmpty()) ocupadas.add(ip);
         }
-        return AsignacionIps.primeraLibre(destino.cidr, ocupadas);
+        return AsignacionIps.primeraLibre(subredPorDefecto(c).cidr, ocupadas);
+    }
+
+    /**
+     * Deja una IP guardada por cada instancia registrada y ninguna de más, y reescribe /etc/hosts.
+     * Si la lista de instancias no se pudo leer no toca nada.
+     */
+    public static synchronized void sincronizarAsignaciones(Context c) {
+        List<SistemaLinux.Instancia> instancias = SistemaLinux.leerInstancias(c);
+        if (instancias == null) return;
+        List<String> ids = new ArrayList<>();
+        for (SistemaLinux.Instancia i : instancias) ids.add(i.id);
+
+        Map<String, AsignacionIp> actuales = listarAsignaciones(c);
+        Map<String, String> ips = new LinkedHashMap<>();
+        for (AsignacionIp asig : actuales.values()) {
+            String ip = sinMascara(asig.ip);
+            if (!ip.isEmpty()) ips.put(asig.instanciaId, ip);
+        }
+        Map<String, String> limpias = AsignacionIps.limpiar(ips, ids);
+        Map<String, String> completas = AsignacionIps.completar(subredPorDefecto(c).cidr, limpias, ids);
+
+        Map<String, AsignacionIp> nuevas = new ConcurrentHashMap<>();
+        for (Map.Entry<String, String> e : completas.entrySet()) {
+            String id = e.getKey();
+            if (limpias.containsKey(id)) {
+                nuevas.put(id, actuales.get(id));
+            } else {
+                nuevas.put(id, new AsignacionIp(id, "sub_default", e.getValue()));
+            }
+        }
+        guardarAsignaciones(c, nuevas);
+        for (Map.Entry<String, String> e : completas.entrySet()) {
+            if (!limpias.containsKey(e.getKey())) escribirVirtualIp(c, e.getKey(), e.getValue());
+        }
+        actualizarHosts(c);
     }
 
     public static String ipParaInstancia(Context c, String instanciaId) {

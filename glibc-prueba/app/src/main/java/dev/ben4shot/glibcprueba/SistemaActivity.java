@@ -72,6 +72,7 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         PuertoAdb.iniciar(this);
+        RedManager.sincronizarAsignaciones(this);
 
         FrameLayout raiz = new FrameLayout(this);
         raiz.setBackgroundColor(FONDO_OSCURO);

@@ -102,6 +102,12 @@ final class SistemaLinux {
     }
 
     static synchronized List<Instancia> listarInstancias(Context c) {
+        List<Instancia> lista = leerInstancias(c);
+        return lista != null ? lista : new ArrayList<>();
+    }
+
+    /** Como listarInstancias, pero devuelve null si el JSON está dañado: así no se confunde con "no hay instancias". */
+    static synchronized List<Instancia> leerInstancias(Context c) {
         SharedPreferences p = preferencias(c);
         String raw = p.getString(PREF_INSTANCIAS, null);
         List<Instancia> lista = new ArrayList<>();
@@ -114,6 +120,7 @@ final class SistemaLinux {
                 }
             } catch (JSONException e) {
                 Log.e(TAG, "error leyendo instancias json", e);
+                return null;
             }
         }
         return lista;
