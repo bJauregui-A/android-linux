@@ -12,6 +12,7 @@ mkdir -p "$E"
 [ -e "$P/var/lib/arch-android" ] || ln -sfn linux-android "$P/var/lib/arch-android" 2>/dev/null || mkdir -p "$P/var/lib/arch-android"
 LOG=$P/tmp/instalacion-extraccion.log
 mkdir -p "$P/tmp" "$P/dev/shm/.sysv" 2>/dev/null || true
+export TMPDIR="$P/tmp"   # los heredocs de sh (mksh) necesitan un tmp escribible; /data/local no lo es
 chmod 1777 "$P/dev/shm" "$P/dev/shm/.sysv" 2>/dev/null || true
 
 # Recuadros: el ancho se mide en la terminal real cada vez que se dibuja (tput/stty; 60 si no hay).
@@ -39,11 +40,22 @@ caja_sup() {
 }
 caja_med() { printf '%b├%s┤\e[0m\n' "$1" "$(_rep $(($(_ancho) - 2)))"; }
 caja_inf() { printf '%b└%s┘\e[0m\n' "$1" "$(_rep $(($(_ancho) - 2)))"; }
+# una fila del recuadro con el texto ya formateado (sin plegar)
+_fila() {
+    _n=$(($(_ancho) - 2 - $(_vis "$2"))); [ "$_n" -ge 0 ] || _n=0
+    printf '%b│\e[0m%s%*s%b│\e[0m\n' "$1" "$2" "$_n" '' "$1"
+}
+# si el texto no cabe se pliega (sin colores) en varias filas dentro del recuadro
 caja_lin() {
     _c=$1; _f=$2; shift 2
     _b=$(printf "$_f" "$@")
-    _n=$(($(_ancho) - 2 - $(_vis "$_b"))); [ "$_n" -ge 0 ] || _n=0
-    printf '%b│\e[0m%s%*s%b│\e[0m\n' "$_c" "$_b" "$_n" '' "$_c"
+    _w=$(_ancho)
+    if [ "$(_vis "$_b")" -le $((_w - 2)) ]; then
+        _fila "$_c" "$_b"
+    else
+        printf '%s' "$_b" | sed "s/$(printf '\033')\[[0-9;]*m//g; s/^ *//" | fmt -w $((_w - 6)) |
+            while IFS= read -r _l; do _fila "$_c" "  $_l"; done
+    fi
 }
 
 # Limpiar pantalla y mostrar banner

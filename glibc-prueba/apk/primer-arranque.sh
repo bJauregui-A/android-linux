@@ -37,11 +37,22 @@ caja_sup() {
 }
 caja_med() { printf '%b├%s┤\e[0m\n' "$1" "$(_rep $(($(_ancho) - 2)))"; }
 caja_inf() { printf '%b└%s┘\e[0m\n' "$1" "$(_rep $(($(_ancho) - 2)))"; }
+# una fila del recuadro con el texto ya formateado (sin plegar)
+_fila() {
+    _n=$(($(_ancho) - 2 - $(_vis "$2"))); [ "$_n" -ge 0 ] || _n=0
+    printf '%b│\e[0m%s%*s%b│\e[0m\n' "$1" "$2" "$_n" '' "$1"
+}
+# si el texto no cabe se pliega (sin colores) en varias filas dentro del recuadro
 caja_lin() {
     _c=$1; _f=$2; shift 2
     _b=$(printf "$_f" "$@")
-    _n=$(($(_ancho) - 2 - $(_vis "$_b"))); [ "$_n" -ge 0 ] || _n=0
-    printf '%b│\e[0m%s%*s%b│\e[0m\n' "$_c" "$_b" "$_n" '' "$_c"
+    _w=$(_ancho)
+    if [ "$(_vis "$_b")" -le $((_w - 2)) ]; then
+        _fila "$_c" "$_b"
+    else
+        printf '%s' "$_b" | sed "s/$(printf '\033')\[[0-9;]*m//g; s/^ *//" | fmt -w $((_w - 6)) |
+            while IFS= read -r _l; do _fila "$_c" "  $_l"; done
+    fi
 }
 
 # Funciones de estilo

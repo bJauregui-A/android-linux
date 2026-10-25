@@ -889,3 +889,4 @@ Cierre de pendientes (2026-10-25):
 - `armar.sh`: `$Z` se define antes de la rama de Debian. Capa/base/APK `sdk36Debug` regeneradas; **sin instalar** (pendiente desde el PC) y B04 (terminal Debian por libldp.so) sin probar.
 - Pacman vuelto al estado previo a Holo: `bootstrap.py` idéntico al del commit 69c84a8 (sin HoldPkg, `IgnorePkg = glibc`, `SigLevel` de la plantilla). Base/APK regeneradas, sin instalar.
 - Fix: `_ancho()` moría bajo `set -e` cuando `tput` no existe en Android (el instalador cerraba tras el banner). Ahora `|| _a=`; probado en el sh del teléfono con `set -e`.
+- Fix: caja_lin pliega con fmt el texto que no cabe en el ancho real; instalar.sh exporta TMPDIR=$P/tmp (mksh no podía crear el temporal de los heredocs en /data/local: 'Permission denied' tras extraer).
