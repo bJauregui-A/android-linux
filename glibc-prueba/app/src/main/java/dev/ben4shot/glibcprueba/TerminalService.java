@@ -40,6 +40,8 @@ public class TerminalService extends Service implements TerminalSessionClient {
     static final String CERRAR_SESION = "dev.ben4shot.glibcprueba.CERRAR_SESION";
     static final String CERRAR_INSTANCIA = "dev.ben4shot.glibcprueba.CERRAR_INSTANCIA";
     static final String EXTRA_INSTANCIA_ID = "instancia_id";
+    // Solo depuración (B29): lo manda ReceptorPruebas, que existe únicamente en src/debug.
+    static final String EJECUTAR_PRUEBA = "dev.ben4shot.glibcprueba.EJECUTAR_PRUEBA";
 
     public static class SesionInstancia {
         public final String id;
@@ -149,11 +151,81 @@ public class TerminalService extends Service implements TerminalSessionClient {
             if (REAJUSTAR_PANTALLA.equals(accion)) {
                 reajustarPantalla();
             }
+            if (EJECUTAR_PRUEBA.equals(accion)) {
+                if (BuildConfig.DEBUG) {
+                    ejecutarPrueba(intent.getStringExtra("id"), intent.getStringExtra("instancia"),
+                            intent.getStringExtra("script"), intent.getIntExtra("limite", 300));
+                } else {
+                    Log.w(TAG, "EJECUTAR_PRUEBA ignorada: no es una compilación de depuración");
+                }
+            }
         }
         actualizarNotificacion();
         RedManager.actualizar(this);
         RedManager.sincronizarIpsActivas(this, sesiones.keySet());
         return START_NOT_STICKY;
+    }
+
+    // --- pruebas desde el PC (B29, solo depuración) ---
+
+    private static final java.util.Set<String> pruebasActivas = ConcurrentHashMap.newKeySet();
+
+    // Corre `bash <script>` en la instancia, con su entorno completo y el seccomp real de la
+    // app. Deja en files/pruebas/<id>/: salida.log, estado y, al final, codigo.
+    private void ejecutarPrueba(String id, String instancia, String script, int limite) {
+        if (id == null || !id.matches("[a-z0-9-]+") || !pruebasActivas.add(id)) {
+            Log.w(TAG, "prueba ignorada (id inválido o repetido): " + id);
+            return;
+        }
+        final File dir = new File(getFilesDir(), "pruebas/" + id);
+        new Thread(() -> {
+            int codigo = 2;
+            String estado = "terminado";
+            try {
+                dir.mkdirs();
+                for (String f : new String[]{"codigo", "salida.log"}) new File(dir, f).delete();
+                escribirPrueba(dir, "estado", "corriendo");
+                File raiz = instancia == null ? null : SistemaLinux.raiz(this, instancia);
+                if (raiz == null || !raiz.isDirectory() || !instancia.matches("[A-Za-z0-9_.-]+")) {
+                    estado = "error: instancia";
+                } else if (script == null || !script.startsWith("/")
+                        || !new File(raiz, script.substring(1)).isFile()) {
+                    estado = "error: script";
+                } else {
+                    int tope = limite > 0 ? limite : 300;
+                    // timeout mata a todo el grupo (sleep, hijos) y devuelve 124.
+                    ProcessBuilder pb = linuxPara(instancia, "/usr/bin/timeout", "-k", "2",
+                            String.valueOf(tope), "/usr/bin/bash", script);
+                    pb.redirectErrorStream(true);
+                    pb.redirectOutput(new File(dir, "salida.log"));
+                    Process p = pb.start();
+                    if (!p.waitFor(tope + 10, java.util.concurrent.TimeUnit.SECONDS)) {
+                        p.destroyForcibly();
+                        codigo = 124;
+                        estado = "limite";
+                    } else {
+                        codigo = p.exitValue();
+                        if (codigo == 124) estado = "limite";
+                    }
+                }
+            } catch (Exception e) {
+                estado = "error: " + e.getMessage();
+                codigo = 2;
+            }
+            escribirPrueba(dir, "estado", estado);
+            escribirPrueba(dir, "codigo", String.valueOf(codigo)); // al final: la PC espera este archivo
+            pruebasActivas.remove(id);
+            if (pruebasActivas.isEmpty()) terminarSiNoQuedaNada();
+        }, "prueba-" + id).start();
+    }
+
+    private static void escribirPrueba(File dir, String nombre, String texto) {
+        try {
+            java.nio.file.Files.write(new File(dir, nombre).toPath(),
+                    (texto + "\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } catch (java.io.IOException e) {
+            Log.w(TAG, "no pude escribir " + nombre + ": " + e.getMessage());
+        }
     }
 
     void actualizarNotificacion() {

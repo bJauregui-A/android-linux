@@ -1,0 +1,17 @@
+# Autoprueba B29 (verde), 2026-10-25
+OK    A1
+OK    A2
+OK    A3
+./autoprueba.sh: línea 19: aviso: sustitución de orden: se ignora byte nulo en la entrada
+OK    A4
+OK    A5
+OK    A5d
+OK    A6
+OK    A6 tiempo (6s)
+OK    A6 sin proceso
+OK    A7
+OK    A8
+OK    A9
+OK    C1 el foco no cambió
+---
+AUTOPRUEBA: VERDE

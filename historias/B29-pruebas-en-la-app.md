@@ -78,7 +78,7 @@ Documentar en `NOTAS.md` cuál de las dos funcionó.
 | # | Script de caso | Esperado |
 |---|---|---|
 | A1 | `echo hola` | imprime `hola`, código 0 |
-| A2 | `exit 3` | código 3 |
+| A2 | `exit 7` | código 7 (no 3: ese es el de "no llegó a la app") |
 | A3 | `echo a; echo b >&2; echo c` | `a`, `b`, `c` en ese orden |
 | A4 | `cat /proc/self/attr/current; grep Seccomp /proc/self/status` | contexto `untrusted_app` y `Seccomp: 2` (**es el contexto de la app**) |
 | A5 | `cat /etc/os-release; echo $GLIBC_PREFIX` | el os-release de **esa** instancia y su prefijo (probar con una Arch y una Debian) |

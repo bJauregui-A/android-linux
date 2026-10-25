@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Solo en compilaciones de depuración (B29). El permiso DUMP lo tiene el
+             usuario shell (adb) y no puede obtenerlo otra app: solo adb lo dispara. -->
+        <receiver
+            android:name=".ReceptorPruebas"
+            android:exported="true"
+            android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="dev.ben4shot.glibcprueba.PRUEBA" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>
