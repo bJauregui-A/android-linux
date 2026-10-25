@@ -7,6 +7,8 @@ final class AsignacionIps {
     private AsignacionIps() {}
 
     static String primeraLibre(Collection<String> ipsOcupadas) {
-        return "10.0.0.2";
+        int n = 2;
+        while (ipsOcupadas.contains("10.0.0." + n)) n++;
+        return "10.0.0." + n;
     }
 }
