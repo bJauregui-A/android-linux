@@ -47,4 +47,12 @@ final class AsignacionIps {
         }
         return limpias;
     }
+
+    static Map<String, String> completar(String cidr, Map<String, String> asignaciones, Collection<String> registradas) {
+        Map<String, String> completas = new LinkedHashMap<>(asignaciones);
+        for (String id : registradas) {
+            if (!completas.containsKey(id)) completas.put(id, primeraLibre(cidr, completas.values()));
+        }
+        return completas;
+    }
 }

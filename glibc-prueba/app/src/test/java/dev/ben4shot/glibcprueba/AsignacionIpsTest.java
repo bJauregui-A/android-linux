@@ -72,4 +72,20 @@ public class AsignacionIpsTest {
                     () -> AsignacionIps.primeraLibre(cidr, Collections.<String>emptyList()));
         }
     }
+
+    @Test
+    public void completarLeDaLaPrimeraLibreALaInstanciaSinIp() {
+        Map<String, String> asignaciones = new LinkedHashMap<>();
+        asignaciones.put("t-1725", "10.0.0.3");
+        asignaciones.put("debian_console-17094", "10.0.0.5");
+
+        Map<String, String> completas = AsignacionIps.completar("10.0.0.0/24", asignaciones,
+                Arrays.asList("arch-principal", "t-1725", "debian_console-17094"));
+
+        Map<String, String> esperadas = new LinkedHashMap<>();
+        esperadas.put("t-1725", "10.0.0.3");
+        esperadas.put("debian_console-17094", "10.0.0.5");
+        esperadas.put("arch-principal", "10.0.0.2");
+        assertEquals(esperadas, completas);
+    }
 }
