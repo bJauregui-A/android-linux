@@ -64,4 +64,12 @@ public class AsignacionIpsTest {
         assertThrows(IllegalStateException.class,
                 () -> AsignacionIps.primeraLibre("10.0.0.0/24", ocupadas));
     }
+
+    @Test
+    public void primeraLibreConCidrInvalidoFalla() {
+        for (String cidr : new String[] {"basura", "10.0.0.0", "10.0.0.0/31", "10.0.0.0/32"}) {
+            assertThrows(cidr, IllegalArgumentException.class,
+                    () -> AsignacionIps.primeraLibre(cidr, Collections.<String>emptyList()));
+        }
+    }
 }

@@ -9,6 +9,7 @@ final class AsignacionIps {
     private AsignacionIps() {}
 
     static String primeraLibre(String cidr, Collection<String> ipsOcupadas) {
+        validarCidr(cidr);
         String[] partes = cidr.split("/");
         long mascara = (0xFFFFFFFFL << (32 - Integer.parseInt(partes[1]))) & 0xFFFFFFFFL;
         long red = aNumero(partes[0]) & mascara;
@@ -17,6 +18,16 @@ final class AsignacionIps {
         while (ipsOcupadas.contains(aTexto(n))) n++;
         if (n >= difusion) throw new IllegalStateException("Subred llena: " + cidr);
         return aTexto(n);
+    }
+
+    private static void validarCidr(String cidr) {
+        boolean valido = cidr.matches("(\\d{1,3}\\.){3}\\d{1,3}/\\d{1,2}");
+        if (valido) {
+            String[] partes = cidr.split("/");
+            for (String octeto : partes[0].split("\\.")) valido &= Integer.parseInt(octeto) <= 255;
+            valido &= Integer.parseInt(partes[1]) <= 30;
+        }
+        if (!valido) throw new IllegalArgumentException("CIDR inválido: " + cidr);
     }
 
     private static long aNumero(String ip) {
