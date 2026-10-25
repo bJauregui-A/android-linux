@@ -577,23 +577,6 @@ public class WaylandActivity extends Activity {
             }
         });
 
-        // Manija de arrastre a la izquierda
-        TextView handle = new TextView(this);
-        handle.setText("⠿");
-        handle.setTextSize(16);
-        handle.setTextColor(0xff94a3b8);
-        handle.setGravity(Gravity.CENTER);
-        handle.setPadding(dp(12), dp(8), dp(12), dp(8));
-        handle.setBackground(crearFondo(0xff16202c, 0x33ffffff, dp(8), dp(1)));
-        LinearLayout.LayoutParams lpH = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        lpH.rightMargin = dp(4);
-        marcoBarra.addView(handle, lpH);
-        handle.setOnTouchListener((v, ev) -> {
-            marcoBarra.onTouchEvent(ev);
-            return true;
-        });
-
         // Centro: Scroll horizontal con las teclas
         HorizontalScrollView scroll = new HorizontalScrollView(this);
         scroll.setFillViewport(false);
