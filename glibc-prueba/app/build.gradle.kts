@@ -95,4 +95,5 @@ tasks.named("preBuild").configure { dependsOn(packageSessionLayer) }
 
 dependencies {
     implementation("com.github.termux.termux-app:terminal-view:v0.118.3")
+    testImplementation("junit:junit:4.13.2")
 }
