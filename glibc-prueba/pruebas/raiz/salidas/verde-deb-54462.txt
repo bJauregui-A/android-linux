@@ -1,0 +1,18 @@
+# Verde: libc 0025 instalada + libldp.so 0025, deb-54462, vía scripts/probar-en-telefono.sh (2026-10-25)
+OK    C13 cd / && ls ..
+OK    C14 ls /..
+OK    C14 ls /../..
+OK    C15 cat /../dev-6918/etc/passwd (existe en dev-6918)
+OK    C16 cd -P /.. && pwd
+OK    C17 realpath /../..
+OK    C17 readlink -f /lib/..
+SALTA C18 (sin python3)
+OK    C19 estático: ls /..
+OK    C19 estático: ls /../..
+OK    C21 estático: execveat(/, ../usr/bin/echo)
+SALTA C21 (sin python3)
+OK    C20 /proc/self/.. sale a /proc
+SALTA C20b /sdcard/.. (se compara en rz.sh, vieja vs nueva)
+---
+TELEFONO: OK
+código: 0

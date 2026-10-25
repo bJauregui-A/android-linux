@@ -1,0 +1,90 @@
+# Rojo: libc y cargador anteriores a 0025, dev-6918, run-as (2026-10-25 ~07:05, sin C19/C21)
+FALLA C13 cd / && ls ..
+      obtenido: arch-arm64
+deb-54462
+debian-arm64
+dev-6918
+dev-94692
+g-86443
+h-39198
+p-34314
+      esperado: bin
+boot
+dev
+etc
+hola.sh
+home
+lib
+mnt
+opt
+proc
+root
+run
+sbin
+srv
+sys
+tmp
+usr
+var
+FALLA C14 ls /..
+      obtenido: arch-arm64
+deb-54462
+debian-arm64
+dev-6918
+dev-94692
+g-86443
+h-39198
+p-34314
+      esperado: bin
+boot
+dev
+etc
+hola.sh
+home
+lib
+mnt
+opt
+proc
+root
+run
+sbin
+srv
+sys
+tmp
+usr
+var
+FALLA C14 ls /../..
+      obtenido: instancias
+ips
+prueba-libc
+      esperado: bin
+boot
+dev
+etc
+hola.sh
+home
+lib
+mnt
+opt
+proc
+root
+run
+sbin
+srv
+sys
+tmp
+usr
+var
+FALLA C15 cat /../deb-54462/etc/os-release (existe en deb-54462)
+      obtenido: 
+      esperado: No such file or directory
+OK    C16 cd -P /.. && pwd
+OK    C17 realpath /../..
+OK    C17 readlink -f /lib/..
+FALLA C18 os.listdir('/..')
+      obtenido: False
+      esperado: True
+SALTA C19 (definir ESTATICO=<binario estático con 'ls'>)
+OK    C20 /proc/self/.. y /sdcard/..
+---
+TELEFONO: 5 FALLAS

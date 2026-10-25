@@ -1,0 +1,18 @@
+# Verde: libc 0025 instalada + libldp.so 0025, dev-6918, vía scripts/probar-en-telefono.sh (2026-10-25)
+OK    C13 cd / && ls ..
+OK    C14 ls /..
+OK    C14 ls /../..
+OK    C15 cat /../deb-54462/etc/os-release (existe en deb-54462)
+OK    C16 cd -P /.. && pwd
+OK    C17 realpath /../..
+OK    C17 readlink -f /lib/..
+OK    C18 os.listdir('/..')
+OK    C19 estático: ls /..
+OK    C19 estático: ls /../..
+OK    C21 estático: execveat(/, ../usr/bin/echo)
+OK    C21 execveat(dirfd=/, ../usr/bin/echo)
+OK    C20 /proc/self/.. sale a /proc
+SALTA C20b /sdcard/.. (se compara en rz.sh, vieja vs nueva)
+---
+TELEFONO: OK
+código: 0
