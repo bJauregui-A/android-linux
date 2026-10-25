@@ -67,7 +67,8 @@ iniciar() {
         kill -0 "$pid" 2>/dev/null || break
         case "$espera" in
             proceso) listo=1 ;;
-            ssh) (echo >/dev/tcp/127.0.0.1/8022) >/dev/null 2>&1 && listo=1 ;;
+            # dentro de la instancia /dev/tcp/127.0.0.1:8022 no conecta aunque sshd escuche; con -e basta su log
+            ssh) grep -q 'Server listening' "$log" 2>/dev/null && listo=1 ;;
             pipewire) pw-cli info 0 >/dev/null 2>&1 && listo=1 ;;
             pulse) pactl info >/dev/null 2>&1 && listo=1 ;;
         esac
