@@ -16,8 +16,8 @@ chmod 1777 "$P/dev/shm" "$P/dev/shm/.sysv" 2>/dev/null || true
 
 # Recuadros: el ancho se mide en la terminal real cada vez que se dibuja (tput/stty; 60 si no hay).
 _ancho() {
-    _a=$(tput cols 2>/dev/null)
-    case $_a in ''|*[!0-9]*) _a=$(stty size 2>/dev/null | cut -d' ' -f2) ;; esac
+    _a=$(tput cols 2>/dev/null) || _a=
+    case $_a in ''|*[!0-9]*) _a=$(stty size 2>/dev/null | cut -d' ' -f2) || _a= ;; esac
     case $_a in ''|*[!0-9]*) _a=60 ;; esac
     [ "$_a" -ge 20 ] || _a=20
     echo "$_a"
