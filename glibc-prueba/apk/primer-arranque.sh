@@ -791,8 +791,10 @@ activar_sudo() {
         [ -f "$f" ] && chmod 4755 "$f"
     done
     mkdir -p /etc/sudoers.d
-    printf '%s ALL=(ALL:ALL) ALL\n' "$N" > "$SUDOERS.nuevo" && chmod 440 "$SUDOERS.nuevo" \
-        && { [ -z "${LD_LIBRARY_PATH:-}" ] || echo 'Defaults env_keep += "LD_LIBRARY_PATH"' >> "$SUDOERS.nuevo"; } \
+    # Todo el contenido antes del chmod 440: después el usuario ya no puede escribirlo.
+    { printf '%s ALL=(ALL:ALL) ALL\n' "$N"
+      [ -z "${LD_LIBRARY_PATH:-}" ] || echo 'Defaults env_keep += "LD_LIBRARY_PATH"'; } > "$SUDOERS.nuevo" \
+        && chmod 440 "$SUDOERS.nuevo" \
         && GLIBC_FAKEROOT=1 chown root:root "$SUDOERS.nuevo" && mv -f "$SUDOERS.nuevo" "$SUDOERS" || return 1
     grep -q 'fakeroot de la glibc propia\|GLIBC_FAKEROOT=1' /usr/local/bin/sudo 2>/dev/null && rm -f /usr/local/bin/sudo
     unset -f sudo

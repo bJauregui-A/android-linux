@@ -105,25 +105,17 @@ final class SistemaLinux {
         SharedPreferences p = preferencias(c);
         String raw = p.getString(PREF_INSTANCIAS, null);
         List<Instancia> lista = new ArrayList<>();
-        if (raw != null) {
-            if (!raw.trim().isEmpty()) {
-                try {
-                    JSONArray arr = new JSONArray(raw);
-                    for (int i = 0; i < arr.length(); i++) {
-                        lista.add(Instancia.deJson(arr.getJSONObject(i)));
-                    }
-                } catch (JSONException e) {
-                    Log.e(TAG, "error leyendo instancias json", e);
+        // Primera ejecución: lista vacía; las instancias se crean solo con crearInstancia (id e IP propios).
+        if (raw != null && !raw.trim().isEmpty()) {
+            try {
+                JSONArray arr = new JSONArray(raw);
+                for (int i = 0; i < arr.length(); i++) {
+                    lista.add(Instancia.deJson(arr.getJSONObject(i)));
                 }
+            } catch (JSONException e) {
+                Log.e(TAG, "error leyendo instancias json", e);
             }
-            return lista;
         }
-        // Primera ejecución limpia
-        Instancia principal = new Instancia("arch-principal", "Arch Linux (Principal)",
-                ARCH, "instancias/arch-principal", System.currentTimeMillis());
-        lista.add(principal);
-        guardarInstancias(c, lista);
-        p.edit().putString(PREF_ACTIVA, principal.id).apply();
         return lista;
     }
 

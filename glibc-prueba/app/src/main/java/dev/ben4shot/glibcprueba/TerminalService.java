@@ -524,7 +524,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
         File prefijo = instalacion.raiz(this);
         if (!instalacion.instalada(this) && instalacion.instaladorDisponible(this)) {
             new File(prefijo, "etc").mkdirs();
-            List<String> env = entorno(instalacion, prefijo);
+            List<String> env = entorno(id, instalacion, prefijo);
             try {
                 String[] args = instalacion.comandoInstalacion(this, env);
                 sesionInst.instalando = true;
@@ -540,7 +540,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
                     new String[]{"sh", "-c", "echo '" + msg + "'"}, new String[0], 2000, this);
         }
         String cargador = instalacion.cargador(this);
-        List<String> env = entorno(instalacion, prefijo);
+        List<String> env = entorno(id, instalacion, prefijo);
         agregarBusSesion(env, prefijo);
         String[] args = instalacion.comandoTerminal(this);
         Log.i(TAG, "sesión Linux [" + id + "]: " + instalacion.id() + ", cargador " + cargador + ", prefijo " + prefijo);
@@ -582,7 +582,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
         File prefijo = instalacion.raiz(this);
         if (!BuildConfig.DIAGNOSTICO && !CapaSesion.actualizar(this, instalacion, prefijo)) return;
         String cargador = instalacion.cargador(this);
-        sesionInst.entornoEscritorio = entorno(instalacion, prefijo);
+        sesionInst.entornoEscritorio = entorno(idActual, instalacion, prefijo);
         String sesion = instalacion.supervisorSesion();
         boolean supervisor = !BuildConfig.DIAGNOSTICO && new File(prefijo, sesion).isFile();
         if (!BuildConfig.DIAGNOSTICO && !supervisor) {
@@ -763,7 +763,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
         pb.directory(new File(raiz, instalacion.home(raiz)));
         pb.environment().clear();
         SesionInstancia s = sesiones.get(id);
-        List<String> env = (s != null && s.entornoEscritorio != null) ? s.entornoEscritorio : entorno(instalacion, raiz);
+        List<String> env = (s != null && s.entornoEscritorio != null) ? s.entornoEscritorio : entorno(id, instalacion, raiz);
         for (String v : env) {
             int i = v.indexOf('=');
             if (i > 0) pb.environment().put(v.substring(0, i), v.substring(i + 1));
@@ -798,8 +798,9 @@ public class TerminalService extends Service implements TerminalSessionClient {
         }
     }
 
-    // Entorno del host Android común a las instalaciones Linux.
-    private List<String> entorno(AdaptadorInstalacion instalacion, File prefijo) {
+    // Entorno del host Android común a las instalaciones Linux. ID es la instancia (no la distro:
+    // instalacion.id() es "arch-arm64"/"debian-arm64" y dejaba la IP virtual en instancias/<distro>).
+    private List<String> entorno(String id, AdaptadorInstalacion instalacion, File prefijo) {
         // La raíz de algunas instancias Arch queda en 555: ni 'sudo mkdir /x' (que solo falsea el uid) podía crear en /.
         prefijo.setWritable(true, true);
         String homeLinux = instalacion.home(prefijo);
@@ -808,11 +809,11 @@ public class TerminalService extends Service implements TerminalSessionClient {
         instalacion.preparar(this, prefijo);
         escribirResolvConf(prefijo);
         try {
-            String vip = RedManager.ipParaInstancia(this, instalacion.id());
-            RedManager.escribirVirtualIp(this, instalacion.id(), vip);
-            RedManager.registrarIpActiva(this, instalacion.id());
+            String vip = RedManager.ipParaInstancia(this, id);
+            RedManager.escribirVirtualIp(this, id, vip);
+            RedManager.registrarIpActiva(this, id);
         } catch (Exception ignorada) { }
-        Wayland.iniciarPara(this, instalacion.id());
+        Wayland.iniciarPara(this, id);
         Abrir.iniciar(this);
         Notificar.iniciar(this);
         PuertoAdb.iniciar(this);
