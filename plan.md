@@ -11,6 +11,11 @@ Estado de partida (teléfono, 25-oct): carpeta suelta `files/instancias/arch-arm
    - cuando creo una instancia nueva,
    - entonces recibe 10.0.0.3 (la primera libre desde .2; la .1 es el gateway) y queda guardada.
 
+1b. **La IP sale de la subred, no de un prefijo fijo**
+   - Dado que la subred por defecto (`sub_default` en la lista de subredes) es `192.168.5.0/24`, o un `/16`,
+   - cuando creo una instancia,
+   - entonces recibe la primera IP libre de ese rango: el gateway es el primer host, las instancias empiezan en el segundo y nunca se usa la de difusión. El rango se lee de la subred de la asignación (`subredId` → `cidr`), no de la preferencia vieja `subred_virtual`.
+
 2. **Las demás conservan su IP**
    - Dado tres instancias con .2, .3 y .4,
    - cuando borro la de .3,
@@ -48,8 +53,10 @@ Estado de partida (teléfono, 25-oct): carpeta suelta `files/instancias/arch-arm
 ## Fuera de alcance
 
 - Editar a mano la IP de una instancia desde la tabla de red (solo se muestra la asignada).
-- Varias subredes; todo sigue en la subred por defecto (10.0.0.0/24).
-- Qué pasa al llenarse la subred (más de 253 instancias).
+- Elegir la subred al crear una instancia: toda instancia nueva va a `sub_default`, con el CIDR que tenga.
+- Mover instancias entre subredes, o reasignar IP al cambiar el CIDR de una subred.
+- Quitar la preferencia vieja `subred_virtual` (`obtenerSubred`/`setSubred`); solo deja de usarse para repartir IP.
+- Manejar una subred llena (mensaje, otra subred...); solo se garantiza que no se devuelva una IP inválida.
 - Reintentar si el borrado de una carpeta falla a la mitad.
 - Restos fuera de `files/instancias/` (por ejemplo `files/ips/`, que ya se reescribe en cada sesión).
 
@@ -57,19 +64,25 @@ Estado de partida (teléfono, 25-oct): carpeta suelta `files/instancias/arch-arm
 
 Pruebas unitarias de JVM en `app/src/test/` (JUnit 4, ya en la caché de gradle), sobre lógica sin `Context` ni `org.json`. Se corren con `./gradlew testSdk36DebugUnitTest`.
 
-1. Primera IP libre sin asignaciones → `10.0.0.2`.
-2. Primera IP libre con .2 y .4 ocupadas → `10.0.0.3` (rellena huecos).
-3. Primera IP libre nunca devuelve la `.1` (gateway).
-4. Asignaciones limpias: dadas asignaciones e instancias registradas, quita las de instancias inexistentes y conserva las demás con su IP.
+Hechas (pruebas 1–3 con commit; la 4 en verde, falta su commit). Al pasar a CIDR, `primeraLibre` recibe la subred como primer argumento y las pruebas 1–3 usan `"10.0.0.0/24"` sin cambiar lo que comprueban.
+
+1. ✅ Primera IP libre sin asignaciones → `10.0.0.2`.
+2. ✅ Primera IP libre con .2 y .4 ocupadas → `10.0.0.3` (rellena huecos).
+3. ✅ Primera IP libre nunca devuelve la `.1` (gateway).
+4. ✅ Asignaciones limpias: dadas asignaciones e instancias registradas, quita las de instancias inexistentes y conserva las demás con su IP.
+4a. Subred `/16`: con `10.0.0.0/16` y ocupadas de `10.0.0.2` a `10.0.0.255` → `10.0.1.0` (en un /16, `.0` y `.255` del tercer octeto son hosts válidos).
+4b. Otro rango: con `192.168.5.0/24` y nada ocupado → `192.168.5.2`.
+4c. Subred llena: con un `/24` y de `.2` a `.254` ocupadas → error explícito; nunca devuelve la `.255` (difusión).
+4d. CIDR inválido (texto mal formado, o `/31` y `/32`, que no dejan hosts para instancias) → error.
 5. Asignaciones completas: a una instancia registrada sin IP le da la primera libre, sin mover las que ya tienen.
 6. Carpetas sueltas: dadas las carpetas de `files/instancias/` y las rutas registradas, devuelve solo las que sobran.
 7. Carpetas sueltas con lista no confiable (no se pudo leer) → ninguna.
 
 Integración en el código de la app (sin prueba unitaria; se comprueba en el teléfono):
 
-8. `crearInstancia`: registrar antes de crear la carpeta y asignar con la primera IP libre (reemplaza la IP por posición de `ipParaInstancia`).
+8. `crearInstancia`: registrar antes de crear la carpeta y asignar con la primera IP libre del CIDR de `sub_default` (reemplaza la IP por posición de `ipParaInstancia`).
 9. `eliminarInstancia`: quitar su asignación y reescribir `/etc/hosts`.
-10. Al abrir la app: limpiar y completar asignaciones (pruebas 4 y 5) y reescribir `/etc/hosts`.
+10. Al abrir la app: limpiar y completar asignaciones (pruebas 4 y 5) y reescribir `/etc/hosts`, con el gateway calculado del CIDR en vez del `10.0.0.1` escrito a mano en `actualizarHosts`.
 11. Paso mínimo de interfaz: en la lista de instancias, el diálogo de carpetas sueltas con el tamaño, Sí/No.
 
 Comprobación final en el teléfono: `arch-principal` queda con 10.0.0.2 guardada, desaparece `debian-63996` del `/etc/hosts`, `t-1725` y `debian_console` conservan .3 y .4 (ya sin choque), y la app ofrece borrar `arch-arm64`.
