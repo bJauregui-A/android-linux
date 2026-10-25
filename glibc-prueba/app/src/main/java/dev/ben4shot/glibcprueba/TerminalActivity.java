@@ -40,6 +40,8 @@ public class TerminalActivity extends Activity implements TerminalViewClient {
     private int tamLetra;
     private boolean ctrl, alt;
     private TextView botonCtrl, botonAlt;
+    private LinearLayout contenedor;
+    private View barraTeclas;
 
     private final ServiceConnection conexion = new ServiceConnection() {
         @Override
@@ -77,7 +79,9 @@ public class TerminalActivity extends Activity implements TerminalViewClient {
         raiz.setOrientation(LinearLayout.VERTICAL);
         raiz.setBackgroundColor(Color.BLACK);
         raiz.addView(vista, new LinearLayout.LayoutParams(-1, 0, 1));
-        raiz.addView(filaTeclas(), new LinearLayout.LayoutParams(-1, -2));
+        contenedor = raiz;
+        barraTeclas = filaTeclas();
+        raiz.addView(barraTeclas, new LinearLayout.LayoutParams(-1, -2));
         // edge-to-edge (targetSdk 35+): dejar espacio a las barras del sistema y al teclado virtual (IME)
         raiz.setOnApplyWindowInsetsListener((v, insets) -> {
             android.graphics.Insets i = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.ime());
@@ -98,6 +102,10 @@ public class TerminalActivity extends Activity implements TerminalViewClient {
         setIntent(intent);
         String id = intent.getStringExtra(TerminalService.EXTRA_INSTANCIA_ID);
         if (id != null) instanciaId = id;
+        // La barra dice CANCELAR durante la instalación: rehacerla ahora que terminó.
+        contenedor.removeView(barraTeclas);
+        barraTeclas = filaTeclas();
+        contenedor.addView(barraTeclas, new LinearLayout.LayoutParams(-1, -2));
         if (servicio != null) {
             TerminalSession ses = servicio.sesionPara(instanciaId);
             servicio.setVista(vista, ses);
