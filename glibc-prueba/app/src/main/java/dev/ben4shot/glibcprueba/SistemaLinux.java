@@ -220,17 +220,7 @@ final class SistemaLinux {
         }
         // Eliminar archivos del entorno en segundo plano para no bloquear el hilo de interfaz (evita ANR)
         File dir = new File(c.getFilesDir(), objetivo.rutaRelativa);
-        new Thread(() -> {
-            try {
-                borrarRecursivo(dir);
-                if (dir.exists()) {
-                    String[] cmd = new String[]{"/system/bin/sh", "-c", "chmod -R u+w '" + dir.getAbsolutePath() + "' 2>/dev/null; rm -rf '" + dir.getAbsolutePath() + "'"};
-                    Runtime.getRuntime().exec(cmd).waitFor();
-                }
-            } catch (Exception e) {
-                Log.w(TAG, "error al borrar directorio de instancia", e);
-            }
-        }, "borrar-instancia").start();
+        new Thread(() -> borrarCarpeta(dir), "borrar-instancia").start();
         lista.remove(objetivo);
         guardarInstancias(c, lista);
         RedManager.liberarIp(c, id);
@@ -242,6 +232,42 @@ final class SistemaLinux {
             }
         }
         return true;
+    }
+
+    static void borrarCarpeta(File dir) {
+        try {
+            borrarRecursivo(dir);
+            if (dir.exists()) {
+                String[] cmd = new String[]{"/system/bin/sh", "-c", "chmod -R u+w '" + dir.getAbsolutePath() + "' 2>/dev/null; rm -rf '" + dir.getAbsolutePath() + "'"};
+                Runtime.getRuntime().exec(cmd).waitFor();
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "error al borrar directorio " + dir, e);
+        }
+    }
+
+    /** Carpetas de files/instancias/ sin instancia registrada; vacío si la lista de instancias no se pudo leer. */
+    static List<File> carpetasSueltas(Context c) {
+        List<Instancia> instancias = leerInstancias(c);
+        File[] hijas = new File(c.getFilesDir(), "instancias").listFiles(File::isDirectory);
+        List<File> sueltas = new ArrayList<>();
+        if (instancias == null || hijas == null) return sueltas;
+        List<String> registradas = new ArrayList<>();
+        for (Instancia i : instancias) registradas.add(i.rutaRelativa);
+        List<String> carpetas = new ArrayList<>();
+        for (File f : hijas) carpetas.add("instancias/" + f.getName());
+        for (String ruta : CarpetasInstancias.sueltas(carpetas, registradas)) sueltas.add(new File(c.getFilesDir(), ruta));
+        return sueltas;
+    }
+
+    static long tamano(File f) {
+        if (f.isDirectory() && !java.nio.file.Files.isSymbolicLink(f.toPath())) {
+            long total = 0;
+            File[] hijos = f.listFiles();
+            if (hijos != null) for (File h : hijos) total += tamano(h);
+            return total;
+        }
+        return f.length();
     }
 
     private static void borrarRecursivo(File f) {

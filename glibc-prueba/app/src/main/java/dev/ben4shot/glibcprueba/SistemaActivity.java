@@ -213,6 +213,30 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         actualizarLista();
         iniciarConsola();
         RedManager.actualizar(this);
+        ofrecerBorrarCarpetasSueltas();
+    }
+
+    private void ofrecerBorrarCarpetasSueltas() {
+        new Thread(() -> {
+            List<java.io.File> sueltas = SistemaLinux.carpetasSueltas(this);
+            if (sueltas.isEmpty()) return;
+            long bytes = 0;
+            for (java.io.File f : sueltas) bytes += SistemaLinux.tamano(f);
+            double gb = bytes / (1024.0 * 1024.0 * 1024.0);
+            String tam = gb >= 1 ? String.format(java.util.Locale.US, "%.1f GB", gb)
+                    : String.format(java.util.Locale.US, "%d MB", bytes / (1024 * 1024));
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                new AlertDialog.Builder(this)
+                        .setTitle("Carpetas sobrantes")
+                        .setMessage("Hay " + sueltas.size() + " carpeta(s) de instancias que ya no existen (" + tam + "). ¿Borrarlas?")
+                        .setPositiveButton("Sí", (d, w) -> new Thread(() -> {
+                            for (java.io.File f : sueltas) SistemaLinux.borrarCarpeta(f);
+                        }, "borrar-sueltas").start())
+                        .setNegativeButton("No", null)
+                        .show();
+            });
+        }, "buscar-sueltas").start();
     }
 
     private void mostrarOverlayConsola(boolean mostrar) {
