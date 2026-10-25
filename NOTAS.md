@@ -972,3 +972,16 @@ Material de estudio (2026-10-25, solo PC, no toca el teléfono): `practica/` reo
 
 **Siguiente sesión (81ª):** B27 fase 2: `chown` persistente (xattr), dueño de archivos nuevos según el fsuid, bloqueo de shadow (B18: `st_nlink = 2` en la copia de `linkat` sobre `*.lock`). Criterio: `sudo groupadd prueba`, `sudo useradd -m prueba` y `apt install apache2` en Debian sin error de `ssl-cert`.
 
+
+## Dueño persistente, B27 fase 2 (2026-10-25, 81ª sesión)
+
+**Pedido:** seguir con la fase 2. Parche **`0027-android-dueno-persistente.patch`** (solo `android-path.c`):
+- **`chown`/`fchown`/`fchownat`** con euid virtual 0: ya no se fingen; guardan `uid:gid` en el xattr `user.linux.owner` (`-1` conserva el campo; si coincide con la regla por ubicación se borra el xattr). Un archivo 0444/0555 recibe `+wx` un instante para poder escribir el xattr. Enlaces, fifos y dispositivos no admiten xattr: se da por bueno. Ruta inexistente devuelve su errno. Sin privilegio el kernel decide (EPERM como antes). Fuera de la instancia queda el comportamiento viejo.
+- **Archivos nuevos:** `openat O_CREAT` (solo si no existía), `mkdirat`, `mknodat` escriben el xattr con fsuid/fsgid cuando el proceso **no es el usuario principal** y la regla de esa ubicación difiere. El principal no escribe nada (la regla basta; así no cambia lo ya instalado). **No** se respeta el bit setgid de la carpeta (queda para después).
+- **Cerrojo de shadow (B18):** `link_copy` marca las dos copias (`user.linux.owner = "u:g:L"` y `user.linux.par` = ruta de la otra); `stat`/`statx`/`fstat` dan `st_nlink = 2` si el par existe. Al borrar uno, el otro vuelve a 1 solo (se comprueba en cada stat; solo cuesta en archivos marcados).
+- **Pruebas:** `pruebas/dueno/dentro.sh <instancia>` vía `probar-en-telefono.sh` (chown, 0444, rename, `cp -a`, `install -o`, archivos nuevos de otro usuario, nlink, `groupadd`): **0 fallas en Arch y Debian**; `pruebas/cred/test.sh` 8/8 en las dos. `ls -lR /usr`: Arch 0,55 s, Debian 0,19 s (sin costo extra frente a la fase 1).
+- **Criterio en Debian:** `groupadd`, `useradd -m` (home con 10479:100), `userdel -r`, y `apt-get install apache2` → `dpkg --configure -a` limpio (`/etc/ssl/private` root:ssl-cert 0:103). Tras instalar solo faltó el paquete `hostname` (no es de permisos). Apache se purgó al terminar.
+- **Hallazgos:** (1) `setpriv --reuid --regid` hace `setresuid` antes de `setresgid` y confía en `PR_SET_KEEPCAPS` (capacidades, fase 4); la prueba baja primero el gid. (2) El Debian de la app no trae `www-data` ni demás usuarios de `base-passwd`: B53.
+- **Libc instalada** en `arch_console-47028` y `debian_console-44800` (`instalar-libc-en-instancia.sh`, con respaldo). **APK armada** (`armar.sh` + `assembleSdk36Debug`, hash de `libc.so.6` igual en `base.tgz` y `salida`) pero **sin instalar** (`adb install -r` cierra la app: esperar al usuario).
+
+**Siguiente sesión (82ª):** instalar la APK cuando el usuario lo permita; B27 fase 3 (setuid virtual en `execve` + `sudo` real: `/etc/sudoers`, PAM, retirar el wrapper); B53; `PR_SET_KEEPCAPS` y bit setgid de carpetas si estorban.

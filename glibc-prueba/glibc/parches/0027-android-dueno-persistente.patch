@@ -1,0 +1,456 @@
+--- a/sysdeps/unix/sysv/linux/aarch64/android-path.c
++++ b/sysdeps/unix/sysv/linux/aarch64/android-path.c
+@@ -566,11 +566,11 @@
+   return m != n ? m : strip (buf, n, real_prefix, rlen);
+ }
+ 
+-/* Dueño virtual de los archivos (B27, fase 1, solo lectura).  El kernel
+-   dice que todo es del UID de la app; stat muestra en su lugar lo que dice el
+-   xattr user.linux.owner ("uid:gid") o, si no lo tiene, la regla por
+-   ubicación: el sistema (/usr, /etc, /var...) es de root y lo demás del
+-   usuario principal.  */
++/* Dueño virtual de los archivos (B27).  El kernel dice que todo es del UID de
++   la app; stat muestra en su lugar lo que dice el xattr user.linux.owner
++   ("uid:gid") o, si no lo tiene, la regla por ubicación: el sistema (/usr,
++   /etc, /var...) es de root y lo demás del usuario principal.  chown y los
++   archivos nuevos de otro usuario escriben el xattr (fase 2).  */
+ static int
+ comp_es (const char *c, const char *nombre)
+ {
+@@ -598,11 +598,11 @@
+   return 0;
+ }
+ 
+-/* Dueño virtual de lo que está en DIRFD/PATH ("" = el propio DIRFD).  BUF
+-   es de PATH_MAX.  0 si no es de la instancia o no se pudo saber.  */
+-static int
+-dueno_virtual (int dirfd, const char *path, int nofollow, char *buf,
+-	       unsigned int *uid, unsigned int *gid)
++/* Ruta real absoluta de lo que está en DIRFD/PATH ("" = el propio DIRFD) en
++   BUF, que es de PATH_MAX.  Devuelve su largo, o 0 si no es de la instancia
++   o no se pudo saber.  */
++static size_t
++resolver_real (int dirfd, const char *path, char *buf)
+ {
+   size_t n;
+   if (path != NULL && path[0] == '/')
+@@ -614,62 +614,50 @@
+       if (n >= PATH_MAX)
+ 	return 0;
+       mcopy (buf, path, n + 1);
++      return n;
+     }
++  const char *rel = path != NULL ? path : "";
++  char link[40];
++  if (dirfd == AT_FDCWD)
++    mcopy (link, "/proc/self/cwd", 15);
+   else
+     {
+-      const char *rel = path != NULL ? path : "";
+-      char link[40];
+-      if (dirfd == AT_FDCWD)
+-	mcopy (link, "/proc/self/cwd", 15);
+-      else
+-	{
+-	  mcopy (link, "/proc/self/fd/", 14);
+-	  *utoa (link + 14, (unsigned int) dirfd) = '\0';
+-	}
+-      long int r = RAW (__NR_readlinkat, AT_FDCWD, link, buf, PATH_MAX - 2);
+-      if (r <= 0 || buf[0] != '/')
+-	return 0;
+-      n = r;
+-      size_t m = slen (rel);
+-      if (m > 0)
+-	{
+-	  if (n + 1 + m >= PATH_MAX)
+-	    return 0;
+-	  if (buf[n - 1] != '/')
+-	    buf[n++] = '/';
+-	  mcopy (buf + n, rel, m);
+-	  n += m;
+-	}
+-      buf[n] = '\0';
++      mcopy (link, "/proc/self/fd/", 14);
++      *utoa (link + 14, (unsigned int) dirfd) = '\0';
+     }
+-
+-  char val[48];
+-  long int r = RAW (nofollow ? __NR_lgetxattr : __NR_getxattr, buf,
+-		    "user.linux.owner", val, sizeof val - 1);
+-  if (r > 0)
++  long int r = RAW (__NR_readlinkat, AT_FDCWD, link, buf, PATH_MAX - 2);
++  if (r <= 0 || buf[0] != '/')
++    return 0;
++  n = r;
++  size_t m = slen (rel);
++  if (m > 0)
+     {
+-      unsigned long int v[2] = { 0, 0 };
+-      int k = 0, dig = 0;
+-      for (long int i = 0; i < r && k < 2; i++)
+-	if (val[i] >= '0' && val[i] <= '9')
+-	  v[k] = v[k] * 10 + (val[i] - '0'), dig = 1;
+-	else if (val[i] == ':' && dig)
+-	  k++, dig = 0;
+-	else
+-	  break;
+-      if (k == 1 && dig)
+-	{
+-	  *uid = v[0];
+-	  *gid = v[1];
+-	  return 1;
+-	}
++      if (n + 1 + m >= PATH_MAX)
++	return 0;
++      if (buf[n - 1] != '/')
++	buf[n++] = '/';
++      mcopy (buf + n, rel, m);
++      n += m;
+     }
++  buf[n] = '\0';
++  return n;
++}
+ 
+-  size_t m = unxlat (buf, n);
+-  if (m == n)
+-    return 0;			/* fuera de la instancia */
+-  buf[m] = '\0';
+-  if (zona_root (buf))
++/* Dueño según la ubicación (BUF: ruta real, N bytes).  0 si está fuera de la
++   instancia.  */
++static int
++regla_dueno (const char *buf, size_t n, unsigned int *uid, unsigned int *gid)
++{
++  size_t k;
++  if (plen != 0 && n >= plen && starts (buf, PREFIX, plen)
++      && (n == plen || buf[plen] == '/'))
++    k = plen;
++  else if (rlen != 0 && n >= rlen && starts (buf, real_prefix, rlen)
++	   && (n == rlen || buf[rlen] == '/'))
++    k = rlen;
++  else
++    return 0;
++  if (zona_root (n == k ? "/" : buf + k))
+     *uid = *gid = 0;
+   else
+     {
+@@ -679,11 +667,71 @@
+   return 1;
+ }
+ 
+-/* Cambia st_uid/st_gid de un stat ya hecho.  MODE: st_mode (solo archivos,
+-   carpetas y enlaces).  */
++/* xattr user.linux.owner de BUF: "uid:gid", o "uid:gid:L" si el archivo es
++   una de las dos copias que dejó linkat (ver marcar_par).  */
++static int
++leer_dueno (const char *buf, int nofollow, unsigned int *uid,
++	    unsigned int *gid, int *par)
++{
++  char val[48];
++  long int r = RAW (nofollow ? __NR_lgetxattr : __NR_getxattr, buf,
++		    "user.linux.owner", val, sizeof val - 1);
++  if (r <= 0)
++    return 0;
++  unsigned long int v[2] = { 0, 0 };
++  int k = 0, dig = 0, l = 0;
++  for (long int i = 0; i < r; i++)
++    if (val[i] >= '0' && val[i] <= '9' && k < 2)
++      v[k] = v[k] * 10 + (val[i] - '0'), dig = 1;
++    else if (val[i] == ':' && dig && k < 2)
++      k++, dig = 0;
++    else if (val[i] == 'L' && k == 2)
++      l = 1;
++    else
++      break;
++  if (k < 1 || (k == 1 && !dig))
++    return 0;
++  *uid = v[0];
++  *gid = v[1];
++  *par = l;
++  return 1;
++}
++
++/* Dueño virtual de lo que está en DIRFD/PATH.  BUF es de PATH_MAX.  0 si no
++   es de la instancia o no se pudo saber.  PAR: es una copia de linkat.  */
++static int
++dueno_virtual (int dirfd, const char *path, int nofollow, char *buf,
++	       unsigned int *uid, unsigned int *gid, int *par)
++{
++  size_t n = resolver_real (dirfd, path, buf);
++  if (n == 0)
++    return 0;
++  *par = 0;
++  if (leer_dueno (buf, nofollow, uid, gid, par))
++    return 1;
++  return regla_dueno (buf, n, uid, gid);
++}
++
++/* La otra copia de linkat (xattr user.linux.par) todavía existe: el archivo
++   cuenta dos enlaces, como espera shadow para su cerrojo.  */
++static __attribute__ ((noinline)) int
++par_existe (const char *buf, int nofollow)
++{
++  char par[PATH_MAX];
++  long int r = RAW (nofollow ? __NR_lgetxattr : __NR_getxattr, buf,
++		    "user.linux.par", par, PATH_MAX - 1);
++  if (r <= 0)
++    return 0;
++  par[r] = '\0';
++  return RAW (__NR_faccessat, AT_FDCWD, par, F_OK) == 0;
++}
++
++/* Cambia st_uid/st_gid (y st_nlink) de un stat ya hecho.  MODE: st_mode
++   (solo archivos, carpetas y enlaces).  */
+ static void
+ stat_virtual (int dirfd, const char *path, int nofollow, unsigned int mode,
+-	      unsigned int *puid, unsigned int *pgid, char *buf)
++	      unsigned int *puid, unsigned int *pgid, unsigned int *pnlink,
++	      char *buf)
+ {
+   cred_asegurar ();
+   unsigned int tipo = mode & 0170000;
+@@ -691,13 +739,153 @@
+       || (tipo != 0100000 && tipo != 0040000 && tipo != 0120000))
+     return;
+   unsigned int u, g;
+-  if (dueno_virtual (dirfd, path, nofollow, buf, &u, &g))
++  int par;
++  if (dueno_virtual (dirfd, path, nofollow, buf, &u, &g, &par))
+     {
+       *puid = u;
+       *pgid = g;
++      if (par && tipo == 0100000 && *pnlink == 1 && par_existe (buf, nofollow))
++	*pnlink = 2;
+     }
+ }
+ 
++/* Escribe (VAL) o borra (VAL == NULL) un xattr.  Si el archivo no deja
++   escribir (0444, 0555), se le da permiso un instante.  */
++static long int
++xattr_escribir (const char *ruta, int nofollow, const char *nombre,
++		const char *val, size_t len)
++{
++  long int r;
++  if (val != NULL)
++    r = RAW (nofollow ? __NR_lsetxattr : __NR_setxattr, ruta, nombre, val,
++	     len, 0);
++  else
++    r = RAW (nofollow ? __NR_lremovexattr : __NR_removexattr, ruta, nombre);
++  if (r != -EACCES)
++    return r;
++  struct stat st;
++  if (RAW (__NR_newfstatat, AT_FDCWD, ruta, &st, AT_SYMLINK_NOFOLLOW) != 0
++      || S_ISLNK (st.st_mode))
++    return r;
++  unsigned int modo = st.st_mode & 07777;
++  if (RAW (__NR_fchmodat, AT_FDCWD, ruta, modo | 0300) != 0)
++    return r;
++  if (val != NULL)
++    r = RAW (__NR_setxattr, ruta, nombre, val, len, 0);
++  else
++    r = RAW (__NR_removexattr, ruta, nombre);
++  RAW (__NR_fchmodat, AT_FDCWD, ruta, modo);
++  return r;
++}
++
++/* Guarda el dueño virtual de RUTA (N bytes): en el xattr, o ninguno si
++   coincide con la regla por ubicación.  PAR marca la copia de linkat.
++   Devuelve el errno de ruta inexistente; los demás fallos (enlaces, fifos y
++   dispositivos no admiten xattr) se dan por buenos.  */
++static long int
++fijar_dueno (const char *ruta, size_t n, int nofollow, unsigned int u,
++	     unsigned int g, int par)
++{
++  unsigned int ru, rg;
++  long int r;
++  if (!par && regla_dueno (ruta, n, &ru, &rg) && ru == u && rg == g)
++    r = xattr_escribir (ruta, nofollow, "user.linux.owner", NULL, 0);
++  else
++    {
++      char val[48];
++      char *q = utoa (val, u);
++      *q++ = ':';
++      q = utoa (q, g);
++      if (par)
++	{
++	  *q++ = ':';
++	  *q++ = 'L';
++	}
++      *q = '\0';
++      r = xattr_escribir (ruta, nofollow, "user.linux.owner", val, q - val);
++    }
++  return (r == -ENOENT || r == -ENOTDIR || r == -ELOOP || r == -ENAMETOOLONG
++	  || r == -EBADF) ? r : 0;
++}
++
++/* chown/fchown/fchownat de root virtual: guarda el dueño en el xattr.  PATH
++   ya viene traducida ("" con DIRFD = el descriptor).  -1 en UID o GID deja
++   ese campo como estaba.  Devuelve 1 en *HECHO si se atendió (si no, la
++   ruta es de fuera de la instancia).  */
++static __attribute__ ((noinline)) long int
++chown_virtual (int dirfd, const char *path, long int uid, long int gid,
++	       long int flags, int *hecho)
++{
++  char buf[PATH_MAX];
++  unsigned int u, g;
++  int par;
++  int nofollow = (flags & AT_SYMLINK_NOFOLLOW) != 0;
++  *hecho = 0;
++  size_t n = resolver_real (dirfd, path, buf);
++  if (n == 0 || !dueno_virtual (dirfd, path, nofollow, buf, &u, &g, &par))
++    return 0;
++  *hecho = 1;
++  if ((unsigned int) uid != 0xffffffffu)
++    u = uid;
++  if ((unsigned int) gid != 0xffffffffu)
++    g = gid;
++  return fijar_dueno (buf, n, nofollow, u, g, par);
++}
++
++/* El proceso crea archivos con un dueño distinto del usuario principal: los
++   nuevos llevan su dueño en el xattr (si no, la regla por ubicación decide,
++   y para el usuario principal basta con ella).  */
++static inline int
++creador_distinto (void)
++{
++  cred_asegurar ();
++  return cu.f != base_uid || cg.f != base_gid;
++}
++
++/* DIRFD/PATH acaba de crearse: dueño = fsuid/fsgid del proceso.  */
++static __attribute__ ((noinline)) void
++dueno_nuevo (int dirfd, const char *path, int nofollow)
++{
++  char buf[PATH_MAX];
++  unsigned int ru, rg;
++  size_t n = resolver_real (dirfd, path, buf);
++  if (n == 0 || !regla_dueno (buf, n, &ru, &rg)
++      || (ru == cu.f && rg == cg.f))
++    return;
++  fijar_dueno (buf, n, nofollow, cu.f, cg.f, 0);
++}
++
++/* openat con O_CREAT de un proceso con fsuid distinto del principal.  */
++static __attribute__ ((noinline)) long int
++abrir_creando (long int a0, long int a1, long int a2, long int a3)
++{
++  struct stat st;
++  int existia = RAW (__NR_newfstatat, a0, a1, &st, AT_SYMLINK_NOFOLLOW) == 0;
++  long int r = raw (__NR_openat, a0, a1, a2, a3, 0, 0);
++  if (r >= 0 && !existia)
++    dueno_nuevo (r, "", 0);
++  return r;
++}
++
++/* linkat copió el archivo (Android no deja enlaces duros): las dos copias
++   quedan marcadas con el dueño, "L" y el nombre de la otra (user.linux.par),
++   y stat informa st_nlink = 2 mientras existan las dos.  */
++static __attribute__ ((noinline)) void
++marcar_par (int olddfd, const char *old, int newdfd, const char *new)
++{
++  char pa[PATH_MAX], pb[PATH_MAX];
++  unsigned int u, g;
++  int par;
++  size_t na = resolver_real (olddfd, old, pa);
++  size_t nb = resolver_real (newdfd, new, pb);
++  if (na == 0 || nb == 0 || !dueno_virtual (olddfd, old, 0, pa, &u, &g, &par))
++    return;
++  fijar_dueno (pa, na, 0, u, g, 1);
++  fijar_dueno (pb, nb, 0, u, g, 1);
++  xattr_escribir (pa, 0, "user.linux.par", pb, nb);
++  xattr_escribir (pb, 0, "user.linux.par", pa, na);
++}
++
+ /* Si PATH es el enlace exe del propio proceso (/proc/self/exe,
+    /proc/thread-self/exe o /proc/<pid>/exe), la ruta del programa.  El kernel
+    apunta al cargador (libldp.so), y los programas que buscan sus archivos a
+@@ -987,6 +1175,8 @@
+   RAW (__NR_close, out);
+   if (r < 0)
+     RAW (__NR_unlinkat, newdfd, new, 0);
++  else
++    marcar_par (olddfd, old, newdfd, new);
+   return r;
+ }
+ 
+@@ -2577,6 +2767,13 @@
+       }
+     case __NR_fchown:
+       {
++	int hecho = 0;
++	if (state == 2 && root_virtual ())
++	  {
++	    long int r = chown_virtual ((int) a0, "", a1, a2, 0, &hecho);
++	    if (hecho)
++	      return r;
++	  }
+ 	long int r = raw (nr, a0, a1, a2, a3, a4, a5);
+ 	return r == -EPERM && root_virtual () ? 0 : r;
+       }
+@@ -2649,6 +2846,8 @@
+ 	  if (r != 1)
+ 	    return r;
+ 	}
++      if ((a2 & (O_CREAT | O_TMPFILE)) == O_CREAT && creador_distinto ())
++	return abrir_creando (a0, a1, a2, a3);
+       break;
+     case __NR_newfstatat:
+       {
+@@ -2658,7 +2857,7 @@
+ 	  {
+ 	    struct stat *st = (struct stat *) a2;
+ 	    stat_virtual ((int) a0, (const char *) a1, a3 & AT_SYMLINK_NOFOLLOW,
+-			  st->st_mode, &st->st_uid, &st->st_gid, b2);
++			  st->st_mode, &st->st_uid, &st->st_gid, &st->st_nlink, b2);
+ 	  }
+ 	return r;
+       }
+@@ -2671,7 +2870,7 @@
+ 	    /* struct statx: stx_uid en 20, stx_gid en 24, stx_mode (16 bits) en 28.  */
+ 	    unsigned int *sx = (unsigned int *) a4;
+ 	    stat_virtual ((int) a0, (const char *) a1, a2 & AT_SYMLINK_NOFOLLOW,
+-			  sx[7] & 0xffff, &sx[5], &sx[6], b2);
++			  sx[7] & 0xffff, &sx[5], &sx[6], &sx[4], b2);
+ 	  }
+ 	return r;
+       }
+@@ -2682,14 +2881,21 @@
+ 	  {
+ 	    struct stat *st = (struct stat *) a1;
+ 	    stat_virtual ((int) a0, "", 0, st->st_mode, &st->st_uid,
+-			  &st->st_gid, b2);
++			  &st->st_gid, &st->st_nlink, b2);
+ 	  }
+ 	return r;
+       }
+-    case __NR_openat2:
+-    case __NR_faccessat:
+     case __NR_mkdirat:
+     case __NR_mknodat:
++      {
++	XLD (a0, a1, b1);
++	long int r = raw (nr, a0, a1, a2, a3, a4, a5);
++	if (r == 0 && creador_distinto ())
++	  dueno_nuevo ((int) a0, (const char *) a1, 1);
++	return r;
++      }
++    case __NR_openat2:
++    case __NR_faccessat:
+     case __NR_unlinkat:
+     case __NR_fchmodat:
+     case __NR_utimensat:
+@@ -2703,6 +2909,14 @@
+     case __NR_fchownat:
+       {
+ 	XLD (a0, a1, b1);
++	if (root_virtual ())
++	  {
++	    int hecho;
++	    long int r = chown_virtual ((int) a0, (const char *) a1, a2, a3, a4,
++					&hecho);
++	    if (hecho)
++	      return r;
++	  }
+ 	long int r = raw (nr, a0, a1, a2, a3, a4, a5);
+ 	return r == -EPERM && root_virtual () ? 0 : r;
+       }

@@ -1,6 +1,6 @@
 # Usuarios y permisos virtuales
 
-Diseño para que los programas Linux **oficiales** (`sudo`, `useradd`, `groupadd`, `passwd`, `chown`, `sshd`, apache, postgres...) funcionen como en un PC dentro de la app, sin wrappers. Ítem B27 de `BACKLOG.md`. Escrito el 2026-10-25. **Fase 1 implementada** (80ª sesión, parche 0026); el resto sigue en diseño.
+Diseño para que los programas Linux **oficiales** (`sudo`, `useradd`, `groupadd`, `passwd`, `chown`, `sshd`, apache, postgres...) funcionen como en un PC dentro de la app, sin wrappers. Ítem B27 de `BACKLOG.md`. Escrito el 2026-10-25. **Fases 1 y 2 implementadas** (80ª y 81ª sesión, parches 0026 y 0027); el resto sigue en diseño.
 
 ## Por qué
 
@@ -95,7 +95,7 @@ Al verse como root, los programas toman caminos privilegiados que antes no tomab
 ## Fases
 
 1. ✅ **Credenciales virtuales** (pieza 1) + `stat` con dueño virtual y regla por ubicación (pieza 2, solo lectura). Criterio: `id`, `ls -l /etc/shadow` (root), `ls -l ~` (usuario) y `sudo -u nobody id` con el wrapper actual.
-2. **`chown` persistente + archivos nuevos + bloqueo de shadow** (piezas 2 y 5). Criterio: `sudo groupadd prueba`, `sudo useradd -m prueba`, y `apt install apache2` en Debian sin error de `ssl-cert` (`dpkg --configure -a` limpio).
+2. ✅ **`chown` persistente + archivos nuevos + bloqueo de shadow** (piezas 2 y 5). Criterio: `sudo groupadd prueba`, `sudo useradd -m prueba`, y `apt install apache2` en Debian sin error de `ssl-cert` (`dpkg --configure -a` limpio).
 3. **setuid virtual + `sudo` real** (pieza 3). Criterio: retirar el wrapper; `sudo -l`, `sudo -i`, contraseña por PAM, `/etc/sudoers` respetado.
 4. **Operaciones de root** (pieza 4, sobre todo `chroot` virtual con B26). Criterio: `sshd` iniciado por el supervisor como root, con privsep; apache con workers como `www-data` (`ps` o `/proc` sintético).
 5. **Chequeo de permisos** (pieza 6) y **pantalla de usuarios en la app**.
@@ -109,6 +109,13 @@ Cada fase: libc nueva probada aislada antes de instalarla (AGENTS.md), con respa
 - **`GLIBC_CRED`** = `r,e,s,f:r,e,s,f:grupos`, reinyectada en cada `execve`. `GLIBC_FAKEROOT=1` recién pedido da todo en 0; no se puede falsificar por entorno.
 - "Privilegiado" (equivale a CAP_SETUID/SETGID/CHOWN) = euid virtual 0.
 - Trampa de compilación: las syscalls de `syscalls.list` (`getgroups`, `setfsuid`...) necesitan un `.c` propio y borrar `build/sysd-syscalls` y los `.o` viejos.
+
+## Decisiones tomadas en la fase 2 (81ª)
+
+- Solo escribe xattr de dueño en archivos nuevos quien **no** es el usuario principal (fsuid/fsgid distintos de los de la app) y cuando la regla de la ubicación no coincide.
+- El cerrojo de shadow se resuelve con `user.linux.owner = "u:g:L"` + `user.linux.par` (ruta de la otra copia); `st_nlink = 2` mientras el par exista (sin hook en `unlink`).
+- Pendiente de la fase: bit setgid de carpetas (el grupo no se hereda); `chown` no limpia setuid/setgid del archivo.
+- Para `setpriv` y similares (cambian uid antes que gid) hace falta `PR_SET_KEEPCAPS` (fase 4).
 
 ## Preguntas abiertas
 
