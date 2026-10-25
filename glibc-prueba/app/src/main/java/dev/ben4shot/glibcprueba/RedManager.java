@@ -191,6 +191,13 @@ public final class RedManager {
         escribirVirtualIp(c, instanciaId, ip.trim());
     }
 
+    /** Quita la IP de una instancia borrada; llamar con la instancia ya fuera de la lista, para no reescribir su carpeta. */
+    public static synchronized void liberarIp(Context c, String instanciaId) {
+        Map<String, AsignacionIp> map = listarAsignaciones(c);
+        if (map.remove(instanciaId) != null) guardarAsignaciones(c, map);
+        actualizarHosts(c);
+    }
+
     public static void escribirVirtualIp(Context c, String instanciaId, String ipCompleta) {
         try {
             java.io.File raiz = SistemaLinux.raiz(c, instanciaId);

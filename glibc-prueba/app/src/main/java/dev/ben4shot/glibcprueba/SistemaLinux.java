@@ -226,6 +226,7 @@ final class SistemaLinux {
         }, "borrar-instancia").start();
         lista.remove(objetivo);
         guardarInstancias(c, lista);
+        RedManager.liberarIp(c, id);
         if (id.equals(preferencias(c).getString(PREF_ACTIVA, ""))) {
             if (!lista.isEmpty()) {
                 seleccionarInstancia(c, lista.get(0).id);
