@@ -55,6 +55,7 @@ Estado de partida (teléfono, 25-oct): carpeta suelta `files/instancias/arch-arm
 - Editar a mano la IP de una instancia desde la tabla de red (solo se muestra la asignada).
 - Elegir la subred al crear una instancia: toda instancia nueva va a `sub_default`, con el CIDR que tenga.
 - Mover instancias entre subredes, o reasignar IP al cambiar el CIDR de una subred.
+- Tabla de red común por subred (`files/red/<subred>/hosts`), gateway calculado del CIDR, aislamiento de nombres entre subredes y `nss-myhostname`: B86.
 - Quitar la preferencia vieja `subred_virtual` (`obtenerSubred`/`setSubred`); solo deja de usarse para repartir IP.
 - Manejar una subred llena (mensaje, otra subred...); solo se garantiza que no se devuelva una IP inválida.
 - Reintentar si el borrado de una carpeta falla a la mitad.
@@ -82,7 +83,7 @@ Integración en el código de la app (sin prueba unitaria; se comprueba en el te
 
 8. `crearInstancia`: registrar antes de crear la carpeta y asignar con la primera IP libre del CIDR de `sub_default` (reemplaza la IP por posición de `ipParaInstancia`).
 9. `eliminarInstancia`: quitar su asignación y reescribir `/etc/hosts`.
-10. Al abrir la app: limpiar y completar asignaciones (pruebas 4 y 5) y reescribir `/etc/hosts`, con el gateway calculado del CIDR en vez del `10.0.0.1` escrito a mano en `actualizarHosts`.
+10. Al abrir la app: limpiar y completar asignaciones (pruebas 4 y 5) y reescribir `/etc/hosts` con el mecanismo actual. El gateway calculado del CIDR, la tabla por subred y dejar de escribir en cada instancia pasan a B86.
 11. Paso mínimo de interfaz: en la lista de instancias, el diálogo de carpetas sueltas con el tamaño, Sí/No.
 
 Comprobación final en el teléfono: `arch-principal` queda con 10.0.0.2 guardada, desaparece `debian-63996` del `/etc/hosts`, `t-1725` y `debian_console` conservan .3 y .4 (ya sin choque), y la app ofrece borrar `arch-arm64`.

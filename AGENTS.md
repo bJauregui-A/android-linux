@@ -9,7 +9,7 @@ Proyecto: Linux real (Arch ARM y Debian con glibc propia, sin root ni proot) den
 ## Cómo se trabaja (TDD)
 - `/backlog`: definir o ajustar historias en `backlog.md` (cortas, una sola cosa cada una, sin detalle técnico).
 - `/story <ID>`: refinar una historia → `plan.md` (criterios Dado/Cuando/Entonces, fuera de alcance, lista de pruebas en orden).
-- `/pair`: implementar `plan.md` en rojo → verde → refactor, **una prueba a la vez**, esperando revisión entre pasos. No modificar ni borrar una prueba para que pase.
+- `/pair`: implementar `plan.md` en rojo → verde → refactor → commit, un ciclo completo por prueba sin pedir permiso entre pasos. Se detiene solo ante decisiones que el plan no resuelve, pruebas que no fallan como se esperaba, el fin de un grupo de pruebas o antes de tocar el teléfono. No modificar ni borrar una prueba para que pase.
 - Al cerrar una historia: commit, borrar la historia de `backlog.md` y `plan.md`. La historia queda en `git log`; no hay bitácora aparte.
 - Las pruebas viven en `glibc-prueba/pruebas/<tema>/`. Las de syscalls se corren dentro de la app con `scripts/probar-en-telefono.sh`; `adb shell` y `run-as` no tienen el seccomp de la app.
 
