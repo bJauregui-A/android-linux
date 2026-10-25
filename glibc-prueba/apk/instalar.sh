@@ -14,30 +14,62 @@ LOG=$P/tmp/instalacion-extraccion.log
 mkdir -p "$P/tmp" "$P/dev/shm/.sysv" 2>/dev/null || true
 chmod 1777 "$P/dev/shm" "$P/dev/shm/.sysv" 2>/dev/null || true
 
+# Recuadros: el ancho se mide en la terminal real cada vez que se dibuja (tput/stty; 60 si no hay).
+_ancho() {
+    _a=$(tput cols 2>/dev/null)
+    case $_a in ''|*[!0-9]*) _a=$(stty size 2>/dev/null | cut -d' ' -f2) ;; esac
+    case $_a in ''|*[!0-9]*) _a=60 ;; esac
+    [ "$_a" -ge 20 ] || _a=20
+    echo "$_a"
+}
+# columnas visibles de un texto: sin secuencias de color y sin bytes de continuación UTF-8
+_vis() { printf '%s' "$1" | sed "s/$(printf '\033')\[[0-9;]*m//g" | LC_ALL=C tr -d '\200-\277' | wc -c; }
+_rep() { [ "$1" -gt 0 ] && printf '%*s' "$1" '' | sed 's/ /─/g'; }
+# caja_sup COLOR [TITULO_FMT args...] · caja_med COLOR · caja_inf COLOR · caja_lin COLOR FMT args...
+caja_sup() {
+    _c=$1; _w=$(_ancho)
+    if [ -n "$2" ]; then
+        _f=$2; shift 2
+        _t=$(printf "$_f" "$@")
+        _n=$((_w - 5 - $(_vis "$_t"))); [ "$_n" -ge 1 ] || _n=1
+        printf '%b┌─ %s %s┐\e[0m\n' "$_c" "$_t" "$(_rep $_n)"
+    else
+        printf '%b┌%s┐\e[0m\n' "$_c" "$(_rep $((_w - 2)))"
+    fi
+}
+caja_med() { printf '%b├%s┤\e[0m\n' "$1" "$(_rep $(($(_ancho) - 2)))"; }
+caja_inf() { printf '%b└%s┘\e[0m\n' "$1" "$(_rep $(($(_ancho) - 2)))"; }
+caja_lin() {
+    _c=$1; _f=$2; shift 2
+    _b=$(printf "$_f" "$@")
+    _n=$(($(_ancho) - 2 - $(_vis "$_b"))); [ "$_n" -ge 0 ] || _n=0
+    printf '%b│\e[0m%s%*s%b│\e[0m\n' "$_c" "$_b" "$_n" '' "$_c"
+}
+
 # Limpiar pantalla y mostrar banner
 ESCRITORIO_PREVIO=$(cat "$E/escritorio" "$P/var/lib/arch-android/escritorio" 2>/dev/null | head -n 1 || true)
 printf '\033[2J\033[H'
-printf '\e[1;38;5;141m┌────────────────────────────────────────────────────────────┐\e[0m\n'
+caja_sup '\e[1;38;5;141m'
 if [ "$GLIBC_PKG_BACKEND" = "apt" ]; then
-    printf '\e[1;38;5;141m│\e[0m  \e[1;38;5;51mINSTALADOR DE DEBIAN ARM64\e[0m                                 \e[1;38;5;141m│\e[0m\n'
+    caja_lin '\e[1;38;5;141m' '  \e[1;38;5;51mINSTALADOR DE DEBIAN ARM64\e[0m'
 else
-    printf '\e[1;38;5;141m│\e[0m  \e[1;38;5;51mINSTALADOR DE ARCH LINUX ARM\e[0m                             \e[1;38;5;141m│\e[0m\n'
+    caja_lin '\e[1;38;5;141m' '  \e[1;38;5;51mINSTALADOR DE ARCH LINUX ARM\e[0m'
 fi
 if [ "$ESCRITORIO_PREVIO" = "sin-entorno" ]; then
-    printf '\e[1;38;5;141m│\e[0m  \e[38;5;250mExtracción del sistema base ligero (modo consola/servidor)\e[0m  \e[1;38;5;141m│\e[0m\n'
+    caja_lin '\e[1;38;5;141m' '  \e[38;5;250mExtracción del sistema base ligero (modo consola/servidor)\e[0m'
 else
-    printf '\e[1;38;5;141m│\e[0m  \e[38;5;250mExtracción del sistema base y capa acelerada por GPU\e[0m     \e[1;38;5;141m│\e[0m\n'
+    caja_lin '\e[1;38;5;141m' '  \e[38;5;250mExtracción del sistema base y capa acelerada por GPU\e[0m'
 fi
-printf '\e[1;38;5;141m└────────────────────────────────────────────────────────────┘\e[0m\n'
+caja_inf '\e[1;38;5;141m'
 
 # Comprobar espacio antes de escribir cientos de MB
 LIBRES=$(df -Pk "$P" | awk 'END {print $4}')
 case "$LIBRES" in ''|*[!0-9]*) LIBRES=0;; esac
 LIBRES_MIB=$((LIBRES / 1024))
 
-printf '\n\e[1;38;5;111m┌─ [1/2] Verificación de Almacenamiento ─────────────────────┐\e[0m\n'
-printf '\e[1;38;5;111m│\e[0m  Espacio libre disponible: \e[1;38;5;48m%d MiB\e[0m (Recomendado: 3072 MiB)\n' "$LIBRES_MIB"
-printf '\e[1;38;5;111m└────────────────────────────────────────────────────────────┘\e[0m\n'
+echo; caja_sup '\e[1;38;5;111m' '[1/2] Verificación de Almacenamiento'
+caja_lin '\e[1;38;5;111m' '  Espacio libre disponible: \e[1;38;5;48m%d MiB\e[0m (Recomendado: 3072 MiB)' "$LIBRES_MIB"
+caja_inf '\e[1;38;5;111m'
 
 if [ "$LIBRES" -lt 3145728 ]; then
     printf '\e[1;38;5;214mHay menos de 3 GiB libres. ¿Continuar de todos modos? [s/N]: \e[0m'
@@ -68,7 +100,7 @@ extraer() { # extraer <offset> <largo> <qué> [tar options...]
 mkdir -p "$E"
 touch "$E/instalando"
 if [ ! -e "$E/extraido" ]; then
-    printf '\n\e[1;38;5;111m┌─ [2/2] Extracción de Capas y Binarios Nativos ─────────────┐\e[0m\n'
+    echo; caja_sup '\e[1;38;5;111m' '[2/2] Extracción de Capas y Binarios Nativos'
     if [ "$GLIBC_PKG_BACKEND" = "apt" ]; then
         extraer "$BASE_OFF" "$BASE_LEN" "Debian ARM64 base (dpkg/apt + glibc propia)"
     else
@@ -98,11 +130,7 @@ if [ ! -e "$E/extraido" ]; then
     # Normalizar permisos de directorios base a 755 para evitar warnings de pacman
     find "$P/usr" "$P/etc" "$P/var" "$P/opt" -type d -exec chmod 755 {} + 2>/dev/null || true
     mkdir -p "$P/etc/services.d" "$P/usr/lib/systemd/system" 2>/dev/null || true
-    if [ -f "$P/etc/pacman.conf" ] && grep -q '\[holo-core\]' "$P/etc/pacman.conf" 2>/dev/null; then
-        sed -i '/\[holo-core\]/{n;s/^#\?SigLevel\s*=.*/SigLevel = Never/}' "$P/etc/pacman.conf" 2>/dev/null || true
-        sed -i '/\[holo-extra\]/{n;s/^#\?SigLevel\s*=.*/SigLevel = Never/}' "$P/etc/pacman.conf" 2>/dev/null || true
-    fi
-    printf '\e[1;38;5;111m└────────────────────────────────────────────────────────────┘\e[0m\n'
+    caja_inf '\e[1;38;5;111m'
 fi
 
 # Enlaces de compatibilidad para bash y binarios base entre /bin y /usr/bin

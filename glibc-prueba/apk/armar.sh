@@ -14,6 +14,7 @@ PREFIJO=/data/user/0/$PKG/files/archlinux
 OUT=trabajo/assets-$V
 [ -f trabajo/compilados.tar ] || { echo "falta trabajo/compilados.tar: apk/traer-compilados.sh"; exit 1; }
 mkdir -p $OUT
+Z=gzip; command -v pigz > /dev/null && Z=pigz
 python3 scripts/bootstrap.py --prefix $PREFIJO --glibc glibc/salida/usr/lib --out trabajo/base-$V.tar pacman
 if [ ! -f "$OUT/base-debian.tgz" ] || [ "${REHACER_DEBIAN:-0}" = "1" ]; then
     echo "==> Generando base de Debian ARM64..."
@@ -22,7 +23,6 @@ if [ ! -f "$OUT/base-debian.tgz" ] || [ "${REHACER_DEBIAN:-0}" = "1" ]; then
     rm trabajo/base-debian-$V.tar
 fi
 python3 apk/capa.py --prefix $PREFIJO --compilados trabajo/compilados.tar --out trabajo/capa-$V.tar
-Z=gzip; command -v pigz > /dev/null && Z=pigz
 $Z -9 -c trabajo/base-$V.tar > $OUT/base.tgz
 $Z -9 -c trabajo/capa-$V.tar > $OUT/capa.tgz
 rm trabajo/base-$V.tar trabajo/capa-$V.tar

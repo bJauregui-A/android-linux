@@ -58,7 +58,7 @@ final class AdaptadorDebianArm64 implements AdaptadorInstalacion {
     @Override public String perfilRescate() { return "openbox"; }
 
     @Override public String[] comandoTerminal(Context contexto) {
-        return new String[]{"bash", "-l"};
+        return new String[]{"libldp.so", "/usr/bin/bash", "-l"};
     }
 
     @Override public boolean instalada(Context contexto) {

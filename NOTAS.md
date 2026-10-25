@@ -882,3 +882,8 @@ Limpiar pruebas: `adb uninstall dev.ben4shot.glibcprueba.sdk28`, `adb uninstall 
    - Intérprete para inicializar instancias aisladas desde `Dockerfile` (`FROM`, `ENV`, `COPY`, `RUN`, etc.) o tarballs OCI.
 2. **Pruebas de compilación nativa y utilidades en Debian ARM64:**
    - Probar `apt-get update` y `apt-get install` de paquetes de desarrollo (build-essential, git, python3) dentro del entorno Debian sin root.
+
+Cierre de pendientes (2026-10-25):
+- Retirado SteamOS Holo: borrados `apk/pacman-xfer`, XferCommand/repos holo en `bootstrap.py`, bloques muertos en `instalar.sh`/`primer-arranque.sh`; Arch ARM vuelve a verificar firmas (sin `SigLevel = Never` global).
+- Recuadros del instalador: nuevas funciones `caja_sup/med/inf/lin` (en `instalar.sh` y `primer-arranque.sh`) miden el ancho real con `tput cols`/`stty size` (60 de respaldo) y rellenan según el texto visible.
+- `armar.sh`: `$Z` se define antes de la rama de Debian. Capa/base/APK `sdk36Debug` regeneradas; **sin instalar** (pendiente desde el PC) y B04 (terminal Debian por libldp.so) sin probar.

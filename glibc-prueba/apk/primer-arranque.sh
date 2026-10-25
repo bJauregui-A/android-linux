@@ -12,6 +12,38 @@ mkdir -p "$E" 2>/dev/null || true
 [ -e /var/lib/arch-android ] || ln -sfn linux-android /var/lib/arch-android 2>/dev/null || true
 [ -e /usr/local/share/arch-android ] || ln -sfn linux-android /usr/local/share/arch-android 2>/dev/null || true
 
+# Recuadros: el ancho se mide en la terminal real cada vez que se dibuja (tput/stty; 60 si no hay).
+_ancho() {
+    _a=$(tput cols 2>/dev/null)
+    case $_a in ''|*[!0-9]*) _a=$(stty size 2>/dev/null | cut -d' ' -f2) ;; esac
+    case $_a in ''|*[!0-9]*) _a=60 ;; esac
+    [ "$_a" -ge 20 ] || _a=20
+    echo "$_a"
+}
+# columnas visibles de un texto: sin secuencias de color y sin bytes de continuación UTF-8
+_vis() { printf '%s' "$1" | sed "s/$(printf '\033')\[[0-9;]*m//g" | LC_ALL=C tr -d '\200-\277' | wc -c; }
+_rep() { [ "$1" -gt 0 ] && printf '%*s' "$1" '' | sed 's/ /─/g'; }
+# caja_sup COLOR [TITULO_FMT args...] · caja_med COLOR · caja_inf COLOR · caja_lin COLOR FMT args...
+caja_sup() {
+    _c=$1; _w=$(_ancho)
+    if [ -n "$2" ]; then
+        _f=$2; shift 2
+        _t=$(printf "$_f" "$@")
+        _n=$((_w - 5 - $(_vis "$_t"))); [ "$_n" -ge 1 ] || _n=1
+        printf '%b┌─ %s %s┐\e[0m\n' "$_c" "$_t" "$(_rep $_n)"
+    else
+        printf '%b┌%s┐\e[0m\n' "$_c" "$(_rep $((_w - 2)))"
+    fi
+}
+caja_med() { printf '%b├%s┤\e[0m\n' "$1" "$(_rep $(($(_ancho) - 2)))"; }
+caja_inf() { printf '%b└%s┘\e[0m\n' "$1" "$(_rep $(($(_ancho) - 2)))"; }
+caja_lin() {
+    _c=$1; _f=$2; shift 2
+    _b=$(printf "$_f" "$@")
+    _n=$(($(_ancho) - 2 - $(_vis "$_b"))); [ "$_n" -ge 0 ] || _n=0
+    printf '%b│\e[0m%s%*s%b│\e[0m\n' "$_c" "$_b" "$_n" '' "$_c"
+}
+
 # Funciones de estilo
 paso() {
     printf '\n\e[1;38;5;81m┌─ %s\e[0m\n' "$*"
@@ -66,11 +98,6 @@ backend_limpiar_lock() {
 backend_iniciar_base() {
     case "$BACKEND" in
         pacman)
-            # Asegurar SigLevel = Never para repositorios de SteamOS sin firmas individuales
-            if grep -q '\[holo-core\]' /etc/pacman.conf 2>/dev/null; then
-                sed -i '/\[holo-core\]/{n;s/^#\?SigLevel\s*=.*/SigLevel = Never/}' /etc/pacman.conf 2>/dev/null || true
-                sed -i '/\[holo-extra\]/{n;s/^#\?SigLevel\s*=.*/SigLevel = Never/}' /etc/pacman.conf 2>/dev/null || true
-            fi
             paso "Inicializando base y paquetes de sistema (pacman)"
             for d in /var/lib/pacman/local/*/; do
                 [ -f "$d/install" ] || continue
@@ -172,21 +199,21 @@ lista() { for g; do f=$(resolver_archivo "paquetes-$g"); [ -n "$f" ] && sed 's/#
 
 # Banner de inicio
 printf '\033[2J\033[H'
-printf '\e[1;38;5;141m┌────────────────────────────────────────────────────────────┐\e[0m\n'
-printf '\e[1;38;5;141m│\e[0m  \e[1;38;5;51mCONFIGURACIÓN INICIAL DEL ENTORNO\e[0m                         \e[1;38;5;141m│\e[0m\n'
-printf '\e[1;38;5;141m│\e[0m  \e[38;5;250mAsistente interactivo de personalización e instalación\e[0m    \e[1;38;5;141m│\e[0m\n'
-printf '\e[1;38;5;141m└────────────────────────────────────────────────────────────┘\e[0m\n'
+caja_sup '\e[1;38;5;141m'
+caja_lin '\e[1;38;5;141m' '  \e[1;38;5;51mCONFIGURACIÓN INICIAL DEL ENTORNO\e[0m'
+caja_lin '\e[1;38;5;141m' '  \e[38;5;250mAsistente interactivo de personalización e instalación\e[0m'
+caja_inf '\e[1;38;5;141m'
 
 # Usuario y nombre del dispositivo (una vez; quedan en $E/usuario y /etc/hostname, que la app
 # y la glibc leen: TerminalService.usuario(), uname/gethostname desde la 0019)
 if [ ! -s $E/usuario ]; then
-    printf '\n\e[1;38;5;111m┌─ [1/4] Identidad del Sistema y Usuario ────────────────────┐\e[0m\n'
+    echo; caja_sup '\e[1;38;5;111m' '[1/4] Identidad del Sistema y Usuario'
     while :; do
         printf '\e[1;38;5;111m│\e[0m  \e[1;38;5;48m❯\e[0m Nombre de usuario [user]: '
         read -r N
         N=${N:-user}
         [[ $N =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] && [ "$N" != root ] && break
-        printf '\e[1;38;5;111m│\e[0m  \e[38;5;214m✖ Inválido: empieza con minúscula o _, sin espacios ni mayúsculas\e[0m\n'
+        caja_lin '\e[1;38;5;111m' '  \e[38;5;214m✖ Inválido: empieza con minúscula o _, sin espacios ni mayúsculas\e[0m'
     done
     echo "$N" > $E/usuario
 fi
@@ -198,10 +225,10 @@ if [ ! -s /etc/hostname ]; then
         read -r H
         H=${H:-${S:-android}}
         [[ $H =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$ ]] && break
-        printf '\e[1;38;5;111m│\e[0m  \e[38;5;214m✖ Inválido: solo letras, números y guiones\e[0m\n'
+        caja_lin '\e[1;38;5;111m' '  \e[38;5;214m✖ Inválido: solo letras, números y guiones\e[0m'
     done
     echo "$H" > /etc/hostname
-    printf '\e[1;38;5;111m└────────────────────────────────────────────────────────────┘\e[0m\n'
+    caja_inf '\e[1;38;5;111m'
 fi
 U=$(id -u); G=$(id -g)
 DEFAULT_SHELL="/bin/bash"
@@ -228,16 +255,16 @@ rmdir /home/user 2>/dev/null
 contrasena_definida() { grep -q "^$N:[^!*:][^:]*:" /etc/shadow 2>/dev/null; }
 pedir_contrasena() {
     local p1 p2 h
-    printf '\n\e[1;38;5;111m┌─ [2/4] Seguridad y Autenticación ──────────────────────────┐\e[0m\n'
-    printf '\e[1;38;5;111m│\e[0m  Configura la contraseña para \e[1;38;5;48m%s\e[0m:\n' "$N"
+    echo; caja_sup '\e[1;38;5;111m' '[2/4] Seguridad y Autenticación'
+    caja_lin '\e[1;38;5;111m' '  Configura la contraseña para \e[1;38;5;48m%s\e[0m:' "$N"
     while :; do
         printf '\e[1;38;5;111m│\e[0m  \e[1;38;5;48m❯\e[0m Nueva contraseña: '
         read -rsp "" p1; echo
-        [ -n "$p1" ] || { printf '\e[1;38;5;111m│\e[0m  \e[38;5;214m✖ No puede estar vacía\e[0m\n'; continue; }
+        [ -n "$p1" ] || { caja_lin '\e[1;38;5;111m' '  \e[38;5;214m✖ No puede estar vacía\e[0m'; continue; }
         printf '\e[1;38;5;111m│\e[0m  \e[1;38;5;48m❯\e[0m Confirmar contraseña: '
         read -rsp "" p2; echo
         [ "$p1" = "$p2" ] && break
-        printf '\e[1;38;5;111m│\e[0m  \e[38;5;214m✖ No coinciden, intenta nuevamente\e[0m\n'
+        caja_lin '\e[1;38;5;111m' '  \e[38;5;214m✖ No coinciden, intenta nuevamente\e[0m'
     done
     h=""
     if command -v openssl >/dev/null 2>&1; then
@@ -255,8 +282,8 @@ pedir_contrasena() {
         printf '%s:%s:%s:0:99999:7:::\n' "$N" "$h" "$(( $(date +%s) / 86400 ))" >> /etc/shadow
     fi
     chmod 600 /etc/shadow
-    printf '\e[1;38;5;111m│\e[0m  \e[1;38;5;48m✔ Contraseña guardada correctamente\e[0m\n'
-    printf '\e[1;38;5;111m└────────────────────────────────────────────────────────────┘\e[0m\n'
+    caja_lin '\e[1;38;5;111m' '  \e[1;38;5;48m✔ Contraseña guardada correctamente\e[0m'
+    caja_inf '\e[1;38;5;111m'
 }
 if [ "$1" = --contrasena ]; then
     pedir_contrasena || falla "no se pudo guardar la contraseña"
@@ -282,10 +309,10 @@ if [ ! -s $E/escritorio ]; then
 
     dibujar_menu_escritorios() {
         printf '\033[2J\033[H'
-        printf '\e[1;38;5;111m┌────────────────────────────────────────────────────────────┐\e[0m\n'
-        printf '\e[1;38;5;111m│\e[0m  \e[1;38;5;81m[3/4] Selección de Entorno de Escritorio\e[0m                  \e[1;38;5;111m│\e[0m\n'
-        printf '\e[1;38;5;111m│\e[0m  \e[38;5;245mUsa ↑/↓ para moverte y Enter para seleccionar entorno\e[0m     \e[1;38;5;111m│\e[0m\n'
-        printf '\e[1;38;5;111m├────────────────────────────────────────────────────────────┤\e[0m\n'
+        caja_sup '\e[1;38;5;111m'
+        caja_lin '\e[1;38;5;111m' '  \e[1;38;5;81m[3/4] Selección de Entorno de Escritorio\e[0m'
+        caja_lin '\e[1;38;5;111m' '  \e[38;5;245mUsa ↑/↓ para moverte y Enter para seleccionar entorno\e[0m'
+        caja_med '\e[1;38;5;111m'
         for i in "${!IDS[@]}"; do
             (. $ED/${IDS[$i]}/escritorio.conf
              if [ "$ESTADO" = probado ]; then
@@ -295,21 +322,21 @@ if [ ! -s $E/escritorio ]; then
              fi
              tam=${TAMANO//[()]/}
              if [ "$i" -eq "$idx_esc" ]; then
-                 printf '\e[1;38;5;111m│\e[0m \e[1;38;5;51m❯\e[0m \e[1;38;5;48m[✔]\e[0m \e[1;38;5;15;48;5;238m %-12s\e[0m %-18s \e[1;38;5;252m%-15s\e[0m\e[1;38;5;111m│\e[0m\n' \
+                 caja_lin '\e[1;38;5;111m' ' \e[1;38;5;51m❯\e[0m \e[1;38;5;48m[✔]\e[0m \e[1;38;5;15;48;5;238m %s\e[0m %s \e[1;38;5;252m%s\e[0m' \
                      "$NOMBRE" "$e" "$tam"
              else
-                 printf '\e[1;38;5;111m│\e[0m   \e[38;5;245m[ ]\e[0m \e[1;38;5;51m%-13s\e[0m %-18s \e[38;5;248m%-15s\e[0m\e[1;38;5;111m│\e[0m\n' \
+                 caja_lin '\e[1;38;5;111m' '   \e[38;5;245m[ ]\e[0m \e[1;38;5;51m%s\e[0m %s \e[38;5;248m%s\e[0m' \
                      "$NOMBRE" "$e" "$tam"
              fi
             )
         done
-        printf '\e[1;38;5;111m├────────────────────────────────────────────────────────────┤\e[0m\n'
+        caja_med '\e[1;38;5;111m'
         if [ "$idx_esc" -eq "$num_esc" ]; then
-            printf '\e[1;38;5;111m│\e[0m \e[1;38;5;51m❯\e[0m  \e[1;38;5;48m[ ✔ CONFIRMAR Y CONTINUAR ]\e[0m                              \e[1;38;5;111m│\e[0m\n'
+            caja_lin '\e[1;38;5;111m' ' \e[1;38;5;51m❯\e[0m  \e[1;38;5;48m[ ✔ CONFIRMAR Y CONTINUAR ]\e[0m'
         else
-            printf '\e[1;38;5;111m│\e[0m    \e[38;5;245m[   Confirmar y continuar   ]\e[0m                              \e[1;38;5;111m│\e[0m\n'
+            caja_lin '\e[1;38;5;111m' '    \e[38;5;245m[   Confirmar y continuar   ]\e[0m'
         fi
-        printf '\e[1;38;5;111m└────────────────────────────────────────────────────────────┘\e[0m\n'
+        caja_inf '\e[1;38;5;111m'
     }
 
     while :; do
@@ -431,10 +458,10 @@ editar_paquetes_grupo() {
 
     while :; do
         printf '\033[2J\033[H'
-        printf '\e[1;38;5;111m┌────────────────────────────────────────────────────────────┐\e[0m\n'
-        printf '\e[1;38;5;111m│\e[0m  \e[1;38;5;81mPersonalizar módulo: %-37s\e[0m \e[1;38;5;111m│\e[0m\n' "$g"
-        printf '\e[1;38;5;111m│\e[0m  \e[38;5;245mUsa ↑/↓, Espacio para marcar/desmarcar, TAB para volver   \e[0m\e[1;38;5;111m│\e[0m\n'
-        printf '\e[1;38;5;111m├────────────────────────────────────────────────────────────┤\e[0m\n'
+        caja_sup '\e[1;38;5;111m'
+        caja_lin '\e[1;38;5;111m' '  \e[1;38;5;81mPersonalizar módulo: %s\e[0m' "$g"
+        caja_lin '\e[1;38;5;111m' '  \e[38;5;245mUsa ↑/↓, Espacio para marcar/desmarcar, TAB para volver\e[0m'
+        caja_med '\e[1;38;5;111m'
 
         if [ "$idx_pkg" -lt "$scroll_top" ]; then
             scroll_top=$idx_pkg
@@ -465,19 +492,19 @@ editar_paquetes_grupo() {
             esac
 
             if [ "$j" -eq "$idx_pkg" ]; then
-                printf '\e[1;38;5;111m│\e[0m \e[1;38;5;51m❯\e[0m %s \e[1;38;5;15;48;5;238m %-52s\e[0m\e[1;38;5;111m│\e[0m\n' "$chk" "${p_desc:0:52}"
+                caja_lin '\e[1;38;5;111m' ' \e[1;38;5;51m❯\e[0m %s \e[1;38;5;15;48;5;238m %s\e[0m' "$chk" "${p_desc:0:52}"
             else
-                printf '\e[1;38;5;111m│\e[0m   %s \e[38;5;250m%-54s\e[0m\e[1;38;5;111m│\e[0m\n' "$chk" "${p_desc:0:54}"
+                caja_lin '\e[1;38;5;111m' '   %s \e[38;5;250m%s\e[0m' "$chk" "${p_desc:0:54}"
             fi
         done
 
-        printf '\e[1;38;5;111m├────────────────────────────────────────────────────────────┤\e[0m\n'
+        caja_med '\e[1;38;5;111m'
         if [ "$idx_pkg" -eq "$n_pkgs" ]; then
-            printf '\e[1;38;5;111m│\e[0m \e[1;38;5;51m❯\e[0m  \e[1;38;5;48m[ ✔ GUARDAR Y VOLVER ]\e[0m                                   \e[1;38;5;111m│\e[0m\n'
+            caja_lin '\e[1;38;5;111m' ' \e[1;38;5;51m❯\e[0m  \e[1;38;5;48m[ ✔ GUARDAR Y VOLVER ]\e[0m'
         else
-            printf '\e[1;38;5;111m│\e[0m    \e[38;5;245m[   Guardar y volver (o presiona TAB)   ]\e[0m                \e[1;38;5;111m│\e[0m\n'
+            caja_lin '\e[1;38;5;111m' '    \e[38;5;245m[   Guardar y volver (o presiona TAB)   ]\e[0m'
         fi
-        printf '\e[1;38;5;111m└────────────────────────────────────────────────────────────┘\e[0m\n'
+        caja_inf '\e[1;38;5;111m'
 
         IFS= read -rsn1 k
         if [ "$k" = $'\e' ]; then
@@ -538,10 +565,10 @@ else
 
     dibujar_menu_opcionales() {
         printf '\033[2J\033[H'
-        printf '\e[1;38;5;111m┌────────────────────────────────────────────────────────────┐\e[0m\n'
-        printf '\e[1;38;5;111m│\e[0m  \e[1;38;5;81m[4/4] Módulos y Paquetes Opcionales\e[0m                       \e[1;38;5;111m│\e[0m\n'
-        printf '\e[1;38;5;111m│\e[0m  \e[38;5;245mUsa ↑/↓, Espacio marcar/desmarcar, TAB elegir paquetes     \e[0m\e[1;38;5;111m│\e[0m\n'
-        printf '\e[1;38;5;111m├────────────────────────────────────────────────────────────┤\e[0m\n'
+        caja_sup '\e[1;38;5;111m'
+        caja_lin '\e[1;38;5;111m' '  \e[1;38;5;81m[4/4] Módulos y Paquetes Opcionales\e[0m'
+        caja_lin '\e[1;38;5;111m' '  \e[38;5;245mUsa ↑/↓, Espacio marcar/desmarcar, TAB elegir paquetes\e[0m'
+        caja_med '\e[1;38;5;111m'
         for i in "${!GRUPOS[@]}"; do
             local g="${GRUPOS[$i]}"
             local total_p=0 sel_p=0
@@ -557,20 +584,20 @@ else
             fi
             local info_p="($sel_p/$total_p)"
             if [ "$i" -eq "$idx_actual" ]; then
-                printf '\e[1;38;5;111m│\e[0m \e[1;38;5;51m❯\e[0m %s \e[1;38;5;15m%-40s\e[0m \e[38;5;81m%-7s\e[0m \e[38;5;245m[TAB]\e[0m\e[1;38;5;111m│\e[0m\n' \
+                caja_lin '\e[1;38;5;111m' ' \e[1;38;5;51m❯\e[0m %s \e[1;38;5;15m%s\e[0m \e[38;5;81m%s\e[0m \e[38;5;245m[TAB]\e[0m' \
                     "$chk" "${TEXTOS[$i]:0:40}" "$info_p"
             else
-                printf '\e[1;38;5;111m│\e[0m   %s \e[38;5;250m%-40s\e[0m \e[38;5;245m%-7s\e[0m      \e[1;38;5;111m│\e[0m\n' \
+                caja_lin '\e[1;38;5;111m' '   %s \e[38;5;250m%s\e[0m \e[38;5;245m%s\e[0m' \
                     "$chk" "${TEXTOS[$i]:0:40}" "$info_p"
             fi
         done
-        printf '\e[1;38;5;111m├────────────────────────────────────────────────────────────┤\e[0m\n'
+        caja_med '\e[1;38;5;111m'
         if [ "$idx_actual" -eq "$num_opciones" ]; then
-            printf '\e[1;38;5;111m│\e[0m \e[1;38;5;51m❯\e[0m  \e[1;38;5;48m[ ✔ ENVIAR Y CONTINUAR ]\e[0m                                 \e[1;38;5;111m│\e[0m\n'
+            caja_lin '\e[1;38;5;111m' ' \e[1;38;5;51m❯\e[0m  \e[1;38;5;48m[ ✔ ENVIAR Y CONTINUAR ]\e[0m'
         else
-            printf '\e[1;38;5;111m│\e[0m    \e[38;5;245m[   Enviar y continuar   ]\e[0m                                 \e[1;38;5;111m│\e[0m\n'
+            caja_lin '\e[1;38;5;111m' '    \e[38;5;245m[   Enviar y continuar   ]\e[0m'
         fi
-        printf '\e[1;38;5;111m└────────────────────────────────────────────────────────────┘\e[0m\n'
+        caja_inf '\e[1;38;5;111m'
     }
 
     while :; do
@@ -707,10 +734,10 @@ done
 # Deduplicar lista de paquetes
 PAQUETES_A_INSTALAR=($(printf '%s\n' "${PAQUETES_A_INSTALAR[@]}" | sort -u))
 
-printf '\n\e[1;38;5;81m┌─ Descarga e instalación de paquetes (%s) ──────────────────┐\e[0m\n' "$(backend_nombre)"
-printf '\e[1;38;5;81m│\e[0m  Módulos: \e[1;38;5;48m%s\e[0m | Escritorio: \e[1;38;5;48m%s\e[0m\n' "$grupos" "$ESC"
-printf '\e[1;38;5;81m│\e[0m  Paquetes seleccionados: \e[1;38;5;48m%d\e[0m\n' "${#PAQUETES_A_INSTALAR[@]}"
-printf '\e[1;38;5;81m└────────────────────────────────────────────────────────────┘\e[0m\n'
+echo; caja_sup '\e[1;38;5;81m' 'Descarga e instalación de paquetes (%s)' "$(backend_nombre)"
+caja_lin '\e[1;38;5;81m' '  Módulos: \e[1;38;5;48m%s\e[0m | Escritorio: \e[1;38;5;48m%s\e[0m' "$grupos" "$ESC"
+caja_lin '\e[1;38;5;81m' '  Paquetes seleccionados: \e[1;38;5;48m%d\e[0m' "${#PAQUETES_A_INSTALAR[@]}"
+caja_inf '\e[1;38;5;81m'
 
 backend_instalar "${PAQUETES_A_INSTALAR[@]}" || falla "falló la instalación de paquetes con $BACKEND (comprueba la conexión a internet)"
 printf '%s\n' "$SISTEMA_LINUX:$ESC" > "$E/receta-aplicada" || falla "no se pudo registrar la receta instalada"
@@ -759,17 +786,17 @@ fi
         > ~/.local/share/applications/firefox.desktop
 
 if [ -e $E/instalado ]; then
-    printf '\n\e[1;38;5;48m┌────────────────────────────────────────────────────────────┐\e[0m\n'
-    printf '\e[1;38;5;48m│\e[0m  \e[1;38;5;81mAJUSTES GUARDADOS CORRECTAMENTE\e[0m                           \e[1;38;5;48m│\e[0m\n'
-    printf '\e[1;38;5;48m│\e[0m  \e[38;5;250mEl nuevo entorno se abrirá al reiniciar la sesión.\e[0m         \e[1;38;5;48m│\e[0m\n'
-    printf '\e[1;38;5;48m└────────────────────────────────────────────────────────────┘\e[0m\n'
+    echo; caja_sup '\e[1;38;5;48m'
+    caja_lin '\e[1;38;5;48m' '  \e[1;38;5;81mAJUSTES GUARDADOS CORRECTAMENTE\e[0m'
+    caja_lin '\e[1;38;5;48m' '  \e[38;5;250mEl nuevo entorno se abrirá al reiniciar la sesión.\e[0m'
+    caja_inf '\e[1;38;5;48m'
     exit 0
 fi
 touch "$E/instalado" 2>/dev/null || : > "$E/instalado"
 rm -f "$E/instalando"
 
-printf '\n\e[1;38;5;48m┌────────────────────────────────────────────────────────────┐\e[0m\n'
-printf '\e[1;38;5;48m│\e[0m  \e[1;38;5;81mINSTALACIÓN COMPLETADA CON ÉXITO\e[0m                          \e[1;38;5;48m│\e[0m\n'
-printf '\e[1;38;5;48m│\e[0m  \e[38;5;250mIniciando el entorno de escritorio en la pantalla...\e[0m       \e[1;38;5;48m│\e[0m\n'
-printf '\e[1;38;5;48m└────────────────────────────────────────────────────────────┘\e[0m\n'
+echo; caja_sup '\e[1;38;5;48m'
+caja_lin '\e[1;38;5;48m' '  \e[1;38;5;81mINSTALACIÓN COMPLETADA CON ÉXITO\e[0m'
+caja_lin '\e[1;38;5;48m' '  \e[38;5;250mIniciando el entorno de escritorio en la pantalla...\e[0m'
+caja_inf '\e[1;38;5;48m'
 sleep 2

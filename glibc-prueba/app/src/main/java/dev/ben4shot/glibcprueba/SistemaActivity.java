@@ -302,14 +302,15 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
             File homeDir = new File(prefijo, homeRel);
             String shell = binZsh.exists() ? "/usr/bin/zsh" : "/usr/bin/bash";
             List<String> envList = new ArrayList<>();
-            envList.add("PATH=/usr/local/bin:/usr/bin:/bin:/system/bin");
+            envList.add("PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
             envList.add("HOME=" + homeDir.getAbsolutePath());
             envList.add("USER=" + adaptador.usuario(prefijo));
             envList.add("SHELL=" + shell);
             envList.add("TERM=xterm-256color");
             envList.add("GLIBC_PREFIX=" + prefijo.getAbsolutePath());
             envList.add("TMPDIR=/tmp");
-            String[] args = new String[]{shell, "-i"};
+            adaptador.agregarEntorno(this, prefijo, envList);
+            String[] args = new String[]{"libldp.so", shell, "-i"};
             sesionConsola = new TerminalSession(cargador, homeDir.getAbsolutePath(), args, envList.toArray(new String[0]), 5000, this);
         } else {
             String cwd = prefijo.exists() ? prefijo.getAbsolutePath() : getFilesDir().getAbsolutePath();
