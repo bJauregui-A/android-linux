@@ -15,14 +15,19 @@ mkdir -p "$P/tmp" "$P/dev/shm/.sysv" 2>/dev/null || true
 export TMPDIR="$P/tmp"   # los heredocs de sh (mksh) necesitan un tmp escribible; /data/local no lo es
 chmod 1777 "$P/dev/shm" "$P/dev/shm/.sysv" 2>/dev/null || true
 
-# Recuadros: el ancho se mide en la terminal real cada vez que se dibuja (tput/stty; 60 si no hay).
-_ancho() {
-    _a=$(tput cols 2>/dev/null) || _a=
-    case $_a in ''|*[!0-9]*) _a=$(stty size 2>/dev/null | cut -d' ' -f2) || _a= ;; esac
+# Recuadros: ancho real de la terminal (stty/tput; 60 si no hay).
+_medir() {
+    _a=$(stty size 2>/dev/null </dev/tty | cut -d' ' -f2) || _a=
+    case $_a in ''|*[!0-9]*) _a=$(tput cols 2>/dev/null </dev/tty) || _a= ;; esac
+    case $_a in ''|*[!0-9]*) _a=${COLUMNS:-} ;; esac
     case $_a in ''|*[!0-9]*) _a=60 ;; esac
     [ "$_a" -ge 20 ] || _a=20
-    echo "$_a"
+    _AN=$_a
 }
+# se mide una vez aquí (dentro de un pipe o de $(...) stty ya no ve la terminal) y de nuevo con SIGWINCH
+_medir
+trap _medir WINCH
+_ancho() { echo "$_AN"; }
 # columnas visibles de un texto: sin secuencias de color y sin bytes de continuación UTF-8
 _vis() { printf '%s' "$1" | sed "s/$(printf '\033')\[[0-9;]*m//g" | LC_ALL=C tr -d '\200-\277' | wc -c; }
 _rep() { [ "$1" -gt 0 ] && printf '%*s' "$1" '' | sed 's/ /─/g'; }
