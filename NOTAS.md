@@ -1000,4 +1000,4 @@ Material de estudio (2026-10-25, solo PC, no toca el teléfono): `practica/` reo
 - **Libc instalada** en las dos instancias; **APK armada** (`armar.sh` + `assembleSdk36Debug`, `libc.so.6` y `libldp.so` coinciden con `glibc/salida`), **sin instalar**: `adb install -r` mata la sesión del usuario.
 - **Límites:** `no_new_privs` no se respeta; `chown` no limpia setuid/setgid; no probé `su` ni `passwd` a mano (PAM sí, por `sudo`); el Debian no trae `nobody` (B53). Una instancia nueva no se ha creado todavía con el flujo nuevo (falta probar `primer-arranque.sh` de punta a punta).
 
-**Siguiente sesión (83ª):** instalar la APK nueva (pidiéndolo al usuario), crear una instancia Arch y una Debian y comprobar el primer arranque (sudo real + contraseña); B53; fase 4 (`chroot` virtual con B26, `PR_SET_KEEPCAPS`, `capset`).
+**Siguiente sesión (83ª):** (APK nueva ya instalada) crear una instancia Arch y una Debian y comprobar el primer arranque (sudo real + contraseña); B53; fase 4 (falta el `chroot(dir)` virtual: B26 y `chroot("/")` ya existen; además `PR_SET_KEEPCAPS`, `capset`). Detalle en `BACKLOG.md`.
