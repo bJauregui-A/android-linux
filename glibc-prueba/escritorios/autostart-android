@@ -54,15 +54,16 @@ boot_fail() { printf '\e[1;31m[FAILED]\e[0m %s\n' "$*" >> "$boot_file"; }
 registro() { printf '%s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$*" >> /tmp/autostart-android.log; }
 
 iniciar() {
-    local nombre=$1 espera=$2 log pid intento listo=
+    local nombre=$1 espera=$2 log pid intento listo= max=20
     shift 2
+    [ "$espera" = ssh ] && max=60   # sshd tarda más en la primera sesión de una instalación recién hecha
     log="$log_dir/$nombre.log"
     registro "$nombre STARTING ($*) log=$log"
     "$@" > "$log" 2>&1 &
     pid=$!
     pids+=("$pid")
     names+=("$nombre")
-    for intento in $(seq 20); do
+    for intento in $(seq "$max"); do
         kill -0 "$pid" 2>/dev/null || break
         case "$espera" in
             proceso) listo=1 ;;
@@ -178,9 +179,9 @@ if [ -x /usr/local/bin/service-daemon ]; then
     fi
 fi
 
-# sshd en foreground para que el supervisor pueda detener exactamente su proceso.
+# sshd en foreground para que el supervisor pueda detener exactamente su proceso; -e deja sus errores en su log.
 if [ -x /usr/bin/sshd ] && ! pgrep -x sshd >/dev/null 2>&1; then
-    iniciar sshd ssh /usr/bin/sshd -D || true
+    iniciar sshd ssh /usr/bin/sshd -D -e || true
 fi
 
 # PipeWire → FIFO → AudioTrack de Android y compatibilidad PulseAudio para Linux/Wine.
