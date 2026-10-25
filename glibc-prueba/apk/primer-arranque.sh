@@ -830,6 +830,10 @@ rm -f "$E/instalando"
 
 echo; caja_sup '\e[1;38;5;48m'
 caja_lin '\e[1;38;5;48m' '  \e[1;38;5;81mINSTALACIÓN COMPLETADA CON ÉXITO\e[0m'
-caja_lin '\e[1;38;5;48m' '  \e[38;5;250mIniciando el entorno de escritorio en la pantalla...\e[0m'
+if [ "$ESC" = "sin-entorno" ]; then
+    caja_lin '\e[1;38;5;48m' '  \e[38;5;250mAbriendo la terminal...\e[0m'
+else
+    caja_lin '\e[1;38;5;48m' '  \e[38;5;250mIniciando el entorno de escritorio en la pantalla...\e[0m'
+fi
 caja_inf '\e[1;38;5;48m'
 sleep 2
