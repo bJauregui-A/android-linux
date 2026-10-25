@@ -372,12 +372,6 @@ if [ ! -s $E/escritorio ]; then
              fi
             )
         done
-        caja_med '\e[1;38;5;111m'
-        if [ "$idx_esc" -eq "$num_esc" ]; then
-            caja_lin '\e[1;38;5;111m' ' \e[1;38;5;51m❯\e[0m  \e[1;38;5;48m[ ✔ CONFIRMAR Y CONTINUAR ]\e[0m'
-        else
-            caja_lin '\e[1;38;5;111m' '    \e[38;5;245m[   Confirmar y continuar   ]\e[0m'
-        fi
         caja_inf '\e[1;38;5;111m'
     }
 
@@ -393,7 +387,7 @@ if [ ! -s $E/escritorio ]; then
                     fi
                     ;;
                 '[B'|'OB')
-                    if [ $idx_esc -lt "$num_esc" ]; then
+                    if [ $idx_esc -lt $((num_esc - 1)) ]; then
                         ((idx_esc++))
                     fi
                     ;;
@@ -401,12 +395,9 @@ if [ ! -s $E/escritorio ]; then
         elif [ "$tecla" = "" ] || [ "$tecla" = $'\n' ] || [ "$tecla" = $'\r' ]; then
             break
         elif [ "$tecla" = " " ]; then
-            if [ "$idx_esc" -eq "$num_esc" ]; then
-                break
-            fi
+            break
         fi
     done
-    [ "$idx_esc" -eq "$num_esc" ] && idx_esc=$((num_esc - 1))
     echo "${IDS[idx_esc]}" > $E/escritorio
 fi
 ESC=$(cat $E/escritorio)
