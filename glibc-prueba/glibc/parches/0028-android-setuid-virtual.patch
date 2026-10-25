@@ -1,0 +1,142 @@
+--- a/sysdeps/unix/sysv/linux/aarch64/android-path.c
++++ b/sysdeps/unix/sysv/linux/aarch64/android-path.c
+@@ -241,9 +241,11 @@
+ /* GLIBC_CRED=... del estado actual, en OUT (al menos KEY_CRED_LEN + 8 * 11 +
+    NGRUPOS * 11 + 1 bytes).  ROOT: el hijo arranca como root (todo en 0, sin
+    grupos), porque el execve pidió GLIBC_FAKEROOT=1 y el proceso no lo traía
+-   (el wrapper de sudo).  */
++   (el wrapper de sudo).  Como en un execve de Linux, el guardado y el fs
++   copian al efectivo; SU y SG (-1: ninguno) son el dueño y el grupo de un
++   programa setuid/setgid, que pasan a ser el efectivo.  */
+ static void
+-cred_serializar (char *out, int root)
++cred_serializar (char *out, int root, long int su, long int sg)
+ {
+   cred_asegurar ();
+   char *p = out;
+@@ -253,6 +255,12 @@
+   if (root)
+     for (int i = 0; i < 8; i++)
+       v[i] = 0;
++  if (su >= 0)
++    v[1] = su;
++  if (sg >= 0)
++    v[5] = sg;
++  v[2] = v[3] = v[1];
++  v[6] = v[7] = v[5];
+   for (int i = 0; i < 8; i++)
+     {
+       p = utoa (p, v[i]);
+@@ -778,6 +786,26 @@
+   return r;
+ }
+ 
++/* Root salta los permisos de lectura y escritura.  El dueño real no: un archivo
++   0440 no se abre para escribir (dpkg escribe dos veces el .dpkg-new de un
++   conffile).  R es el resultado del openat que ya se intentó; si fue EACCES se
++   da permiso un instante y se reintenta.  */
++static long int
++abrir_root (long int a0, long int a1, long int a2, long int a3, long int r)
++{
++  if (r != -EACCES)
++    return r;
++  struct stat st;
++  if (RAW (__NR_newfstatat, a0, a1, &st, 0) != 0 || !S_ISREG (st.st_mode))
++    return r;
++  unsigned int modo = st.st_mode & 07777;
++  if (RAW (__NR_fchmodat, a0, a1, modo | 0600) != 0)
++    return r;
++  r = RAW (__NR_openat, a0, a1, a2, a3);
++  RAW (__NR_fchmodat, a0, a1, modo);
++  return r;
++}
++
+ /* Guarda el dueño virtual de RUTA (N bytes): en el xattr, o ninguno si
+    coincide con la regla por ubicación.  PAR marca la copia de linkat.
+    Devuelve el errno de ruta inexistente; los demás fallos (enlaces, fifos y
+@@ -973,9 +1001,31 @@
+   return 1;
+ }
+ 
++/* Programa setuid/setgid (bits del modo real; `nosuid` hace que el kernel los
++   ignore): el proceso nuevo arranca con el dueño y el grupo virtuales del
++   archivo como ids efectivos.  CRED es el GLIBC_CRED que viaja en el entorno
++   y se vuelve a escribir.  Un script no cuenta, como en Linux.  */
++static void
++cred_setuid (int fd, const char *t, char *cred, int root)
++{
++  struct stat st;
++  if (RAW (__NR_fstat, fd, &st) != 0 || !S_ISREG (st.st_mode)
++      || (st.st_mode & (S_ISUID | S_ISGID)) == 0)
++    return;
++  char buf[PATH_MAX];
++  unsigned int u, g;
++  int par;
++  if (!dueno_virtual (AT_FDCWD, t, 0, buf, &u, &g, &par))
++    return;
++  long int su = st.st_mode & S_ISUID ? (long int) u : -1;
++  long int sg = (st.st_mode & (S_ISGID | S_IXGRP)) == (S_ISGID | S_IXGRP)
++		? (long int) g : -1;
++  cred_serializar (cred, root, su, sg);
++}
++
+ static long int
+ do_execve (const char *path, char *const argv[], char *const envp[],
+-	   char *buf, int depth)
++	   char *buf, int depth, char *cred, int root)
+ {
+   if (depth > 4)
+     return -ELOOP;
+@@ -1037,9 +1087,11 @@
+       for (size_t i = 1; i < argc; i++)
+ 	nargv[k++] = argv[i];
+       nargv[k] = NULL;
+-      return do_execve (interp, nargv, envp, buf, depth + 1);
++      return do_execve (interp, nargv, envp, buf, depth + 1, cred, root);
+     }
+ 
++  if (depth == 0)
++    cred_setuid (fd, t, cred, root);
+   int can_load = n >= SELFMAG && starts (hdr, ELFMAG, SELFMAG)
+ 	      && elf_can_load (fd, hdr, n);
+   RAW (__NR_close, fd);
+@@ -1099,7 +1151,8 @@
+   /* Las credenciales viajan siempre, aunque el programa haya limpiado el
+      entorno; se descarta la copia que traiga (puede ser vieja).  */
+   char cred[KEY_CRED_LEN + 8 * 11 + NGRUPOS * 11 + 1];
+-  cred_serializar (cred, pide_root && !fakeroot);
++  int root = pide_root && !fakeroot;
++  cred_serializar (cred, root, -1, -1);
+   char *nenvp[envc + 4];
+   size_t k = 0;
+   for (size_t i = 0; i < envc; i++)
+@@ -1111,7 +1164,7 @@
+     nenvp[k++] = env_loader;
+   nenvp[k++] = cred;
+   nenvp[k] = NULL;
+-  return do_execve (path, argv, nenvp, buf, 0);
++  return do_execve (path, argv, nenvp, buf, 0, cred, root);
+ }
+ 
+ /* Android no deja crear enlaces duros en los datos de la app: linkat copia
+@@ -2846,8 +2899,18 @@
+ 	  if (r != 1)
+ 	    return r;
+ 	}
+-      if ((a2 & (O_CREAT | O_TMPFILE)) == O_CREAT && creador_distinto ())
+-	return abrir_creando (a0, a1, a2, a3);
++      {
++	int escribe = root_virtual ()
++		      && ((a2 & O_ACCMODE) != O_RDONLY || (a2 & O_TRUNC));
++	if ((a2 & (O_CREAT | O_TMPFILE)) == O_CREAT && creador_distinto ())
++	  {
++	    long int r = abrir_creando (a0, a1, a2, a3);
++	    return escribe ? abrir_root (a0, a1, a2, a3, r) : r;
++	  }
++	if (escribe)
++	  return abrir_root (a0, a1, a2, a3,
++			     raw (nr, a0, a1, a2, a3, a4, a5));
++      }
+       break;
+     case __NR_newfstatat:
+       {

@@ -985,3 +985,19 @@ Material de estudio (2026-10-25, solo PC, no toca el teléfono): `practica/` reo
 - **Libc instalada** en `arch_console-47028` y `debian_console-44800` (`instalar-libc-en-instancia.sh`, con respaldo). **APK armada** (`armar.sh` + `assembleSdk36Debug`, hash de `libc.so.6` igual en `base.tgz` y `salida`) e **instalada** con `adb install -r` a pedido del usuario (instancias intactas).
 
 **Siguiente sesión (82ª):** B27 fase 3 (setuid virtual en `execve` + `sudo` real: `/etc/sudoers`, PAM, retirar el wrapper); B53; `PR_SET_KEEPCAPS` y bit setgid de carpetas si estorban.
+
+
+## setuid virtual y sudo real, B27 fase 3 (2026-10-25, 82ª sesión)
+
+**Pedido:** seguir con la fase 3. Decisiones del usuario: `sudo` **pide contraseña** (como en Linux, regla `usuario ALL=(ALL:ALL) ALL`) y el paquete se **instala al crear la instancia** (no va dentro de los tarballs base).
+- **Parche `0028-android-setuid-virtual.patch`** (`android-path.c`):
+  - `execve` (solo el programa final, no el `#!`, como Linux): si el archivo tiene setuid/setgid en el modo real y dueño virtual U/G (xattr o regla), el hijo arranca con euid = suid = fsuid = U (y lo mismo con G; el setgid exige `x` de grupo). Se reescribe `GLIBC_CRED` ya serializada (`cred_setuid`).
+  - **Todo `execve` copia el efectivo al guardado y al fs** (semántica de Linux). Cambia la prueba `pruebas/cred` (`exec`/`execenv` esperan `200 300 300 300 ...`).
+  - **Root salta los permisos de escritura** (`abrir_root`): `open` para escribir que da EACCES se reintenta dándole `+w` un instante al archivo (dpkg escribe dos veces el `.dpkg-new` de un conffile 0440: `sudo` no instalaba en Debian).
+- **Pruebas nuevas:** `pruebas/suid/dentro.sh` (10 casos: setuid root, setgid, sin `x` de grupo, setuid+setgid de otro dueño, script ignorado, de root bajado a otro uid) y `pruebas/sudo/dentro.sh` (crea el usuario `prueba` con contraseña, regla en `sudoers.d`; clave buena/mala, `-n`, `-u`, `-i`, `-l`, `SUDO_UID`, sudoers con permisos 666 rechazado, NOPASSWD acotado a un comando). **0 fallas en Arch y Debian**, más `pruebas/dueno` y `pruebas/cred` 8/8 en las dos.
+- **App:** `apk/primer-arranque.sh` agrega el paquete `sudo` a la instalación, y `activar_sudo` pone el bit setuid (`sudo su passwd newgrp chsh chfn gpasswd`: **el `tar` de la base no conserva el bit**, `passwd` y `su` salían 755), escribe `/etc/sudoers.d/10-linux-android` (la marca) y borra el wrapper. Hasta entonces `sudo` es una función de bash con `GLIBC_FAKEROOT=1`. En Debian la regla lleva `Defaults env_keep += "LD_LIBRARY_PATH"` (sin `ld.so.cache`, `env_reset` dejaba a los programas sin bibliotecas). `apk/instalar.sh` y los dos adaptadores escriben el wrapper solo si no existe la marca (las instancias viejas siguen igual).
+- **Estado de las instancias de prueba:** `arch_console-47028` tiene sudo real, la regla con contraseña y el wrapper borrado; **la APK instalada aún es la vieja y reescribe el wrapper al abrir** hasta instalar la nueva. `debian_console-44800` tiene el paquete `sudo` instalado pero sin regla ni marca (sigue el wrapper). `pacman -S sudo` ejecutó el hook de tmpfiles que dejó `/tmp` como root:root (normal en Linux; lo devolví al principal para no romper `pruebas/cred stat`).
+- **Libc instalada** en las dos instancias; **APK armada** (`armar.sh` + `assembleSdk36Debug`, `libc.so.6` y `libldp.so` coinciden con `glibc/salida`), **sin instalar**: `adb install -r` mata la sesión del usuario.
+- **Límites:** `no_new_privs` no se respeta; `chown` no limpia setuid/setgid; no probé `su` ni `passwd` a mano (PAM sí, por `sudo`); el Debian no trae `nobody` (B53). Una instancia nueva no se ha creado todavía con el flujo nuevo (falta probar `primer-arranque.sh` de punta a punta).
+
+**Siguiente sesión (83ª):** instalar la APK nueva (pidiéndolo al usuario), crear una instancia Arch y una Debian y comprobar el primer arranque (sudo real + contraseña); B53; fase 4 (`chroot` virtual con B26, `PR_SET_KEEPCAPS`, `capset`).

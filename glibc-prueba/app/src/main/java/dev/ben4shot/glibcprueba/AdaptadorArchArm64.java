@@ -169,6 +169,8 @@ final class AdaptadorArchArm64 implements AdaptadorInstalacion {
     }
 
     private static void escribirSudo(File raiz) {
+        // Con el sudo real puesto (marca del primer arranque) no hay wrapper: lo tapaba.
+        if (new File(raiz, "etc/sudoers.d/10-linux-android").exists()) return;
         File f = new File(raiz, "usr/local/bin/sudo");
         if (f.exists()) return;
         f.getParentFile().mkdirs();

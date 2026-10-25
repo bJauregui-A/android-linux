@@ -91,6 +91,11 @@ paso() {
     printf '\n\e[1;38;5;81m┌─ %s\e[0m\n' "$*"
 }
 
+# Hasta que el paquete sudo y su regla estén puestos (activar_sudo, más abajo), "sudo" es root virtual
+# de la libc (GLIBC_FAKEROOT): en una base nueva todavía no hay sudo real.  Con la regla puesta es el real.
+SUDOERS=/etc/sudoers.d/10-linux-android
+[ -e "$SUDOERS" ] || sudo() { GLIBC_FAKEROOT=1 "$@"; }
+
 # ==============================================================================
 # Capa de Abstracción de Gestor de Paquetes (Backend Multi-Distribución)
 # ==============================================================================
@@ -764,6 +769,9 @@ for i in "${!GRUPOS[@]}"; do
     fi
 done
 
+# sudo real (B27 fase 3): setuid virtual de la libc + PAM + /etc/sudoers
+PAQUETES_A_INSTALAR+=("sudo")
+
 # Deduplicar lista de paquetes
 PAQUETES_A_INSTALAR=($(printf '%s\n' "${PAQUETES_A_INSTALAR[@]}" | sort -u))
 
@@ -773,6 +781,24 @@ caja_lin '\e[1;38;5;81m' '  Paquetes seleccionados: \e[1;38;5;48m%d\e[0m' "${#PA
 caja_inf '\e[1;38;5;81m'
 
 backend_instalar "${PAQUETES_A_INSTALAR[@]}" || falla "falló la instalación de paquetes con $BACKEND (comprueba la conexión a internet)"
+
+# Deja sudo como en Linux: el binario setuid (el tar de la base no conserva el bit en su, passwd...),
+# la regla del usuario (pide su contraseña) y fuera el wrapper viejo.
+activar_sudo() {
+    [ -x /usr/bin/sudo ] || return 0
+    local f
+    for f in /usr/bin/sudo /usr/bin/su /usr/bin/passwd /usr/bin/newgrp /usr/bin/chsh /usr/bin/chfn /usr/bin/gpasswd; do
+        [ -f "$f" ] && chmod 4755 "$f"
+    done
+    mkdir -p /etc/sudoers.d
+    printf '%s ALL=(ALL:ALL) ALL\n' "$N" > "$SUDOERS.nuevo" && chmod 440 "$SUDOERS.nuevo" \
+        && { [ -z "${LD_LIBRARY_PATH:-}" ] || echo 'Defaults env_keep += "LD_LIBRARY_PATH"' >> "$SUDOERS.nuevo"; } \
+        && GLIBC_FAKEROOT=1 chown root:root "$SUDOERS.nuevo" && mv -f "$SUDOERS.nuevo" "$SUDOERS" || return 1
+    grep -q 'fakeroot de la glibc propia\|GLIBC_FAKEROOT=1' /usr/local/bin/sudo 2>/dev/null && rm -f /usr/local/bin/sudo
+    unset -f sudo
+    hash -r
+}
+activar_sudo || printf '\e[1;38;5;214m✖ Aviso: no se pudo dejar sudo real; sigue el provisional (root virtual)\e[0m\n'
 printf '%s\n' "$SISTEMA_LINUX:$ESC" > "$E/receta-aplicada" || falla "no se pudo registrar la receta instalada"
 
 if [ "${#AUR_A_INSTALAR[@]}" -gt 0 ]; then

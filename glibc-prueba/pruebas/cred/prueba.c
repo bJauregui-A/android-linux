@@ -186,14 +186,15 @@ c_exec (const char *yo, int via_env)
     b[--n] = 0;
   int st;
   waitpid (pid, &st, 0);
-  const char *esperado = "200 300 400 300 100 101 102 101 5,6";
+  /* como en Linux, el execve copia el efectivo al guardado (y al fs) */
+  const char *esperado = "200 300 300 300 100 101 101 101 5,6";
   CHECK (strcmp (b, esperado) == 0, "hijo '%s' esperado '%s'", b, esperado);
   /* un fork sin exec también hereda */
   if (fork () == 0)
     {
       char c[512];
       ids (c, sizeof c);
-      _exit (strcmp (c, esperado) == 0 ? 0 : 1);
+      _exit (strcmp (c, "200 300 400 300 100 101 102 101 5,6") == 0 ? 0 : 1);
     }
   wait (&st);
   CHECK (WIFEXITED (st) && WEXITSTATUS (st) == 0, "fork");

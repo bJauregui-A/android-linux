@@ -162,9 +162,10 @@ if [ -f "$P/usr/share/keyrings/debian-archive-keyring.gpg" ]; then
     cp "$P/usr/share/keyrings/debian-archive-keyring.gpg" "$P/etc/apt/trusted.gpg.d/debian-archive-keyring.gpg" 2>/dev/null || true
 fi
 
-# Escribir siempre el wrapper robusto de sudo
+# Wrapper provisional de sudo (root virtual): solo hasta que el primer arranque deje el sudo real
+# (marca /etc/sudoers.d/10-linux-android).
 mkdir -p "$P/usr/local/bin"
-cat <<'EOF' > "$P/usr/local/bin/sudo"
+[ -e "$P/etc/sudoers.d/10-linux-android" ] || cat <<'EOF' > "$P/usr/local/bin/sudo"
 #!/bin/bash
 export GLIBC_FAKEROOT=1
 while [ $# -gt 0 ]; do
@@ -183,7 +184,7 @@ while [ $# -gt 0 ]; do
 done
 exec "$@"
 EOF
-chmod 755 "$P/usr/local/bin/sudo" 2>/dev/null || true
+[ -e "$P/etc/sudoers.d/10-linux-android" ] || chmod 755 "$P/usr/local/bin/sudo" 2>/dev/null || true
 
 # Configuración de APT para Android sin root si es backend apt
 if [ "$GLIBC_PKG_BACKEND" = "apt" ]; then

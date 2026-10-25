@@ -1,6 +1,6 @@
 # Usuarios y permisos virtuales
 
-Diseño para que los programas Linux **oficiales** (`sudo`, `useradd`, `groupadd`, `passwd`, `chown`, `sshd`, apache, postgres...) funcionen como en un PC dentro de la app, sin wrappers. Ítem B27 de `BACKLOG.md`. Escrito el 2026-10-25. **Fases 1 y 2 implementadas** (80ª y 81ª sesión, parches 0026 y 0027); el resto sigue en diseño.
+Diseño para que los programas Linux **oficiales** (`sudo`, `useradd`, `groupadd`, `passwd`, `chown`, `sshd`, apache, postgres...) funcionen como en un PC dentro de la app, sin wrappers. Ítem B27 de `BACKLOG.md`. Escrito el 2026-10-25. **Fases 1, 2 y 3 implementadas** (80ª a 82ª sesión, parches 0026, 0027 y 0028); el resto sigue en diseño.
 
 ## Por qué
 
@@ -96,7 +96,7 @@ Al verse como root, los programas toman caminos privilegiados que antes no tomab
 
 1. ✅ **Credenciales virtuales** (pieza 1) + `stat` con dueño virtual y regla por ubicación (pieza 2, solo lectura). Criterio: `id`, `ls -l /etc/shadow` (root), `ls -l ~` (usuario) y `sudo -u nobody id` con el wrapper actual.
 2. ✅ **`chown` persistente + archivos nuevos + bloqueo de shadow** (piezas 2 y 5). Criterio: `sudo groupadd prueba`, `sudo useradd -m prueba`, y `apt install apache2` en Debian sin error de `ssl-cert` (`dpkg --configure -a` limpio).
-3. **setuid virtual + `sudo` real** (pieza 3). Criterio: retirar el wrapper; `sudo -l`, `sudo -i`, contraseña por PAM, `/etc/sudoers` respetado.
+3. ✅ **setuid virtual + `sudo` real** (pieza 3). Criterio: retirar el wrapper; `sudo -l`, `sudo -i`, contraseña por PAM, `/etc/sudoers` respetado.
 4. **Operaciones de root** (pieza 4, sobre todo `chroot` virtual con B26). Criterio: `sshd` iniciado por el supervisor como root, con privsep; apache con workers como `www-data` (`ps` o `/proc` sintético).
 5. **Chequeo de permisos** (pieza 6) y **pantalla de usuarios en la app**.
 
@@ -127,3 +127,9 @@ Cada fase: libc nueva probada aislada antes de instalarla (AGENTS.md), con respa
 
 - `fakeroot` (modo `-s`/`-i`, base de datos en archivo) y `pseudo` (Yocto, SQLite): mismo problema, resuelto con una base de datos externa. Aquí los xattr evitan esa base.
 - `proot` (`-0`, extensión `fake_id0`): credenciales virtuales con ptrace; misma idea, pero por syscall interceptada en vez de dentro de la libc.
+
+## Decisiones tomadas en la fase 3 (82ª)
+
+- El setuid/setgid vale solo para el programa final del `execve` (un script no); el hijo recibe el dueño/grupo virtual como efectivo, guardado y fs. Todo `execve` copia el efectivo al guardado, como Linux.
+- El `sudo` real viene del paquete de la distro, instalado en el primer arranque; el bit setuid se pone a mano (el `tar` de la base no lo conserva). La regla del usuario principal pide contraseña. Marca: `/etc/sudoers.d/10-linux-android`.
+- Root virtual también salta los permisos de **escritura** de archivos (`abrir_root`); falta lo mismo para carpetas sin `x`/`w` y para lectura (fase 5, chequeo de permisos).
