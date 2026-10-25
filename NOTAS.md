@@ -930,7 +930,7 @@ Con la APK de B26/B29 el usuario borró las sesiones, creó instancias nuevas y 
 
 **Siguiente sesión (79ª):**
 1. Comprobar a mano con la APK final: `mkdir /test` en `arch_console` (sin `chmod` previo) y el mensaje "Abriendo la terminal..." en una consola nueva.
-2. Regresión con escritorio (sway, kitty, `sshd` del supervisor, `sudo`) en una Arch nueva con la libc 0025; ver B43.
+2. ~~Regresión con escritorio~~ **hecha por el usuario** (Arch nueva con sway): kitty abre, `sudo id` da uid 0, `ssh user@10.0.0.2 -p 8022` entra (el 22 da `Connection refused`: sshd escucha en 8022). Falta probar Debian con escritorio (B43). Siguiente grande: **B27 fase 1** (credenciales virtuales; ver `ARQUITECTURA-USUARIOS.md`), decidiendo antes si el usuario principal conserva el UID real de la app.
 3. B44 (validar nombres de instancia), B45 (autoprueba que compruebe el hash de la libc en instancias nuevas Arch y Debian), B46 (`sudo -n`).
 4. B26b y B28; B16 y B27 fase 1.
 
