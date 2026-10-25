@@ -29,7 +29,7 @@ _medir
 trap _medir WINCH
 _ancho() { echo "$_AN"; }
 # columnas visibles de un texto: sin secuencias de color y sin bytes de continuación UTF-8
-_vis() { printf '%s' "$1" | sed "s/$(printf '\033')\[[0-9;]*m//g" | LC_ALL=C tr -d '\200-\277' | wc -c; }
+_vis() { printf '%s' "$1" | sed "s/$(printf '\033')\[[0-9;]*m//g" | LC_ALL=C tr -d "$(printf '\200-\277')" | wc -c; }
 _rep() { [ "$1" -gt 0 ] && printf '%*s' "$1" '' | sed 's/ /─/g'; }
 # caja_sup COLOR [TITULO_FMT args...] · caja_med COLOR · caja_inf COLOR · caja_lin COLOR FMT args...
 caja_sup() {
