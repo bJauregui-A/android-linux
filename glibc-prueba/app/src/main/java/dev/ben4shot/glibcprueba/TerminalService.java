@@ -884,15 +884,17 @@ public class TerminalService extends Service implements TerminalSessionClient {
                 dueña.sesionTerminal = null;
                 AdaptadorInstalacion adp = SistemaLinux.adaptador(this, dueña.id);
                 if (adp != null && adp.instalada(this)) {
-                    if (vista != null && s == sesionVisible && vista.getContext() instanceof android.app.Activity) {
-                        ((android.app.Activity) vista.getContext()).finish();
-                    }
                     boolean esSinEntorno = "sin-entorno".equals(SistemaLinux.leerEscritorio(this, dueña.id));
                     if (esSinEntorno) {
+                        // Sin finish(): singleTop entrega el intent a la TerminalActivity visible (onNewIntent)
+                        // y un finish() asíncrono la cerraría justo después, dejando el inicio.
                         Intent i = new Intent(this, TerminalActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                         i.putExtra(EXTRA_INSTANCIA_ID, dueña.id);
                         startActivity(i);
                     } else {
+                        if (vista != null && s == sesionVisible && vista.getContext() instanceof android.app.Activity) {
+                            ((android.app.Activity) vista.getContext()).finish();
+                        }
                         Intent i = new Intent(this, WaylandActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                         i.putExtra(EXTRA_INSTANCIA_ID, dueña.id);
                         startActivity(i);

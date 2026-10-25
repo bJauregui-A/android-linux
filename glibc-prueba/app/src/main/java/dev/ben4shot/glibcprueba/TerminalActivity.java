@@ -91,6 +91,21 @@ public class TerminalActivity extends Activity implements TerminalViewClient {
         bindService(intent, conexion, Context.BIND_AUTO_CREATE);
     }
 
+    // Al terminar la instalación el servicio relanza esta actividad (singleTop): reengancharse a la sesión nueva.
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        String id = intent.getStringExtra(TerminalService.EXTRA_INSTANCIA_ID);
+        if (id != null) instanciaId = id;
+        if (servicio != null) {
+            TerminalSession ses = servicio.sesionPara(instanciaId);
+            servicio.setVista(vista, ses);
+            vista.attachSession(ses);
+            vista.requestFocus();
+        }
+    }
+
     @Override
     protected void onDestroy() {
         if (servicio != null) servicio.setVista(null, null);
