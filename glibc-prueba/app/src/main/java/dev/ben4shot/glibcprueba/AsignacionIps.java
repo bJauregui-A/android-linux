@@ -8,10 +8,22 @@ import java.util.Map;
 final class AsignacionIps {
     private AsignacionIps() {}
 
-    static String primeraLibre(Collection<String> ipsOcupadas) {
-        int n = 2;
-        while (ipsOcupadas.contains("10.0.0." + n)) n++;
-        return "10.0.0." + n;
+    static String primeraLibre(String cidr, Collection<String> ipsOcupadas) {
+        String[] partes = cidr.split("/");
+        long red = aNumero(partes[0]) & (0xFFFFFFFFL << (32 - Integer.parseInt(partes[1]))) & 0xFFFFFFFFL;
+        long n = red + 2;
+        while (ipsOcupadas.contains(aTexto(n))) n++;
+        return aTexto(n);
+    }
+
+    private static long aNumero(String ip) {
+        long n = 0;
+        for (String octeto : ip.split("\\.")) n = (n << 8) | Integer.parseInt(octeto);
+        return n;
+    }
+
+    private static String aTexto(long n) {
+        return (n >> 24 & 0xFF) + "." + (n >> 16 & 0xFF) + "." + (n >> 8 & 0xFF) + "." + (n & 0xFF);
     }
 
     static Map<String, String> limpiar(Map<String, String> asignaciones, Collection<String> registradas) {
