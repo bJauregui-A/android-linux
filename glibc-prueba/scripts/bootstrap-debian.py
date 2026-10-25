@@ -425,11 +425,10 @@ def main():
 
     out.directorio("run/sshd")
 
-    # Configuración de usuarios y grupos estándar de Debian
+    # Usuarios y grupos estándar de Debian. El del usuario lo agrega primer-arranque.sh con el UID real.
     out.archivo("etc/passwd",
                 b"root:x:0:0:root:/root:/bin/bash\n"
-                b"sshd:x:100:65534::/run/sshd:/usr/sbin/nologin\n"
-                b"user:x:10478:10478:user:/home/user:/bin/bash\n", 0o644)
+                b"sshd:x:100:65534::/run/sshd:/usr/sbin/nologin\n", 0o644)
     out.archivo("etc/group",
                 b"root:x:0:\n"
                 b"daemon:x:1:\n"
@@ -451,7 +450,7 @@ def main():
                 b"cdrom:x:24:\n"
                 b"floppy:x:25:\n"
                 b"tape:x:26:\n"
-                b"sudo:x:27:user\n"
+                b"sudo:x:27:\n"
                 b"audio:x:29:\n"
                 b"dip:x:30:\n"
                 b"www-data:x:33:\n"
@@ -471,8 +470,7 @@ def main():
                 b"users:x:100:\n"
                 b"_ssh:x:101:\n"
                 b"ssh:x:102:\n"
-                b"nogroup:x:65534:\n"
-                b"user:x:10478:\n", 0o644)
+                b"nogroup:x:65534:\n", 0o644)
 
     out.t.close()
     tam_mb = os.path.getsize(a.out) / (1024 * 1024)

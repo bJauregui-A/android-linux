@@ -277,12 +277,22 @@ if [ ! -s /etc/hostname ]; then
     echo "$H" > /etc/hostname
     caja_inf '\e[1;38;5;111m'
 fi
+# Deja al usuario con el UID/GID reales de la app. Si la base ya trae una línea con su nombre
+# (la Debian traía user:x:10478), la corrige: un UID ajeno da "I have no name!" y rompe sudo.
+registrar_usuario() {
+    local n=$1 u=$2 g=$3 sh=$4 p=${PASSWD_ARCHIVO:-/etc/passwd} gr=${GROUP_ARCHIVO:-/etc/group} t
+    t=$(mktemp) || return 1
+    awk -F: -v OFS=: -v n="$n" -v u="$u" -v g="$g" '$1 == n { $3 = u; $4 = g } 1' "$p" > "$t" && cat "$t" > "$p"
+    awk -F: -v OFS=: -v n="$n" -v g="$g" '$1 == n { $3 = g } 1' "$gr" > "$t" && cat "$t" > "$gr"
+    rm -f "$t"
+    grep -q "^$n:" "$p" || echo "$n:x:$u:$g:$n:/home/$n:$sh" >> "$p"
+    grep -q "^$n:" "$gr" || echo "$n:x:$g:" >> "$gr"
+}
 U=$(id -u); G=$(id -g)
 DEFAULT_SHELL="/bin/bash"
 [ -x /usr/bin/zsh ] && DEFAULT_SHELL="/usr/bin/zsh"
 [ -x /bin/zsh ] && DEFAULT_SHELL="/bin/zsh"
-grep -q "^$N:" /etc/passwd || echo "$N:x:$U:$G:$N:/home/$N:$DEFAULT_SHELL" >> /etc/passwd
-grep -q "^$N:" /etc/group || echo "$N:x:$G:" >> /etc/group
+registrar_usuario "$N" "$U" "$G" "$DEFAULT_SHELL"
 # Registrar shells en /etc/shells para que PAM y login no las rechacen
 grep -q "^/usr/bin/zsh$" /etc/shells 2>/dev/null || echo "/usr/bin/zsh" >> /etc/shells
 grep -q "^/bin/zsh$" /etc/shells 2>/dev/null || echo "/bin/zsh" >> /etc/shells
