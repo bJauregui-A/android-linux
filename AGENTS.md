@@ -1,27 +1,33 @@
 # Contexto para agentes (Claude Code, agy)
 
-Proyecto: Linux real (Arch ARM con glibc propia, sin root ni proot) dentro de una app de Android, con escritorio sway por GPU. Teléfono: Redmi 15 5G (HyperOS 3, Android 16, bootloader bloqueado). Además está el registro del debloat en `debloat/`.
+Proyecto: Linux real (Arch ARM y Debian con glibc propia, sin root ni proot) dentro de una app de Android, con escritorios por GPU. Teléfono: Redmi 15 5G (HyperOS 3, Android 16, bootloader bloqueado). El registro del debloat está en `debloat/`.
 
 ## Leer primero
-1. `NOTAS.md` — bitácora por sesión; el plan vigente está en "Siguiente sesión (Nª)" (el número más alto).
-2. `glibc-prueba/PROYECTO.md` — "Objetivo principal", "Para retomar" y "Archivos".
+1. `README.md`: cómo funciona, estructura del repo, cómo compilar e instalar, pruebas y trampas conocidas.
+2. `backlog.md`: lo pendiente, en historias priorizadas. Si existe `plan.md`, es la historia en curso.
+
+## Cómo se trabaja (TDD)
+- `/backlog`: definir o ajustar historias en `backlog.md` (cortas, una sola cosa cada una, sin detalle técnico).
+- `/story <ID>`: refinar una historia → `plan.md` (criterios Dado/Cuando/Entonces, fuera de alcance, lista de pruebas en orden).
+- `/pair`: implementar `plan.md` en rojo → verde → refactor, **una prueba a la vez**, esperando revisión entre pasos. No modificar ni borrar una prueba para que pase.
+- Al cerrar una historia: commit, borrar la historia de `backlog.md` y `plan.md`. La historia queda en `git log`; no hay bitácora aparte.
+- Las pruebas viven en `glibc-prueba/pruebas/<tema>/`. Las de syscalls se corren dentro de la app con `scripts/probar-en-telefono.sh`; `adb shell` y `run-as` no tienen el seccomp de la app.
 
 ## Dónde corres
 - **En el PC** (repo original): el teléfono se maneja por `adb` y por SSH (`adb forward tcp:8022 tcp:8022`, `ssh -p 8022 user@127.0.0.1`).
-- **Dentro del teléfono** (Claude Code o agy en kitty, dentro de sway): ya estás en el Arch de la app. Casi todo lo que las notas hacen "por SSH" se corre directo. Hay `adb` local (depuración inalámbrica a `127.0.0.1`, reconectar con `adb-conectar`; se cae sin wifi o al reiniciar el teléfono): da nivel `shell` sobre Android, así que las reglas de abajo sobre comandos que modifican aplican igual. Ojo: **tú mismo corres dentro de la app** (`dev.ben4shot.glibcprueba.sdk36`), así que reiniciar sway, hacer `am force-stop` o `pm` sobre esa app, reinstalar el APK o instalar una libc nueva (`instalar-glibc.sh`) **te mata la sesión** (y todo lo que el usuario tiene abierto). Eso se hace desde el PC, o se le pide al usuario.
-- **Probar dentro de la app desde el PC** (B29): `glibc-prueba/scripts/probar-en-telefono.sh [--conservar] <instancia> <script> [límite]` corre el script con el seccomp real de la app y sale con su código (3 = no llegó). Solo funciona con una APK de depuración y **con una sesión de la app abierta**: sin ella HyperOS no levanta el proceso (`proc frequent died`); para abrirla, `adb shell am start -n dev.ben4shot.glibcprueba.sdk36/dev.ben4shot.glibcprueba.TerminalActivity` (cambia lo que se ve en pantalla). `adb shell` y `run-as` NO tienen el seccomp de la app: no sirven para probar syscalls. Para una libc nueva: `glibc-prueba/scripts/instalar-libc-en-instancia.sh <instancia>` (con respaldo y `--revertir`), sin tocar las demás instancias.
-- Lo generado (`~/mesa-gl`, `~/sway`, `~/wlroots`, `~/turnip-x11`...) vive en el home del teléfono, no en el repo; el repo tiene los parches y scripts para rehacerlo.
+- **Dentro del teléfono** (en kitty, dentro de un escritorio): ya estás en una instancia de la app. Hay `adb` local (depuración inalámbrica a `127.0.0.1`; se reconecta con `adb-conectar` y se cae sin wifi o al reiniciar). Da nivel `shell` sobre Android, así que las reglas de abajo aplican igual. Ojo: **tú mismo corres dentro de la app** (`dev.ben4shot.glibcprueba.sdk36`): `am force-stop`, `pm` sobre la app, reinstalar el APK, reiniciar el compositor o instalar una libc en tu instancia **te matan la sesión** (y todo lo que el usuario tiene abierto). Eso se hace desde el PC o se le pide al usuario.
+- **Probar dentro de la app desde el PC**: `glibc-prueba/scripts/probar-en-telefono.sh [--conservar] <instancia> <script> [límite]` (sale con 3 si no llegó). Necesita un APK de depuración **y una sesión de la app abierta**: `adb shell am start -n dev.ben4shot.glibcprueba.sdk36/dev.ben4shot.glibcprueba.TerminalActivity` (cambia lo que se ve en pantalla). Para instalar una libc nueva en una sola instancia: `glibc-prueba/scripts/instalar-libc-en-instancia.sh <instancia>` (con respaldo y `--revertir`).
+- Lo compilado en el teléfono (`~/mesa-gl`, `~/sway`, `~/wlroots`, `~/turnip`...) vive en el home de la instancia, no en el repo. El repo tiene los parches y las recetas para rehacerlo.
 
 ## Reglas de trabajo
 - Conversación en español.
 - Antes de un comando largo o que modifique algo en el teléfono, decir en una línea qué hace y si es solo lectura. Nunca borrar datos de apps sin confirmación.
 - Hablar de lo técnicamente posible; no revisar políticas de HyperOS ni licencias.
 - Todo reversible; no poner en riesgo las apps bancarias (por eso no hay root ni bootloader abierto).
-- Probar una libc nueva aislada antes de instalarla, y dejar respaldo (`libc.so.6.00NN`). No forzar cambios de render sin probarlos en una instancia aparte.
-- **Binarios y bibliotecas compiladas**: Siempre que se hagan cambios sobre los binarios o bibliotecas nativas de glibc (`libldp.so`, `libc.so.6`, shims, etc.), se deben volver a empaquetar e incorporar al APK (`jniLibs`, assets/capa) y sincronizar a las instancias del teléfono; nunca dejar el binario solo en `build/` o solo a medias en `jniLibs`.
-- No mandar teclas/toques mientras el usuario juega o usa el teléfono. Capturas con `grim` dentro de sway, nunca `screencap` con la app en segundo plano (captura chats privados).
-- Cerrar Steam en orden: `swaymsg exec "steam -shutdown"`.
-- Al terminar una sesión, actualizar `NOTAS.md` (y `PROYECTO.md` si cambia el estado) y hacer commit.
+- Probar una libc nueva aislada antes de instalarla, y dejar respaldo. No forzar cambios de render sin probarlos en una instancia aparte.
+- **Binarios y bibliotecas compiladas**: cada cambio en los binarios o bibliotecas nativas (`libldp.so`, `libc.so.6`, shims...) se vuelve a empaquetar en el APK (`jniLibs`, `apk/armar.sh`) y se sincroniza a las instancias del teléfono. Nunca dejar el binario solo en `build/` o a medias en `jniLibs`.
+- No mandar teclas ni toques mientras el usuario usa el teléfono. Las capturas se hacen con `grim` dentro del escritorio, nunca con `screencap` con la app en segundo plano (captura chats privados).
+- Si cambia algo de lo que describe `README.md` (arquitectura, comandos, trampas), actualizarlo en el mismo commit.
 
 <!-- CODEGRAPH_START -->
 ## CodeGraph

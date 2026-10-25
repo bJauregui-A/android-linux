@@ -82,17 +82,8 @@ ARCHIVOS = [
     ("apk/primer-arranque.sh", f"{D}/primer-arranque.sh", 0o755),
     ("apk/instalar-aur.sh", f"{D}/instalar-aur.sh", 0o755),
     ("apk/instalar-aur.sh", "usr/local/bin/instalar-aur", 0o755),
-    ("apk/juegos.sh", f"{D}/juegos.sh", 0o755),
-    ("steam/steam.sh", f"{D}/juegos/steam", 0o755),
-    ("steam/lsof.py", f"{D}/juegos/lsof", 0o755),
-    ("steam/proton-directo/compatibilitytool.vdf", f"{D}/juegos/proton-directo/compatibilitytool.vdf", 0o644),
-    ("steam/proton-directo/toolmanifest.vdf", f"{D}/juegos/proton-directo/toolmanifest.vdf", 0o644),
-    ("steam/proton-directo/proton", f"{D}/juegos/proton-directo/proton", 0o755),
-    ("lutris/wine", f"{D}/juegos/lutris/wine", 0o755),
-    ("lutris/wine.yml", f"{D}/juegos/lutris/wine.yml", 0o644),
-    ("lutris/system.yml", f"{D}/juegos/lutris/system.yml", 0o644),
 ]
-# Con @P@ = <paquete>/files/archlinux (como scripts/subir-android.sh)
+# Con @P@ = <paquete>/files/archlinux (prefijo de armado; no se reescribe por instancia: ver B28)
 PLANTILLAS = [
     ("android/android-prefijo.conf", "etc/ld.so.conf.d/android-prefijo.conf"),
     ("android/firefox-android.js", f"{D}/firefox-android.js"),

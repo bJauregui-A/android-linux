@@ -1,6 +1,6 @@
 # zsh como la de HyDE en el PC, sin oh-my-zsh (no está en los repos de Arch ARM):
 # prompt de starship con el starship.toml del PC, autosugerencias, colores de sintaxis,
-# historial compartido y fastfetch al abrir. Lo copia scripts/subir-sway.sh a ~/.zshrc.
+# historial compartido y fastfetch al abrir. Lo instala apk/capa.py en ~/.zshrc.
 
 HISTFILE=~/.zsh_history
 HISTSIZE=10000

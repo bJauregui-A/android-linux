@@ -1,6 +1,6 @@
 #!/usr/bin/bash
 # Supervisor de los servicios comunes de una sesión gráfica. Comparte el D-Bus y el
-# compositor publicados por sesion-android; al salir, cierra Steam y detiene lo que inició.
+# compositor publicados por sesion-android; al salir, detiene lo que inició.
 if [ "$1" = --esperar ]; then
     listo=
     for i in $(seq 120); do
@@ -43,7 +43,6 @@ fi
 
 pids=()
 names=()
-steam_iniciado=
 cerrando=
 log_dir=/tmp/linux-session-services
 mkdir -p "$log_dir"
@@ -103,41 +102,11 @@ if [ -z "$dbus_listo" ]; then
 fi
 registro "D-Bus READY check=ping"
 
-pedir_cierre_steam() {
-    [ -n "$steam_iniciado" ] || return 0
-    pgrep -x steam >/dev/null 2>&1 || return 0
-
-    # Pedir primero al compositor que cierre Steam, como en el cierre manual recomendado.
-    pedido=
-    for sock in "$XDG_RUNTIME_DIR"/sway-ipc.*.sock; do
-        [ -S "$sock" ] || continue
-        if swaymsg -s "$sock" -t get_version >/dev/null 2>&1; then
-            swaymsg -s "$sock" exec "steam -shutdown" >/dev/null 2>&1 && pedido=1
-            break
-        fi
-    done
-    # Otros compositores no implementan sway IPC; solicitar el mismo cierre directamente.
-    [ -n "$pedido" ] || /usr/local/bin/steam -shutdown >/dev/null 2>&1
-
-    for i in $(seq 40); do
-        pgrep -x steam >/dev/null 2>&1 || return 0
-        sleep 0.5
-    done
-    registro "Steam no cerró en 20 s; envío shutdown directo"
-    /usr/local/bin/steam -shutdown >/dev/null 2>&1
-    for i in $(seq 20); do
-        pgrep -x steam >/dev/null 2>&1 || return 0
-        sleep 0.5
-    done
-    registro "Steam sigue activo tras solicitar el cierre ordenado"
-}
-
 cerrar() {
     [ -n "$cerrando" ] && return
     cerrando=1
     trap - EXIT TERM HUP INT
     registro "SHUTDOWN begin"
-    pedir_cierre_steam
     for pid in "${pids[@]}"; do kill -TERM "$pid" 2>/dev/null; done
     for i in $(seq 20); do
         vivos=
@@ -193,7 +162,7 @@ if [ -n "$sshd_bin" ] && ! pgrep -x sshd >/dev/null 2>&1 \
     iniciar sshd ssh "$sshd_bin" -D -e || true
 fi
 
-# PipeWire → FIFO → AudioTrack de Android y compatibilidad PulseAudio para Linux/Wine.
+# PipeWire → FIFO → AudioTrack de Android y compatibilidad PulseAudio.
 if [ -x /usr/bin/pipewire ] && ! pgrep -x pipewire >/dev/null 2>&1; then
     if iniciar pipewire pipewire /usr/bin/pipewire; then
         [ -x /usr/bin/wireplumber ] && iniciar wireplumber proceso /usr/bin/wireplumber
@@ -203,11 +172,6 @@ if [ -x /usr/bin/pipewire ] && ! pgrep -x pipewire >/dev/null 2>&1; then
             iniciar pipewire-pulse proceso /usr/bin/pipewire-pulse
         fi
     fi
-fi
-
-# Steam se lanza desde el entorno de sway cuando Xwayland publica DISPLAY.
-if [ -n "$DISPLAY" ] && [ -x /usr/local/bin/steam ] && ! pgrep -x steam >/dev/null 2>&1; then
-    if iniciar steam proceso /usr/local/bin/steam; then steam_iniciado=1; fi
 fi
 
 # Limpieza periódica de memoria compartida huérfana en segundo plano.

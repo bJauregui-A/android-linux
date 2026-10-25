@@ -1,7 +1,7 @@
 #!/usr/bin/bash
 # Compila sway 1.12 con parches propios dentro del Arch de la app, contra el wlroots
 # parchado de ~/wlroots (wlroots/compilar-wlroots.sh: necesita el 0004, escala de contenido).
-# scripts/subir-sway-parchado.sh lo copia a ~/ junto con ~/src/sway-1.12.tar.gz y ~/src/parches-sway/.
+# Se corre desde ~/ con ~/src/sway-1.12.tar.gz y los parches en ~/src/parches-sway/ (copiarlos a mano).
 #   0001: una ventana cuyo tamaño mínimo no cabe en su espacio se dibuja achicada en vez
 #         de recortada (apps de escritorio en la pantalla del teléfono)
 #   0002: `xwayland_scale <n>` (config): Xwayland ve la pantalla en píxeles reales y sway

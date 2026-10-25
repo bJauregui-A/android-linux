@@ -131,8 +131,7 @@ if [ ! -e "$E/extraido" ]; then
             --exclude='usr/local/sway*' \
             --exclude='usr/local/lib/libudmabuf-shim.so' \
             --exclude='opt/gtk2*' \
-            --exclude='etc/skel/.config/kitty*' \
-            --exclude='usr/local/share/*/juegos*'
+            --exclude='etc/skel/.config/kitty*'
     else
         extraer "$CAPA_OFF" "$CAPA_LEN" "Capa GPU (Turnip, Zink, Mesa, wlroots, configs)"
     fi

@@ -39,25 +39,13 @@ android {
         }
     }
 
-    // Dos variantes para comparar las restricciones de ejecución (W^X) según targetSdk.
+    // Una sola variante; se conserva el sufijo .sdk36 para no cambiar el paquete instalado.
     flavorDimensions += "target"
     productFlavors {
-        create("sdk28") {
-            dimension = "target"
-            applicationIdSuffix = ".sdk28"
-            targetSdk = 28
-        }
         create("sdk36") {
             dimension = "target"
             applicationIdSuffix = ".sdk36"
             targetSdk = 36
-        }
-        // Igual a sdk36 pero aparte: para probar el APK autoinstalable desde cero sin tocar el Arch de la sdk36
-        create("prueba") {
-            dimension = "target"
-            applicationIdSuffix = ".prueba"
-            targetSdk = 36
-            manifestPlaceholders["etiqueta"] = "Linux (prueba)"
         }
     }
 
@@ -81,7 +69,7 @@ android {
     // Sin comprimir: instalar.sh los lee directo del APK por offset (Instalador.java).
     sourceSets {
         getByName("main").assets.srcDir(sessionLayerAssets)
-        for (v in listOf("sdk28", "sdk36", "prueba")) getByName(v).assets.srcDir("../trabajo/assets-$v")
+        getByName("sdk36").assets.srcDir("../trabajo/assets-sdk36")
     }
     androidResources {
         noCompress += "tgz"

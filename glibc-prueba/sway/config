@@ -1,6 +1,6 @@
 # sway en el teléfono, con los atajos y la apariencia de la config de Hyprland del PC
 # (HyDE, tema "Mine": Graphite Mono, sin bordes, huecos de 1 px, opacidad 0.90/0.75).
-# Fuente: glibc-prueba/sway/config; scripts/subir-sway.sh la copia a ~/.config/sway/.
+# Fuente: glibc-prueba/sway/config; apk/capa.py la instala en ~/.config/sway/ de las instancias nuevas.
 # Ver atajos en el teléfono: SUPER + /
 
 set $mod Mod4

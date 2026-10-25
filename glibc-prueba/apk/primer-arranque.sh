@@ -1,7 +1,7 @@
 #!/usr/bin/bash
 # Primer arranque, parte Linux (va en /usr/local/share/arch-android; lo lanza instalar.sh).
 # Deja el Arch completo: usuario, llavero, paquetes (lo mínimo + lo que se elija en el menú: ssh,
-# audio, Firefox, juegos...) y los ajustes que antes hacían a mano los scripts subir-*.sh.
+# audio, Firefox...) y los ajustes de la sesión.
 # Se puede volver a correr (pacman --needed); --elegir vuelve a mostrar el menú.
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 D=/usr/local/share/linux-android

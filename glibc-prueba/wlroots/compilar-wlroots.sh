@@ -1,6 +1,6 @@
 #!/usr/bin/bash
 # Compila wlroots 0.20.2 con parches propios dentro del Arch de la app (como Mesa).
-# scripts/subir-wlroots.sh lo copia a ~/ junto con ~/src/wlroots-0.20.2.tar.gz y ~/src/parches-wlroots/.
+# Se corre desde ~/ con ~/src/wlroots-0.20.2.tar.gz y los parches en ~/src/parches-wlroots/ (copiarlos a mano).
 #   0001: renderer Vulkan sin nodo DRM (Turnip con KGSL)
 #   0002: allocator android-ahb-v1 en el backend wayland (sway compone directo en el AHardwareBuffer)
 #   0003: linux-dmabuf sin nodo DRM (v3, sin feedback): los clientes de sway le pasan dmabufs

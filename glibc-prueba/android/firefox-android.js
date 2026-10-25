@@ -1,5 +1,5 @@
 // Firefox en Linux dentro de Android (va en /usr/lib/firefox/browser/defaults/preferences/; lo
-// copia scripts/subir-android.sh con @P@ = el prefijo). La glibc traduce /usr, /etc, ~... al
+// instala apk/capa.py con @P@ = el prefijo). La glibc traduce /usr, /etc, ~... al
 // prefijo antes de cada llamada, así que el broker del sandbox de contenido recibe rutas reales
 // del prefijo (y las resuelve: /data/user/0 → /data/data). Se permiten las mismas que la política
 // normal deja leer: sistema y ~/.config/mozilla.

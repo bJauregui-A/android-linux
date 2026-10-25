@@ -1,4 +1,4 @@
-# Generados o descargables: se reconstruyen con los scripts (ver glibc-prueba/PROYECTO.md)
+# Generados o descargables: se reconstruyen con los scripts (ver README.md)
 .gradle/
 build/
 .cxx/
