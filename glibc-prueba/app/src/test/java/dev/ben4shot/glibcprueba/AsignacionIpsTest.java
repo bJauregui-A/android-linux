@@ -50,4 +50,9 @@ public class AsignacionIpsTest {
         for (int i = 2; i <= 255; i++) ocupadas.add("10.0.0." + i);
         assertEquals("10.0.1.0", AsignacionIps.primeraLibre("10.0.0.0/16", ocupadas));
     }
+
+    @Test
+    public void primeraLibreEnOtroRango() {
+        assertEquals("192.168.5.2", AsignacionIps.primeraLibre("192.168.5.0/24", Collections.<String>emptyList()));
+    }
 }
