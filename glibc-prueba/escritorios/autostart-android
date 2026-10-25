@@ -54,21 +54,22 @@ boot_fail() { printf '\e[1;31m[FAILED]\e[0m %s\n' "$*" >> "$boot_file"; }
 registro() { printf '%s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$*" >> /tmp/autostart-android.log; }
 
 iniciar() {
-    local nombre=$1 espera=$2 log pid intento listo= max=20
+    local nombre=$1 espera=$2 log pid intento listo=
     shift 2
-    [ "$espera" = ssh ] && max=60   # sshd tarda más en la primera sesión de una instalación recién hecha
     log="$log_dir/$nombre.log"
     registro "$nombre STARTING ($*) log=$log"
     "$@" > "$log" 2>&1 &
     pid=$!
     pids+=("$pid")
     names+=("$nombre")
-    for intento in $(seq "$max"); do
+    for intento in $(seq 20); do
         kill -0 "$pid" 2>/dev/null || break
         case "$espera" in
             proceso) listo=1 ;;
-            # dentro de la instancia /dev/tcp/127.0.0.1:8022 no conecta aunque sshd escuche; con -e basta su log
-            ssh) grep -q 'Server listening' "$log" 2>/dev/null && listo=1 ;;
+            # la glibc (0022) mapea la IP virtual de la instancia (/etc/virtual-ip, p. ej. 10.0.0.4) a 127.0.0.4
+            # y sshd escucha ahí, no en 127.0.0.1: hay que conectar a la IP virtual
+            ssh) vip=$(cat /etc/virtual-ip 2>/dev/null); vip=${vip%%/*}
+                 (echo >"/dev/tcp/${vip:-127.0.0.1}/8022") >/dev/null 2>&1 && listo=1 ;;
             pipewire) pw-cli info 0 >/dev/null 2>&1 && listo=1 ;;
             pulse) pactl info >/dev/null 2>&1 && listo=1 ;;
         esac
