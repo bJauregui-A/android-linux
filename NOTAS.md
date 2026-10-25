@@ -968,7 +968,7 @@ Material de estudio (2026-10-25, solo PC, no toca el teléfono): `practica/` reo
 - **Pruebas** (`pruebas/cred/test.sh <instancia>`, 8 casos: `real`, `fake`, `cred`, `cola`, `exec`, `execenv`, `stat`, `wrapper`): **8/8 en Arch y en Debian**. Regresión: `sudo id` → uid 0, `ls -ln` (`/etc/shadow` 0:0, `~` y `/tmp` del usuario), `pacman -Qk` sin faltantes, reinicio de ssh con la libc nueva (`running`, AUTO yes).
 - **Costo:** `ls -lR /usr` Arch 0,42 → 0,56 s (+33 %), Debian 0,11 → 0,15 s (+37 %). Atajos posibles si molesta: caché de directorio por `dirfd`, o saltar el `getxattr` en `/usr`.
 - **Límites conocidos de la fase 1:** el dueño de archivos nuevos sale por la regla (no por el uid de quien los crea): fase 2. `chown` aún no guarda nada. Programas que hacen `getuid` por syscall directa (Go, estáticos de otra libc) ven el UID real. `/proc/<pid>/status` sigue mostrando el UID real.
-- **Libc instalada en las dos instancias** con `instalar-libc-en-instancia.sh` (respaldo y `--revertir`); APK: ver "Instalación" abajo.
+- **Libc instalada en las dos instancias** con `instalar-libc-en-instancia.sh` (respaldo y `--revertir`); **APK:** `armar.sh` + `assembleSdk36Debug` (hash de `libc.so.6` igual en `base.tgz`, `base-debian.tgz` y `glibc/salida`) e instalada con `adb install -r`; respaldo del APK anterior en `~/respaldos-apk/*-antes-credenciales/base.apk`; instancias intactas.
 
 **Siguiente sesión (81ª):** B27 fase 2: `chown` persistente (xattr), dueño de archivos nuevos según el fsuid, bloqueo de shadow (B18: `st_nlink = 2` en la copia de `linkat` sobre `*.lock`). Criterio: `sudo groupadd prueba`, `sudo useradd -m prueba` y `apt install apache2` en Debian sin error de `ssl-cert`.
 
