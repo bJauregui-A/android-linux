@@ -10,9 +10,12 @@ final class AsignacionIps {
 
     static String primeraLibre(String cidr, Collection<String> ipsOcupadas) {
         String[] partes = cidr.split("/");
-        long red = aNumero(partes[0]) & (0xFFFFFFFFL << (32 - Integer.parseInt(partes[1]))) & 0xFFFFFFFFL;
+        long mascara = (0xFFFFFFFFL << (32 - Integer.parseInt(partes[1]))) & 0xFFFFFFFFL;
+        long red = aNumero(partes[0]) & mascara;
+        long difusion = red | (~mascara & 0xFFFFFFFFL);
         long n = red + 2;
         while (ipsOcupadas.contains(aTexto(n))) n++;
+        if (n >= difusion) throw new IllegalStateException("Subred llena: " + cidr);
         return aTexto(n);
     }
 

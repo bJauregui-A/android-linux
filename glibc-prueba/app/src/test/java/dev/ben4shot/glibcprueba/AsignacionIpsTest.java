@@ -2,6 +2,7 @@ package dev.ben4shot.glibcprueba;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertThrows;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -54,5 +55,13 @@ public class AsignacionIpsTest {
     @Test
     public void primeraLibreEnOtroRango() {
         assertEquals("192.168.5.2", AsignacionIps.primeraLibre("192.168.5.0/24", Collections.<String>emptyList()));
+    }
+
+    @Test
+    public void primeraLibreConSubredLlenaFallaSinUsarLaDifusion() {
+        List<String> ocupadas = new ArrayList<>();
+        for (int i = 2; i <= 254; i++) ocupadas.add("10.0.0." + i);
+        assertThrows(IllegalStateException.class,
+                () -> AsignacionIps.primeraLibre("10.0.0.0/24", ocupadas));
     }
 }
