@@ -6,7 +6,7 @@ Documento de contexto del proyecto. Resume la idea, las decisiones tomadas (y po
 
 Que el teléfono (Redmi 15 5G, HyperOS, **sin root**) sea a la vez Android y un **Linux real y totalmente modificable**: programas de Arch Linux ARM sin recompilar corriendo nativos (glibc propia dentro de una app normal, sin proot ni emulación), con un **escritorio Wayland mínimo y modificable, tipo Hyprland adaptado al celular**, y **aceleración por GPU** (Turnip en la Adreno 619). Sin perder lo de Android que importa (apps bancarias chilenas, Play Store, cámara, pagos) y todo reversible: es una app, se desinstala y el teléfono queda igual. Más adelante, si se puede, Steam.
 
-## Para retomar (estado al 2026-10-22)
+## Para retomar (estado al 2026-10-25)
 
 | Frente | Estado |
 |---|---|
@@ -32,7 +32,9 @@ Que el teléfono (Redmi 15 5G, HyperOS, **sin root**) sea a la vez Android y un 
 | Hyprland (53ª) | ✅ arranca y se ve (confirmado): `anfitrion.c` responde al `configure` inicial también con `attach(NULL)` (Aquamarine) y reenvía el tamaño a todas las toplevel. Los otros 13 perfiles: re-verificar que se vean (el recorrido de la 52ª solo comprobaba proceso+socket). Contraseña de usuario: la pide ahora el instalador (`--contrasena`); falta probar desbloqueo |
 | Recetas sistema + escritorio | ✅ 14 perfiles de escritorio para Arch ARM64 (`sway`, `hyprland`, `labwc`, `xfce`, `lxqt`, `kde`, `plasma-movil`, `phosh`, `niri`, `cosmic`, `wayfire`, `river`, `qtile`, `weston`), todos instalados y probados en el dispositivo (`ESTADO=probado`) |
 | Proveedor y compositor X11 directo | ✅ proveedor `x11-directo` sin Wayland/Xwayland, `DISPLAY=:0`, comprobación `socket-x11`, perfiles Openbox y XFCE con compositing nativo (`picom`, `xfwm4`) |
-| Distribuciones adicionales (Debian ARM64) | ✅ `AdaptadorDebianArm64`, bootstrap oficial (`bootstrap-debian.py`), rootfs base `base-debian.tgz` (50 MB), configuración APT sin root y creación de instancias habilitada en la app |
+| Distribuciones adicionales (Debian ARM64) | ✅ `AdaptadorDebianArm64`, bootstrap oficial (`bootstrap-debian.py`), rootfs base `base-debian.tgz` (~177 MB, con `gpg`, `perl-base`, `usr-is-merged`), configuración APT sin root y creación de instancias habilitada en la app. Pendiente: `apt-get install build-essential git python3` y probar la terminal por `libldp.so` (BACKLOG B04, B13) |
+| Pacman (Arch ARM) | ✅ vuelto a la configuración previa a SteamOS Holo (25-oct): solo `[core]`/`[extra]`/`[alarm]` de Arch ARM, `IgnorePkg = glibc`, `SigLevel` de la plantilla (`Required DatabaseOptional`, firmas verificadas); sin `[holo-*]` ni `pacman-xfer`. Falta probar `pacman -Sy` con firmas en una instalación completa (B12) |
+| Instalador adaptativo (25-oct) | ✅ `instalar.sh` (sh de Android) y `primer-arranque.sh` (bash) dibujan los recuadros al ancho real de la terminal (`stty`/`tput`, una vez + SIGWINCH; dentro de pipes/`$(...)` stty no ve la terminal). Texto largo se pliega, filas de menú se cortan con «…». Probado a 54 columnas en el Redmi |
 | Entornos desde Dockerfile / OCI | ⏳ Inicialización declarativa de instancias basada en Dockerfile e importación de rootfs OCI con glibc propia |
 
 **52ª sesión (2026-10-21, repo + Redmi):** creado `scripts/recorrer-escritorios.sh` (ciclo `am force-stop` → escribir `/var/lib/arch-android/escritorio` → `am start WaylandActivity` → verificar `LISTO:<id>:<socket>` en `linux-session.estado` y mostrar cada escritorio en pantalla). Corregidos en `turnip/udmabuf-shim.c` el retorno `-ENOENT` de `drmGetDeviceFromDevId` para `libwlroots` con `WLR_RENDERER=vulkan`, la resolución de `libEGL.so.1` cargada por `dlopen`, `stat`/`fstatat` sobre `/dev/dri/renderD128` y `wlr_surface_reject_pending` para el commit inicial de `phosh home`; ajustados los lanzadores de `plasma-movil`, `cosmic`, `wayfire`, `lxqt`, `phosh` y `niri`. **Resultado del recorrido completo: 14 OK, 0 con fallo (de 14).** Recompilados e instalados `capa.tgz` y `sdk36Debug`.
@@ -584,14 +586,7 @@ Antecedente útil para ver qué parches hacen falta: el proyecto **glibc-package
 
 ## Próximos pasos
 
-1. **Compilar glibc propia** (cross-compile a aarch64 desde el PC, Arch Linux x86_64):
-   - Partir del PKGBUILD de glibc de Arch Linux ARM (misma versión 2.43) para mantener ABI.
-   - ✅ Primer parche mínimo: quitar `set_robust_list`/`rseq` → corre sin el rastreador.
-   - ✅ Traducción de rutas y `execve` vía cargador.
-2. ✅ Gestor de paquetes: pacman real (bootstrap desde el PC + pacman dentro de la app).
-3. ✅ Terminal dentro de la app (ver "Para retomar"), con DNS de Android en `/etc/resolv.conf` y servicio en primer plano.
-4. Binarios estáticos/static-pie: cargarlos en espacio de usuario desde `execve` (mapear segmentos, armar pila y auxv, saltar al punto de entrada).
-5. ✅ Compositor Wayland (anfitrión propio + sway anidado, ver "Para retomar"). Siguiente: Turnip + `vkcube`, cuadros por GPU (dmabuf/AHardwareBuffer), mejoras de entrada.
+La lista priorizada y al día está en [`../BACKLOG.md`](../BACKLOG.md) (`NOTAS.md` es la bitácora de qué pasó). Cerrado de la lista original: glibc propia, pacman, terminal, binarios estáticos (0023) y compositor Wayland con GPU. Lo que sigue: validar lo existente (P1: escritorios con imagen, X11 directo, instalación desde cero, Debian con `build-essential`), Dockerfile/OCI (P2) e integración con Android (P3).
 
 ## Archivos
 

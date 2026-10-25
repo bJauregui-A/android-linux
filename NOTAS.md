@@ -894,3 +894,4 @@ Cierre de pendientes (2026-10-25):
 - instalar.sh: el ancho se medía dentro de pipes (`fmt | while`) donde stty lee el pipe y cae a 60 (logcat: stty=[29 54]). Ahora `_medir` una vez + SIGWINCH, `_ancho` solo repite `$_AN`.
 - instalar.sh: `_vis` usa `tr -d "$(printf '\200-\277')"` (el tr de Android no entiende el escape octal y contaba bytes: la fila con acento quedaba 1 columna corta). Probado a 54 columnas.
 - Verificado en el teléfono (usuario, 25-oct): instalador y asistente correctos; instancias nuevas con `pacman.conf` previo a Holo (`IgnorePkg = glibc`, `SigLevel = Required DatabaseOptional`, sin holo/xfer). Pendiente: `pacman -Sy` con firmas (B12), terminal Debian (B04), B05/B06.
+- Repo: `.gitignore` con carpetas de agentes/editor, `practica/`, transcripción, `.codegraph/`, `graphify-out/`, `__pycache__/`; `PROYECTO.md` al día (estado 25-oct, pacman pre-Holo, instalador adaptativo, Próximos pasos → BACKLOG.md); AGENTS.md/GEMINI.md con el bloque CodeGraph.

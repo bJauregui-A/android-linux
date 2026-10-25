@@ -11,8 +11,10 @@ Origen: sesión de NOTAS (`76ª`), sección de `PROYECTO.md` o revisión del 202
 
 - [ ] **B03b · Instalar desde el PC la APK armada el 25-oct** (capa y APK ya regeneradas, ver B03 en "Hecho").
 - [ ] **B04 · Probar la terminal de Debian por `libldp.so`** (cambio en `AdaptadorDebianArm64.comandoTerminal` y en la consola de `SistemaActivity`, que además ahora llama `agregarEntorno`).
-- [ ] **B05 · Decidir qué archivos nuevos entran al repo:** `.claude/`, `.codex/`, `.gemini/`, `.agents/`, `.mcp.json`, `.vscode/`, `.graphifyignore`, `practica/`, `transcripcion_android_linux.txt`. Agregar `.codegraph/` y `graphify-out/` a `.gitignore`.
-- [ ] **B06 · Poner al día `PROYECTO.md`:** "Para retomar" dice 2026-10-22; "Próximos pasos" está obsoleto (los binarios estáticos ya están, 0023). Considerar archivar las sesiones viejas de `NOTAS.md` (884 líneas).
+- [x] **B05 · Decidir qué archivos nuevos entran al repo:** `.claude/`, `.codex/`, `.gemini/`, `.agents/`, `.mcp.json`, `.vscode/`, `.graphifyignore`, `practica/`, `transcripcion_android_linux.txt`. Agregar `.codegraph/` y `graphify-out/` a `.gitignore`.
+  - Hecho 25-oct: `.gitignore` actualizado con las carpetas de agentes/editor, `practica/`, la transcripción, `.codegraph/`, `graphify-out/` y `__pycache__/`.
+- [x] **B06 · Poner al día `PROYECTO.md`:** "Para retomar" dice 2026-10-22; "Próximos pasos" está obsoleto (los binarios estáticos ya están, 0023). Considerar archivar las sesiones viejas de `NOTAS.md` (884 líneas).
+  - Hecho 25-oct: `PROYECTO.md` al día (25-oct); falta, si se quiere, archivar sesiones viejas de `NOTAS.md`.
 
 ## P1 — Validar lo que ya existe
 

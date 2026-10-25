@@ -12,3 +12,17 @@ glibc-prueba/glibc/build.log
 glibc-prueba/wayland/fuentes/
 glibc-prueba/wayland/salida/
 .idea/
+
+# Herramientas de agentes/editor y material suelto: no van al repo
+.agents/
+.claude/
+.codex/
+.gemini/
+.mcp.json
+.vscode/
+.graphifyignore
+.codegraph/
+graphify-out/
+practica/
+transcripcion_android_linux.txt
+__pycache__/
