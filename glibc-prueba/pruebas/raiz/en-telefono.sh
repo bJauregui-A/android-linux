@@ -16,7 +16,7 @@ chk C14 "ls /../.."                "$(ls /../..)"        "$raiz"
 # Se elige un archivo que SÍ exista en ella, para que el fallo no sea casual.
 base=$(dirname "$GLIBC_PREFIX"); yo=$(basename "$GLIBC_PREFIX")
 otra=; arch=
-for d in $(ls "$base" 2>/dev/null | grep -vx "$yo"); do
+for d in $(ls "$base" 2>/dev/null | grep -vx -- "$yo"); do
   for f in etc/os-release etc/passwd; do
     [ -f "$base/$d/$f" ] && { otra=$d; arch=$f; break 2; }
   done

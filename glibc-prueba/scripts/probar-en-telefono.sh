@@ -1,14 +1,14 @@
 #!/bin/bash
 # B29: corre un script de prueba DENTRO de la app (mismo seccomp, misma glibc) en una
 # instancia, desde el PC por adb. Imprime la salida y sale con el código del script.
-#   probar-en-telefono.sh [--conservar] [--abrir] <instancia> <script-local> [limite-seg]
+#   probar-en-telefono.sh [--conservar] [--abrir] [--] <instancia> <script-local> [limite-seg]
 # Códigos: los del script; 124 por límite de tiempo; 2 error de pedido; 3 no llegó al app.
 # Requiere una APK de depuración con ReceptorPruebas. Solo escribe en la carpeta de la app:
 # <instancia>/tmp/prueba-<id>.sh y files/pruebas/<id>/ (se borran al terminar).
 APP=${APP:-dev.ben4shot.glibcprueba.sdk36}
 conservar=0; abrir=0
 while [[ $1 == --* ]]; do
-  case $1 in --conservar) conservar=1;; --abrir) abrir=1;; *) echo "opción desconocida: $1" >&2; exit 2;; esac
+  case $1 in --conservar) conservar=1;; --abrir) abrir=1;; --) shift; break;; *) echo "opción desconocida: $1" >&2; exit 2;; esac
   shift
 done
 inst=$1; local_sh=$2; limite=${3:-300}
