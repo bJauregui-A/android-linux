@@ -6,7 +6,6 @@ El detalle técnico de los ítems anteriores (B04–B61) está en `git show c268
 
 ## P0 — Terminar lo que quedó a medias
 
-- **B85** · Como usuario, quiero que la app no deje carpetas sueltas de instancias que no existen, para no gastar espacio ni confundirme (hoy quedó `files/instancias/arch-arm64` del error de la IP virtual, ya corregido en `b7fb8d3`). Tampoco libera la IP virtual al borrar una instancia: `debian-63996` sigue en `/etc/hosts` y la siguiente Debian recibió su misma IP.
 - **B86** · Como usuario, quiero que las instancias lean una tabla de red común por subred, para que los nombres e IP de las demás estén siempre al día sin reescribir archivos en cada una.
   - Idea (25-oct): `files/red/<subred>/hosts` lo escribe solo `RedManager` cuando cambia la tabla; el `/etc/hosts` de cada instancia es un enlace a la de su subred (`/data` ya pasa sin traducir, sin tocar la glibc). Gateway calculado del CIDR, no `10.0.0.1` fijo. El nombre de equipo propio no cabe en la tabla común: `hosts: files myhostname dns` con `nss-myhostname` (comprobar que esté en las bases de Arch y Debian), o parche de glibc si no. No mover las instancias de carpeta (`files/` ya es la raíz común: `instancias/`, `ips/`).
 - **B12** · Como usuario, quiero instalar Arch con sway desde un APK limpio y volver a abrirlo después de cerrar la app, para confiar en que la instalación funciona de punta a punta.
