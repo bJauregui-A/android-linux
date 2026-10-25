@@ -887,3 +887,4 @@ Cierre de pendientes (2026-10-25):
 - Retirado SteamOS Holo: borrados `apk/pacman-xfer`, XferCommand/repos holo en `bootstrap.py`, bloques muertos en `instalar.sh`/`primer-arranque.sh`; Arch ARM vuelve a verificar firmas (sin `SigLevel = Never` global).
 - Recuadros del instalador: nuevas funciones `caja_sup/med/inf/lin` (en `instalar.sh` y `primer-arranque.sh`) miden el ancho real con `tput cols`/`stty size` (60 de respaldo) y rellenan según el texto visible.
 - `armar.sh`: `$Z` se define antes de la rama de Debian. Capa/base/APK `sdk36Debug` regeneradas; **sin instalar** (pendiente desde el PC) y B04 (terminal Debian por libldp.so) sin probar.
+- Pacman vuelto al estado previo a Holo: `bootstrap.py` idéntico al del commit 69c84a8 (sin HoldPkg, `IgnorePkg = glibc`, `SigLevel` de la plantilla). Base/APK regeneradas, sin instalar.

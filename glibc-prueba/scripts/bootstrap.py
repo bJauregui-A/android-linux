@@ -276,8 +276,7 @@ def main():
     conf = re.sub(r"(?m)^CheckSpace", "#CheckSpace", conf)
     conf = re.sub(r"(?m)^DownloadUser", "#DownloadUser", conf)
     conf = re.sub(r"(?m)^#?DisableSandbox.*$", "", conf)
-    conf = re.sub(r"(?m)^#?HoldPkg\s*=.*$", "HoldPkg     = pacman glibc sway wlroots mesa", conf, count=1)
-    conf = re.sub(r"(?m)^#?IgnorePkg\s*=.*$", "IgnorePkg   = glibc sway wlroots mesa", conf, count=1)
+    conf = re.sub(r"(?m)^#?IgnorePkg\s*=.*$", "IgnorePkg   = glibc", conf, count=1)
     conf = re.sub(r"(?m)^#?NoExtract\s*=.*$",
                   "NoExtract   = usr/bin/ldconfig " + " ".join(f"usr/lib/{f}" for f in libs),
                   conf, count=1)
