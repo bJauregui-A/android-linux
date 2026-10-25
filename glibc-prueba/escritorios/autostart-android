@@ -182,8 +182,15 @@ if [ -x /usr/local/bin/service-daemon ]; then
 fi
 
 # sshd en foreground para que el supervisor pueda detener exactamente su proceso; -e deja sus errores en su log.
-if [ -x /usr/bin/sshd ] && ! pgrep -x sshd >/dev/null 2>&1; then
-    iniciar sshd ssh /usr/bin/sshd -D -e || true
+# Arch lo instala en /usr/bin y Debian en /usr/sbin. Si el usuario hizo 'service enable ssh', lo arranca
+# service-daemon (ya iniciado arriba) y aquí no se duplica: dos sshd chocarían en el puerto 8022.
+sshd_bin=
+for c in /usr/bin/sshd /usr/sbin/sshd; do
+    [ -x "$c" ] && { sshd_bin=$c; break; }
+done
+if [ -n "$sshd_bin" ] && ! pgrep -x sshd >/dev/null 2>&1 \
+        && ! grep -qxE 'ssh|sshd' /var/lib/supervisor/enabled.txt 2>/dev/null; then
+    iniciar sshd ssh "$sshd_bin" -D -e || true
 fi
 
 # PipeWire → FIFO → AudioTrack de Android y compatibilidad PulseAudio para Linux/Wine.

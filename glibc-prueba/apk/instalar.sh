@@ -214,6 +214,11 @@ EOF
         grep -q "^sshd:" "$P/etc/passwd" || echo "sshd:x:100:65534::/run/sshd:/usr/sbin/nologin" >> "$P/etc/passwd"
         mkdir -p "$P/run/sshd" 2>/dev/null || true
     fi
+    # Debian no usa ld.so.cache: sin esto las sesiones de sshd (entorno limpio, sin PAM) no encuentran
+    # libtinfo y demás en /lib/aarch64-linux-gnu y bash muere al entrar por ssh.
+    mkdir -p "$P/etc/ssh/sshd_config.d" 2>/dev/null || true
+    echo "SetEnv LD_LIBRARY_PATH=/usr/lib/aarch64-linux-gnu:/lib/aarch64-linux-gnu:/usr/lib:/lib" \
+        > "$P/etc/ssh/sshd_config.d/20-debian-libs.conf"
 
     # Enlaces de compatibilidad awk y nologin
     [ -x "$P/usr/bin/mawk" ] && [ ! -e "$P/usr/bin/awk" ] && ln -sfn mawk "$P/usr/bin/awk" 2>/dev/null || true
