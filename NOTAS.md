@@ -893,3 +893,4 @@ Cierre de pendientes (2026-10-25):
 - Recuadros de primer-arranque.sh reescritos en bash puro (sin forks, ancho medido una vez + SIGWINCH; dentro de $(...) tput/stty no ven la terminal): `caja_item` corta con … una fila por entrada en los menús, `caja_lin` pliega prosa. Probado a 51 columnas en locale UTF-8 y C.
 - instalar.sh: el ancho se medía dentro de pipes (`fmt | while`) donde stty lee el pipe y cae a 60 (logcat: stty=[29 54]). Ahora `_medir` una vez + SIGWINCH, `_ancho` solo repite `$_AN`.
 - instalar.sh: `_vis` usa `tr -d "$(printf '\200-\277')"` (el tr de Android no entiende el escape octal y contaba bytes: la fila con acento quedaba 1 columna corta). Probado a 54 columnas.
+- Verificado en el teléfono (usuario, 25-oct): instalador y asistente correctos; instancias nuevas con `pacman.conf` previo a Holo (`IgnorePkg = glibc`, `SigLevel = Required DatabaseOptional`, sin holo/xfer). Pendiente: `pacman -Sy` con firmas (B12), terminal Debian (B04), B05/B06.
