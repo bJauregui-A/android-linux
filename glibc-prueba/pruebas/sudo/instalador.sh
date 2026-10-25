@@ -32,6 +32,13 @@ caso "conserva LD_LIBRARY_PATH"             'grep -q "env_keep += \"LD_LIBRARY_P
 caso "modo 440 y dueño root"                '[ "$(stat -c "%a %u %g" $SUDOERS 2>/dev/null)" = "440 0 0" ]'
 caso "sudo la acepta (visudo -c)"           'GLIBC_FAKEROOT=1 visudo -cf $SUDOERS >/dev/null 2>&1 || ! command -v visudo >/dev/null'
 
-GLIBC_FAKEROOT=1 rm -f $SUDOERS $SUDOERS.nuevo
+# En una terminal (como en kitty), sudo abre su propia pty (use_pty) y Android no lo deja.
+NP=/etc/sudoers.d/99-prueba-b62-np
+printf '%s ALL=(root) NOPASSWD: /usr/bin/id\n' "$N" | GLIBC_FAKEROOT=1 tee $NP >/dev/null
+GLIBC_FAKEROOT=1 chmod 440 $NP
+salida_tty=$(script -qec "sudo -n /usr/bin/id -u" /dev/null 2>&1 | tr -d '\r')
+caso "sudo en una terminal (pty)"           '[ "$salida_tty" = 0 ] || { echo "      $salida_tty"; false; }'
+
+GLIBC_FAKEROOT=1 rm -f $SUDOERS $SUDOERS.nuevo $NP
 echo "fallas: $fallas"
 [ $fallas -eq 0 ]

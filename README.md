@@ -96,6 +96,7 @@ Flujo: `/backlog` (historias) → `/story <historia>` (genera `plan.md`) → `/p
 - `adb install -r`, `am force-stop`, reiniciar sway o instalar una libc en la instancia en uso **matan la sesión** (también al agente si corre dentro del teléfono).
 - glibc: si se agregan `.c` nuevos a `sysdeps`, hay que borrar `glibc/build/` (o al menos `sysd-syscalls` y los `.o`). La lista de stubs se genera una sola vez.
 - Debian no usa `ld.so.cache`: depende de `LD_LIBRARY_PATH`, que hay que pasar también a ssh (`SetEnv`) y a sudo (`env_keep`).
+- sudo no puede abrir su propia pty dentro de la app (`unable to allocate pty`): la regla del instalador lleva `Defaults !use_pty`.
 - El `tar` de la base no conserva setuid: `primer-arranque.sh` lo vuelve a poner (`sudo`, `su`, `passwd`...).
 - Programas que no pasan por la glibc para `getuid` (Go, estáticos de otra libc) ven el UID real. `/proc/<pid>/status` también lo muestra.
 - Los servicios de una instancia escuchan en su `127.0.0.N`, no en `127.0.0.1`.

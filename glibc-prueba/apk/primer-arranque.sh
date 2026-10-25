@@ -792,7 +792,9 @@ activar_sudo() {
     done
     mkdir -p /etc/sudoers.d
     # Todo el contenido antes del chmod 440: después el usuario ya no puede escribirlo.
+    # !use_pty: sudo no puede abrir su propia pty dentro de la app ("unable to allocate pty").
     { printf '%s ALL=(ALL:ALL) ALL\n' "$N"
+      echo 'Defaults !use_pty'
       [ -z "${LD_LIBRARY_PATH:-}" ] || echo 'Defaults env_keep += "LD_LIBRARY_PATH"'; } > "$SUDOERS.nuevo" \
         && chmod 440 "$SUDOERS.nuevo" \
         && GLIBC_FAKEROOT=1 chown root:root "$SUDOERS.nuevo" && mv -f "$SUDOERS.nuevo" "$SUDOERS" || return 1
