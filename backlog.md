@@ -9,7 +9,36 @@ El detalle técnico de los ítems anteriores (B04–B61) está en `git show c268
 - **B62** · Como usuario, quiero que una instancia nueva (Arch y Debian) tenga desde el primer arranque `sudo` real con mi contraseña, para administrarla como cualquier Linux.
 - **B12** · Como usuario, quiero instalar Arch con sway desde un APK limpio y volver a abrirlo después de cerrar la app, para confiar en que la instalación funciona de punta a punta.
 
-## P1 — Validar lo que ya existe
+## P1 — Escritorios por distribución
+
+Cada distro ofrece la lista de su instalador oficial (archinstall, tasksel, sabores de Ubuntu). Lo no probado se muestra como experimental.
+
+- **B64** · Como usuario, quiero ver junto a cada escritorio del menú si usa Wayland o X11, para saber qué compositor voy a tener.
+- **B65** · Como usuario de Arch, quiero que el menú muestre los escritorios que ofrece archinstall, con los no probados marcados como experimentales, para elegir como en una instalación real.
+- **B66** · Como usuario de Debian, quiero que el menú muestre los escritorios que ofrece tasksel, instalados con paquetes de Debian, para elegir como en una instalación real.
+- **B67** · Como usuario de Debian, quiero tener XFCE probado y funcionando, para contar con al menos un escritorio seguro.
+- **B19** · Como usuario de Debian, quiero que `/bin`, `/sbin` y `/lib` estén unificados con `/usr` como en un Debian actual, para que los paquetes que lo asumen funcionen (lo exigen Debian 13 y Ubuntu).
+- **B68** · Como usuario, quiero elegir entre Debian 12 y Debian 13 al crear una instancia, para usar la versión que necesito.
+- **B69** · Como usuario, quiero crear una instancia de Ubuntu 24.04 LTS, para usar sus paquetes.
+- **B70** · Como usuario, quiero elegir entre Ubuntu 24.04 y 26.04 LTS al crear una instancia de Ubuntu, para usar la versión que necesito.
+- **B71** · Como usuario de Ubuntu, quiero que el menú muestre los escritorios de los sabores oficiales (Ubuntu, Kubuntu, Xubuntu, Lubuntu, MATE, Budgie, Unity, Cinnamon), para elegir como en una instalación real.
+- **B72** · Como usuario de Ubuntu, quiero tener LXQt (Lubuntu) probado y funcionando, para contar con al menos un escritorio seguro.
+
+Escritorios del instalador oficial que todavía no tenemos (uno por historia; cada uno deja de ser experimental cuando se prueba):
+- **B73** · Como usuario, quiero usar GNOME.
+- **B74** · Como usuario de Debian, quiero usar GNOME Flashback.
+- **B75** · Como usuario, quiero usar Cinnamon.
+- **B76** · Como usuario, quiero usar MATE.
+- **B77** · Como usuario, quiero usar Budgie.
+- **B78** · Como usuario de Debian, quiero usar LXDE.
+- **B79** · Como usuario de Ubuntu, quiero usar Unity.
+- **B80** · Como usuario de Arch, quiero usar i3.
+- **B81** · Como usuario de Arch, quiero usar bspwm.
+- **B82** · Como usuario de Arch, quiero usar awesome.
+- **B83** · Como usuario de Arch, quiero usar Enlightenment.
+- **B84** · Como usuario de Arch, quiero usar Deepin.
+
+## P2 — Validar lo que ya existe
 
 - **B10** · Como usuario, quiero que los dos escritorios que hoy quedan en negro o en gris muestren imagen, para poder elegir cualquiera de los 14.
 - **B11** · Como usuario, quiero usar los escritorios X11 directos (Openbox, XFCE X11), para tener una alternativa sin Wayland.
@@ -22,12 +51,11 @@ El detalle técnico de los ítems anteriores (B04–B61) está en `git show c268
 - **B42** · Como usuario, quiero llegar a un servicio de mi instancia por `127.0.0.1`, para que los programas que asumen loopback funcionen sin configurarlos.
 - **B41** · Como usuario, quiero que el menú de escritorios del instalador responda al instante, para elegir sin esperas.
 
-## P2 — Plan vigente
+## P3 — Plan vigente
 
 - **B27a** · Como usuario, quiero que `sshd` corra como root con separación de privilegios, como en Linux, para usar la configuración oficial de OpenSSH.
 - **B27b** · Como usuario, quiero que Apache atienda con sus procesos como `www-data`, para correr servidores web tal como vienen empaquetados.
 - **B53** · Como usuario de Debian, quiero que la instancia traiga los usuarios de sistema estándar (`www-data`, `nobody`...) y `hostname`, para que los paquetes se instalen sin errores.
-- **B19** · Como usuario de Debian, quiero que `/bin`, `/sbin` y `/lib` estén unificados con `/usr` como en un Debian actual, para que los paquetes que lo asumen funcionen.
 - **B23** · Como usuario, quiero que al actualizar la app mis instancias reciban la glibc y las herramientas nuevas sin reinstalarlas, para no perder lo que tengo.
 - **B28** · Como usuario, quiero copiar o renombrar una instancia sin que se rompan sus enlaces, para duplicar un entorno que ya funciona (hoy los enlaces y algunas configs de la base apuntan a `files/archlinux`).
 - **B22** · Como usuario, quiero exportar una instancia a un archivo y restaurarla, para tener respaldos.
@@ -41,12 +69,11 @@ El detalle técnico de los ítems anteriores (B04–B61) está en `git show c268
 - **B45** · Como desarrollador, quiero que una prueba compruebe que las instancias nuevas traen la glibc recién compilada, para no publicar un APK con la libc vieja.
 - **B63** · Como desarrollador, quiero regenerar desde una instancia actual lo compilado en el teléfono (Mesa, wlroots, sway, mesa-gl), para poder rearmar el APK si se pierde `trabajo/compilados.tar`.
 - **B20** · Como usuario, quiero crear una instancia a partir de un Dockerfile, para reproducir entornos declarados.
-- **B21** · Como usuario, quiero crear una instancia de Ubuntu, para usar sus paquetes.
 - **B24a** · Como usuario, quiero que los programas que usan colas de mensajes SysV funcionen, para no quedar fuera por esa falta.
 - **B24b** · Como usuario, quiero que la memoria compartida no ocupe disco ni deje basura al cerrarse los programas, para no llenar el almacenamiento.
 - **B25** · Como desarrollador, quiero pasar los parches a la próxima glibc de Arch ARM, para seguir instalando paquetes nuevos.
 
-## P3 — Escritorio completo e integración con Android
+## P4 — Escritorio completo e integración con Android
 
 - **B30** · Como usuario, quiero ver la batería real del teléfono en la barra del escritorio, para saber cuánta carga me queda.
 - **B31** · Como usuario, quiero que KDE, COSMIC y los bloqueadores encuentren un gestor de sesión mínimo, para que no fallen las funciones que lo piden.
