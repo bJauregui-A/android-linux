@@ -7,6 +7,8 @@ El detalle técnico de los ítems anteriores (B04–B61) está en `git show c268
 ## P0 — Terminar lo que quedó a medias
 
 - **B62** · Como usuario, quiero que una instancia nueva (Arch y Debian) tenga desde el primer arranque `sudo` real con mi contraseña, para administrarla como cualquier Linux.
+  - Avance 25-oct: el instalador dejaba la regla a medias (`.nuevo` + wrapper) y sudo fallaba en terminal (`unable to allocate pty`); arreglado en `b7fb8d3` y `bffcfc2`, prueba `pruebas/sudo/instalador.sh` 8/8. Corregido a mano en `arch-principal` (sudo pide contraseña y da root, confirmado por el usuario). APK instalada 17:22. **Falta:** crear una Arch y una Debian nuevas con ＋ CREAR y comprobar sudo sin tocar nada.
+- **B85** · Como usuario, quiero que la app no deje carpetas sueltas de instancias que no existen, para no gastar espacio ni confundirme (hoy quedó `files/instancias/arch-arm64` del error de la IP virtual, ya corregido en `b7fb8d3`).
 - **B12** · Como usuario, quiero instalar Arch con sway desde un APK limpio y volver a abrirlo después de cerrar la app, para confiar en que la instalación funciona de punta a punta.
 
 ## P1 — Escritorios por distribución
