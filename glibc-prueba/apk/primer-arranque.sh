@@ -12,47 +12,78 @@ mkdir -p "$E" 2>/dev/null || true
 [ -e /var/lib/arch-android ] || ln -sfn linux-android /var/lib/arch-android 2>/dev/null || true
 [ -e /usr/local/share/arch-android ] || ln -sfn linux-android /usr/local/share/arch-android 2>/dev/null || true
 
-# Recuadros: el ancho se mide en la terminal real cada vez que se dibuja (tput/stty; 60 si no hay).
-_ancho() {
-    _a=$(tput cols 2>/dev/null) || _a=
-    case $_a in ''|*[!0-9]*) _a=$(stty size 2>/dev/null | cut -d' ' -f2) || _a= ;; esac
-    case $_a in ''|*[!0-9]*) _a=60 ;; esac
-    [ "$_a" -ge 20 ] || _a=20
-    echo "$_a"
+# Recuadros (bash puro, sin procesos hijos: los menús se redibujan en cada tecla).
+# El ancho se mide UNA vez en la terminal real (dentro de $(...) tput/stty ya no la ven) y se
+# vuelve a medir con SIGWINCH; 60 si no se puede.
+_medir() {
+    local a
+    a=$(stty size 2>/dev/null </dev/tty | cut -d' ' -f2) || a=
+    case $a in ''|*[!0-9]*) a=$(tput cols 2>/dev/null </dev/tty) || a= ;; esac
+    case $a in ''|*[!0-9]*) a=${COLUMNS:-} ;; esac
+    case $a in ''|*[!0-9]*) a=60 ;; esac
+    [ "$a" -ge 20 ] || a=20
+    _AN=$a
+    printf -v _DASH '%*s' $((_AN - 2)) ''
+    _DASH=${_DASH// /─}
 }
-# columnas visibles de un texto: sin secuencias de color y sin bytes de continuación UTF-8
-_vis() { printf '%s' "$1" | sed "s/$(printf '\033')\[[0-9;]*m//g" | LC_ALL=C tr -d '\200-\277' | wc -c; }
-_rep() { [ "$1" -gt 0 ] && printf '%*s' "$1" '' | sed 's/ /─/g'; }
-# caja_sup COLOR [TITULO_FMT args...] · caja_med COLOR · caja_inf COLOR · caja_lin COLOR FMT args...
+_u=ñ; _UTF8=0; [ ${#_u} -eq 1 ] && _UTF8=1
+_medir
+trap _medir WINCH
+# _vis TEXTO → _P (sin colores) y _V (columnas visibles)
+_vis() {
+    _P=$1
+    while [[ $_P == *$'\e['* ]]; do _P=${_P%%$'\e['*}${_P#*$'\e['*m}; done
+    if [ $_UTF8 = 1 ]; then _V=${#_P}
+    else local t=${_P//[^$'\200'-$'\277']/}; _V=$((${#_P} - ${#t})); fi
+}
+# _cortar TEXTO MAX → _C: TEXTO con a lo sumo MAX columnas visibles (conserva los colores, añade …)
+_cortar() {
+    local s=$1 max=$2 i=0 n=${#1} v=0 ch r q
+    _C=
+    _vis "$s"
+    if [ "$_V" -le "$max" ]; then _C=$s; return; fi
+    while [ $i -lt $n ]; do
+        ch=${s:i:1}
+        if [ "$ch" = $'\e' ]; then
+            r=${s:i}; q=${r%%m*}m; _C+=$q; i=$((i + ${#q}))
+        elif [[ $ch == [$'\200'-$'\277'] ]]; then   # byte de continuación UTF-8 (locale C): no cuenta
+            _C+=$ch; i=$((i + 1))
+        else
+            [ $v -lt $((max - 1)) ] || break
+            _C+=$ch; i=$((i + 1)); v=$((v + 1))
+        fi
+    done
+    _C+=$'…\e[0m'
+}
+_fila() { # COLOR TEXTO COLUMNAS
+    local n=$((_AN - 2 - $3)); [ $n -ge 0 ] || n=0
+    printf '%b│\e[0m%s%*s%b│\e[0m\n' "$1" "$2" "$n" '' "$1"
+}
+# caja_sup COLOR [TITULO_FMT args...] · caja_med COLOR · caja_inf COLOR
+# caja_lin COLOR FMT args... (si no cabe se pliega) · caja_item COLOR FMT args... (si no cabe se corta con …)
 caja_sup() {
-    _c=$1; _w=$(_ancho)
+    local c=$1 t n d
     if [ -n "$2" ]; then
-        _f=$2; shift 2
-        _t=$(printf "$_f" "$@")
-        _n=$((_w - 5 - $(_vis "$_t"))); [ "$_n" -ge 1 ] || _n=1
-        printf '%b┌─ %s %s┐\e[0m\n' "$_c" "$_t" "$(_rep $_n)"
-    else
-        printf '%b┌%s┐\e[0m\n' "$_c" "$(_rep $((_w - 2)))"
-    fi
+        printf -v t "$2" "${@:3}"; _vis "$t"
+        n=$((_AN - 5 - _V)); [ $n -ge 1 ] || n=1
+        printf -v d '%*s' $n ''
+        printf '%b┌─ %s %s┐\e[0m\n' "$c" "$t" "${d// /─}"
+    else printf '%b┌%s┐\e[0m\n' "$c" "$_DASH"; fi
 }
-caja_med() { printf '%b├%s┤\e[0m\n' "$1" "$(_rep $(($(_ancho) - 2)))"; }
-caja_inf() { printf '%b└%s┘\e[0m\n' "$1" "$(_rep $(($(_ancho) - 2)))"; }
-# una fila del recuadro con el texto ya formateado (sin plegar)
-_fila() {
-    _n=$(($(_ancho) - 2 - $(_vis "$2"))); [ "$_n" -ge 0 ] || _n=0
-    printf '%b│\e[0m%s%*s%b│\e[0m\n' "$1" "$2" "$_n" '' "$1"
-}
-# si el texto no cabe se pliega (sin colores) en varias filas dentro del recuadro
+caja_med() { printf '%b├%s┤\e[0m\n' "$1" "$_DASH"; }
+caja_inf() { printf '%b└%s┘\e[0m\n' "$1" "$_DASH"; }
 caja_lin() {
-    _c=$1; _f=$2; shift 2
-    _b=$(printf "$_f" "$@")
-    _w=$(_ancho)
-    if [ "$(_vis "$_b")" -le $((_w - 2)) ]; then
-        _fila "$_c" "$_b"
+    local c=$1 b l
+    printf -v b "$2" "${@:3}"; _vis "$b"
+    if [ "$_V" -le $((_AN - 2)) ]; then _fila "$c" "$b" "$_V"
     else
-        printf '%s' "$_b" | sed "s/$(printf '\033')\[[0-9;]*m//g; s/^ *//" | fmt -w $((_w - 6)) |
-            while IFS= read -r _l; do _fila "$_c" "  $_l"; done
+        while IFS= read -r l; do _vis "$l"; _fila "$c" "  $l" $((_V + 2)); done < <(printf '%s\n' "${_P# }" | fmt -w $((_AN - 6)))
     fi
+}
+caja_item() {
+    local c=$1 b
+    printf -v b "$2" "${@:3}"; _cortar "$b" $((_AN - 2)); _vis "$_C"
+    _fila "$c" "$_C" "$_V"
 }
 
 # Funciones de estilo
@@ -333,10 +364,10 @@ if [ ! -s $E/escritorio ]; then
              fi
              tam=${TAMANO//[()]/}
              if [ "$i" -eq "$idx_esc" ]; then
-                 caja_lin '\e[1;38;5;111m' ' \e[1;38;5;51m❯\e[0m \e[1;38;5;48m[✔]\e[0m \e[1;38;5;15;48;5;238m %s\e[0m %s \e[1;38;5;252m%s\e[0m' \
+                 caja_item '\e[1;38;5;111m' ' \e[1;38;5;51m❯\e[0m \e[1;38;5;48m[✔]\e[0m \e[1;38;5;15;48;5;238m %s\e[0m %s \e[1;38;5;252m%s\e[0m' \
                      "$NOMBRE" "$e" "$tam"
              else
-                 caja_lin '\e[1;38;5;111m' '   \e[38;5;245m[ ]\e[0m \e[1;38;5;51m%s\e[0m %s \e[38;5;248m%s\e[0m' \
+                 caja_item '\e[1;38;5;111m' '   \e[38;5;245m[ ]\e[0m \e[1;38;5;51m%s\e[0m %s \e[38;5;248m%s\e[0m' \
                      "$NOMBRE" "$e" "$tam"
              fi
             )
@@ -503,9 +534,9 @@ editar_paquetes_grupo() {
             esac
 
             if [ "$j" -eq "$idx_pkg" ]; then
-                caja_lin '\e[1;38;5;111m' ' \e[1;38;5;51m❯\e[0m %s \e[1;38;5;15;48;5;238m %s\e[0m' "$chk" "${p_desc:0:52}"
+                caja_item '\e[1;38;5;111m' ' \e[1;38;5;51m❯\e[0m %s \e[1;38;5;15;48;5;238m %s\e[0m' "$chk" "${p_desc:0:52}"
             else
-                caja_lin '\e[1;38;5;111m' '   %s \e[38;5;250m%s\e[0m' "$chk" "${p_desc:0:54}"
+                caja_item '\e[1;38;5;111m' '   %s \e[38;5;250m%s\e[0m' "$chk" "${p_desc:0:54}"
             fi
         done
 
@@ -595,10 +626,10 @@ else
             fi
             local info_p="($sel_p/$total_p)"
             if [ "$i" -eq "$idx_actual" ]; then
-                caja_lin '\e[1;38;5;111m' ' \e[1;38;5;51m❯\e[0m %s \e[1;38;5;15m%s\e[0m \e[38;5;81m%s\e[0m \e[38;5;245m[TAB]\e[0m' \
+                caja_item '\e[1;38;5;111m' ' \e[1;38;5;51m❯\e[0m %s \e[1;38;5;15m%s\e[0m \e[38;5;81m%s\e[0m \e[38;5;245m[TAB]\e[0m' \
                     "$chk" "${TEXTOS[$i]:0:40}" "$info_p"
             else
-                caja_lin '\e[1;38;5;111m' '   %s \e[38;5;250m%s\e[0m \e[38;5;245m%s\e[0m' \
+                caja_item '\e[1;38;5;111m' '   %s \e[38;5;250m%s\e[0m \e[38;5;245m%s\e[0m' \
                     "$chk" "${TEXTOS[$i]:0:40}" "$info_p"
             fi
         done

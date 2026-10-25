@@ -890,3 +890,4 @@ Cierre de pendientes (2026-10-25):
 - Pacman vuelto al estado previo a Holo: `bootstrap.py` idéntico al del commit 69c84a8 (sin HoldPkg, `IgnorePkg = glibc`, `SigLevel` de la plantilla). Base/APK regeneradas, sin instalar.
 - Fix: `_ancho()` moría bajo `set -e` cuando `tput` no existe en Android (el instalador cerraba tras el banner). Ahora `|| _a=`; probado en el sh del teléfono con `set -e`.
 - Fix: caja_lin pliega con fmt el texto que no cabe en el ancho real; instalar.sh exporta TMPDIR=$P/tmp (mksh no podía crear el temporal de los heredocs en /data/local: 'Permission denied' tras extraer).
+- Recuadros de primer-arranque.sh reescritos en bash puro (sin forks, ancho medido una vez + SIGWINCH; dentro de $(...) tput/stty no ven la terminal): `caja_item` corta con … una fila por entrada en los menús, `caja_lin` pliega prosa. Probado a 51 columnas en locale UTF-8 y C.
