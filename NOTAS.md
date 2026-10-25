@@ -921,3 +921,5 @@ Cierre de pendientes (2026-10-25):
 2. Reducir `passthrough` (B26b: `/data` deja ver `files/instancias/...` por ruta completa) y B28 (enlaces independientes del prefijo).
 3. B16: batería de humo sobre `probar-en-telefono.sh`; B27 fase 1 (credenciales virtuales).
 
+
+Material de estudio (2026-10-25, solo PC, no toca el teléfono): `practica/` reorganizada en 8 niveles (0 mapa → 7 integración), cada uno con `teoria.md` y labs con `README.md` + `ejercicio.*` + `solucion.*` + `test.sh` (33 labs: 17 nuevos, los 16 viejos reubicados; ELF, red virtual y flotantes pasados de Python a C; la red virtual ahora sigue la semántica real de 0022, 10.0.0.N ↔ 127.0.0.N). Sitio HTML sin conexión: `cd practica && python3 construir.py` → `practica/sitio/index.html`. Pruebas: `./correr.sh [--sol] [N|N.MM]` (fija `LC_ALL=C`); las 32 soluciones pasan y los esqueletos fallan rápido sin colgarse. Los manuales viejos quedaron en `practica/_viejo/` (tenían errores: ubicación de `anfitrion.c`, formato de `escritorio.conf`); respaldo del original en `practica/respaldo-original.tgz`. `practica/` sigue en `.gitignore`.
