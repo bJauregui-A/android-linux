@@ -800,6 +800,8 @@ public class TerminalService extends Service implements TerminalSessionClient {
 
     // Entorno del host Android común a las instalaciones Linux.
     private List<String> entorno(AdaptadorInstalacion instalacion, File prefijo) {
+        // La raíz de algunas instancias Arch queda en 555: ni 'sudo mkdir /x' (que solo falsea el uid) podía crear en /.
+        prefijo.setWritable(true, true);
         String homeLinux = instalacion.home(prefijo);
         File home = new File(prefijo, homeLinux);
         if (instalacion.instalada(this)) home.mkdirs(); // al instalar lo crea el adaptador
