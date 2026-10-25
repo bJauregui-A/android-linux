@@ -307,6 +307,22 @@ public final class RedManager {
         actualizar(c);
     }
 
+    /** Primera IP libre de la subred por defecto (sub_default, o la primera de la lista). */
+    public static synchronized String ipLibreEnSubredPorDefecto(Context c) {
+        List<Subred> subredes = listarSubredes(c);
+        Subred destino = subredes.get(0);
+        for (Subred s : subredes) {
+            if ("sub_default".equals(s.id)) destino = s;
+        }
+        List<String> ocupadas = new ArrayList<>();
+        for (AsignacionIp asig : listarAsignaciones(c).values()) {
+            String ip = asig.ip == null ? "" : asig.ip.trim();
+            if (ip.contains("/")) ip = ip.substring(0, ip.indexOf('/'));
+            if (!ip.isEmpty()) ocupadas.add(ip);
+        }
+        return AsignacionIps.primeraLibre(destino.cidr, ocupadas);
+    }
+
     public static String ipParaInstancia(Context c, String instanciaId) {
         Map<String, AsignacionIp> asigs = listarAsignaciones(c);
         AsignacionIp asig = asigs.get(instanciaId);

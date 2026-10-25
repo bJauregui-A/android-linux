@@ -173,18 +173,18 @@ final class SistemaLinux {
         String id = slug + "-" + (System.currentTimeMillis() % 100000);
         String rutaRelativa = "instancias/" + id;
         File dir = new File(c.getFilesDir(), rutaRelativa);
-        dir.mkdirs();
 
+        // Registrar antes de crear la carpeta: una instancia en creación nunca parece carpeta suelta.
         Instancia nueva = new Instancia(id, nombre, distroId, rutaRelativa, System.currentTimeMillis());
         lista.add(nueva);
         guardarInstancias(c, lista);
+        dir.mkdirs();
         try {
             AdaptadorInstalacion adp = adaptador(nueva);
             adp.preparar(c, dir);
         } catch (Exception ignorada) { }
         try {
-            String ipSugerida = RedManager.ipParaInstancia(c, nueva.id);
-            RedManager.asignarIp(c, nueva.id, "sub_default", ipSugerida);
+            RedManager.asignarIp(c, nueva.id, "sub_default", RedManager.ipLibreEnSubredPorDefecto(c));
         } catch (Exception ignorada) { }
         seleccionarInstancia(c, nueva.id);
         Log.i(TAG, "creada instancia " + id + " en " + rutaRelativa);
