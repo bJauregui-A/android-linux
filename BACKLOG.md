@@ -5,7 +5,7 @@ Lista priorizada de lo pendiente. `NOTAS.md` es la bitácora (qué pasó); esto 
 
 Prioridad: **P0** bloquea o deja algo a medias · **P1** validar lo que ya existe · **P2** plan vigente · **P3** escritorio completo e integración con Android · **P5** proyecto/publicación.
 Juegos (Steam, Wine, mandos, DXVK) quedan **fuera por ahora**: ver "En pausa".
-Origen: sesión de NOTAS (`76ª`), sección de `PROYECTO.md` o revisión del 2026-10-25. Última puesta al día: 2026-10-25.
+Origen: sesión de NOTAS (`76ª`), sección de `PROYECTO.md` o revisión del 2026-10-25. Última puesta al día: 2026-10-25 (80ª).
 
 # 1. Por hacer
 
@@ -39,12 +39,12 @@ Origen: sesión de NOTAS (`76ª`), sección de `PROYECTO.md` o revisión del 202
 - [ ] **B44 · Validar el nombre de instancia.** El nombre "." generó el id `--67263` (empieza con guiones: rompe `ls`, `grep`, scripts). Limpiar el id (solo `[a-z0-9_-]`, sin guion inicial) y rechazar nombres vacíos o de puntos.
 - [ ] **B45 · Autoprueba de instancias nuevas.** Que `pruebas/intent/` cree (o reciba) una instancia Arch y una Debian y compruebe que la libc cargada tiene el hash de `glibc/salida` y que `ls /..` no sale. Evita repetir lo de la Debian con la libc vieja (`armar.sh` no rehacía `base-debian.tgz`).
 - [ ] **B46 · `sudo -n` no funciona.** El wrapper `/usr/local/bin/sudo` (fakeroot) no acepta `-n` (`exec: -n: invalid option`); aceptar y ignorar `-n`/`-S`/`-k`/`-H` y revisar `sudo -l`.
+- [ ] **B47 · Causa de la raíz en 555.** La raíz de las Arch nuevas quedaba en `dr-xr-xr-x` (las viejas en 777). Se parchó al abrir la instancia (`TerminalService.entorno`); falta saber qué la deja así (¿un paquete de la base nueva?) y arreglarla en origen.
 - [ ] **B48 · Pruebas del supervisor en el repo.** La prueba con `SERVICE_ROOT` (rootfs Debian falso: alias, `enable`/`disable`, `EnvironmentFile`, `ExecStartPre`, `logs`, nombre inexistente, `list -a`) se hizo a mano en el scratchpad y no quedó guardada. Dejarla en `pruebas/supervisor/test.sh` (corre en el PC con `compilar.sh --local`); ojo: el cliente lanza el demonio con `argv[0]` corto, así que `pkill -f <ruta>` no lo encuentra (usar `SERVICE_DAEMON` y matar por PID).
 - [ ] **B49 · Sincronizar la capa a instancias existentes.** El APK solo aplica `capa.tgz` al crear una instancia: `service`, `sv`, `service-daemon` y `autostart-android` se copiaron a mano con `run-as` a 4 instancias (`--91506`, `arch_console-6489`, `arch_desktop-57486`, `debian_console-48776`; originales como `*.anterior`). Hacer `scripts/sincronizar-capa-en-instancia.sh <instancia>` (respaldo y `--revertir`, `cp`+`mv` por si el binario está en uso), como `instalar-libc-en-instancia.sh`.
 - [ ] **B50 · Un servicio que falla al arrancar atasca el demonio.** `servicios_revisar_hijos` hace `usleep(500000)` y reinicia en el mismo hilo: un servicio que muere al instante (p. ej. sshd con el puerto ocupado) deja al demonio reiniciando sin parar y a los clientes esperando. Reinicio con espera no bloqueante, límite de reintentos y estado `failed`.
 - [ ] **B51 · Log de sshd.** Con `-D -e` el `stderr` de sshd queda en `/dev/null` (fd 2) y `service logs ssh` solo muestra las líneas `INICIO`; con `-E /var/log/supervisor/ssh.log` sí escribe. Está puesto **solo a mano** en `/etc/default/ssh` de `debian_console-48776` (`SSHD_OPTS="-E ... -o LogLevel=VERBOSE"`, respaldo `ssh.anterior`). Averiguar por qué sshd descarta `stderr` y fijar el valor en el instalador de Debian.
 - [ ] **B52 · Un solo dueño para sshd.** Lo arrancan dos caminos: `autostart-android` (si `ssh`/`sshd` no está en `enabled.txt`) y el supervisor (si está habilitado). Que `autostart-android` delegue siempre en `service` y no lance sshd él mismo.
-- [ ] **B47 · Causa de la raíz en 555.** La raíz de las Arch nuevas quedaba en `dr-xr-xr-x` (las viejas en 777). Se parchó al abrir la instancia (`TerminalService.entorno`); falta saber qué la deja así (¿un paquete de la base nueva?) y arreglarla en origen.
 
 - [ ] **B28 · Enlaces simbólicos independientes del prefijo.** Hoy `symlinkat` guarda el destino absoluto con la ruta real (`/data/user/0/<app>/files/instancias/<id>/usr/...`) y `readlinkat` le quita el prefijo al leerlo. Si la instancia se copia, se renombra o se restaura (B22), esos enlaces se rompen. Ya pasa: en `dev-6918` hay 4 enlaces rotos que apuntan al prefijo viejo `files/archlinux/` (por ejemplo `usr/lib/libkeyutils.so`). Propuesta: guardar el destino **relativo** a la carpeta del enlace (`/usr/lib/x` desde `/usr/lib/y` → `x`), que el kernel resuelve dentro del prefijo; o guardar el destino de Linux tal cual y que la glibc resuelva los enlaces absolutos (más caro). Incluir un script que repare los enlaces de las instancias existentes.
 - [ ] **B27 · Usuarios y permisos virtuales en la glibc** (propuesta del 25-oct; **diseño en `glibc-prueba/ARQUITECTURA-USUARIOS.md`**, con fases y criterios de aceptación). Hoy hay un solo UID real: `GLIBC_FAKEROOT=1` hace que `getuid` dé 0, los `set*id` se aceptan sin efecto (0010) y `stat` muestra el UID de la app. Objetivo: que `sudo`, `useradd`, `chown`, `chmod` y los demonios que bajan privilegios (sshd, apache con `www-data`, postgres) **oficiales** funcionen como en Linux, sin wrappers. Piezas:
@@ -54,6 +54,7 @@ Origen: sesión de NOTAS (`76ª`), sección de `PROYECTO.md` o revisión del 202
   4. **Chequeo de permisos opcional** en `open`/`access`/`execve` según el modo virtual, para que se vean los errores normales de Linux. Es semántica, **no seguridad**: el UID real es uno solo.
   5. **Bloqueo de shadow** (B18): con la misma infraestructura de xattr, la copia de `linkat` sobre `*.lock` informa `st_nlink = 2`. Así funcionan `useradd`, `groupadd` y `passwd` oficiales; `/etc/passwd`, `group` y `shadow` siguen siendo la única base de usuarios.
   6. **App** (después): lista de usuarios de la instancia, usuario por defecto de la terminal, cambiar contraseña.
+  - **Avance 25-oct (80ª): fase 1 hecha** (parche 0026: credenciales virtuales, `stat` con dueño virtual, `GLIBC_CRED` por `execve`; `pruebas/cred/test.sh` 8/8 en Arch y Debian). Falta la fase 2 en adelante. Se conserva el UID real de la app como usuario principal.
   - Probado el 25-oct en `dev-6918`: xattrs `user.*` ✅ en archivos y carpetas, se conservan en `rename`; en symlinks EPERM (normal en Linux). Al verse como root, los programas intentan `chroot` (sshd privsep): depende de B26. Costo: un `getxattr` extra en cada `stat`. Referencias: `pseudo` (Yocto) y `fakeroot -s` resuelven lo mismo con base de datos.
 
 - [ ] **B20 · Instancias desde Dockerfile / OCI** (plan 76ª, punto 1): intérprete de `FROM`/`ENV`/`COPY`/`RUN` e importación de tarballs OCI con la glibc propia.
@@ -83,10 +84,10 @@ Ya implementados, falta confirmar que andan en todos los escritorios:
 
 ### P5 — Proyecto y publicación
 
-- [ ] **B50 · README público:** arquitectura, requisitos, dispositivos probados (Redmi 15 5G, Xiaomi 12T Pro), estado y límites.
-- [ ] **B51 · Licencia explícita.**
-- [ ] **B52 · Separar resultados medidos de objetivos**, con versiones exactas (Android, Mesa, glibc, parches) y comandos para reproducir.
 - [ ] **B53 · Sección "Imposible sin root" en `PROYECTO.md`** (namespaces/`unshare`, systemd como PID 1, cgroups, módulos, KVM, ver procesos de otras apps), para filtrar propuestas que no aplican.
+- [ ] **B54 · README público:** arquitectura, requisitos, dispositivos probados (Redmi 15 5G, Xiaomi 12T Pro), estado y límites.
+- [ ] **B55 · Licencia explícita.**
+- [ ] **B56 · Separar resultados medidos de objetivos**, con versiones exactas (Android, Mesa, glibc, parches) y comandos para reproducir.
 
 ### Debloat
 
@@ -109,6 +110,8 @@ Se retoman cuando P0–P3 estén estables. Detalle en `PROYECTO.md` ("Jugar") y 
 Más reciente primero. Detalle de cada sesión en `NOTAS.md`.
 
 ## 25-oct-2026
+
+- [x] **B27 fase 1 · Credenciales virtuales y dueño virtual en `stat` (80ª sesión):** parche `0026-android-credenciales-virtuales.patch`; `get*id`/`set*id`/`setgroups`/`getgroups`/`setfs*id` con reglas de Linux, herencia por `fork` y `execve` (`GLIBC_CRED`), `GLIBC_FAKEROOT=1` = root; `stat` por xattr `user.linux.owner` o por ubicación. Evidencia: `pruebas/cred/test.sh` 8/8 en `arch_console-47028` y `debian_console-44800`; costo de `stat` +33–37 %. Sigue abierto B27 (fases 2–5).
 
 - [x] **Supervisor modular, sintaxis `service <acción> <nombre>` y SSH en Debian (79ª sesión):** `supervisor/` partido en módulos; se quitó el orden antiguo `service <nombre> <acción>`; el demonio busca unidades también en `/lib/systemd/system` (Debian sin usr-merge) y resuelve alias (`ssh`/`sshd`/`openssh-server`); `service logs` funciona (antes el demonio no tenía el comando); `autostart-android` encuentra `sshd` en `/usr/sbin` (Debian) y no lo duplica si `ssh` está habilitado; las sesiones ssh de Debian llevan `LD_LIBRARY_PATH` (`SetEnv` en `20-debian-libs.conf`, también en `apk/instalar.sh`). APK instalada (15:12) y probado por el usuario: ssh a Debian entra. Detalle en `NOTAS.md` (79ª).
 

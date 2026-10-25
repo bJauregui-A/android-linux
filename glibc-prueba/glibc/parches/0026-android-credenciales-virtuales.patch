@@ -1,0 +1,649 @@
+--- a/sysdeps/unix/sysv/linux/aarch64/android-path.c
++++ b/sysdeps/unix/sysv/linux/aarch64/android-path.c
+@@ -47,6 +47,8 @@
+ #define KEY_DEBUG_LEN 19
+ #define KEY_SECCOMP "GLIBC_SECCOMP="
+ #define KEY_SECCOMP_LEN 14
++#define KEY_CRED "GLIBC_CRED="
++#define KEY_CRED_LEN 11
+ 
+ /* 0 sin iniciar, 1 sin prefijo (no se traduce nada), 2 con prefijo.  */
+ static int state;
+@@ -60,6 +62,20 @@
+ static char real_prefix[PATH_MAX];
+ static size_t rlen;
+ static int fakeroot;
++
++/* Credenciales virtuales (B27, fase 1): el kernel da un solo UID a la app, así
++   que uid/gid/grupos viven aquí.  Se heredan en fork (memoria) y viajan por
++   execve en GLIBC_CRED="r,e,s,f:r,e,s,f:g1,g2,..." (uid y gid, luego grupos).
++   Sin GLIBC_CRED: GLIBC_FAKEROOT=1 es todo en 0; si no, los ids reales.  Es
++   semántica de Linux, no seguridad: el UID real sigue siendo uno solo.  */
++#define NGRUPOS 32
++struct ids { unsigned int r, e, s, f; };
++static struct ids cu, cg;
++static unsigned int cgrp[NGRUPOS];
++static int ncgrp;
++static int cred_ready;
++/* Ids reales del kernel: el usuario principal de la instancia los usa.  */
++static unsigned int base_uid, base_gid;
+ static int debug_sigsys;
+ static int sin_seccomp;		/* GLIBC_SECCOMP=0: sin la capa propia */
+ #define PREFIX (env_prefix + KEY_LEN)
+@@ -146,6 +162,165 @@
+   return p;
+ }
+ 
++/* Estado inicial de las credenciales.  S es el valor de GLIBC_CRED (o NULL).  */
++static void
++cred_iniciar (const char *s)
++{
++  unsigned int r, e, sv;
++  raw (__NR_getresuid, (long int) &r, (long int) &e, (long int) &sv, 0, 0, 0);
++  base_uid = r;
++  raw (__NR_getresgid, (long int) &r, (long int) &e, (long int) &sv, 0, 0, 0);
++  base_gid = r;
++
++  unsigned long int v[8 + NGRUPOS];
++  int n = 0;
++  if (s != NULL)
++    {
++      unsigned long int cur = 0;
++      int dig = 0;
++      for (;; s++)
++	{
++	  if (*s >= '0' && *s <= '9')
++	    {
++	      cur = cur * 10 + (*s - '0');
++	      dig = 1;
++	      continue;
++	    }
++	  if (dig && n < 8 + NGRUPOS)
++	    v[n++] = cur;
++	  cur = 0;
++	  dig = 0;
++	  if (*s == '\0')
++	    break;
++	}
++    }
++  if (n >= 8)
++    {
++      cu.r = v[0], cu.e = v[1], cu.s = v[2], cu.f = v[3];
++      cg.r = v[4], cg.e = v[5], cg.s = v[6], cg.f = v[7];
++      ncgrp = n - 8;
++      for (int i = 0; i < ncgrp; i++)
++	cgrp[i] = v[8 + i];
++    }
++  else if (fakeroot)
++    {
++      cu.r = cu.e = cu.s = cu.f = 0;
++      cg.r = cg.e = cg.s = cg.f = 0;
++      ncgrp = 0;
++    }
++  else
++    {
++      raw (__NR_getresuid, (long int) &cu.r, (long int) &cu.e,
++	   (long int) &cu.s, 0, 0, 0);
++      cu.f = cu.e;
++      raw (__NR_getresgid, (long int) &cg.r, (long int) &cg.e,
++	   (long int) &cg.s, 0, 0, 0);
++      cg.f = cg.e;
++      long int g = raw (__NR_getgroups, NGRUPOS, (long int) cgrp, 0, 0, 0, 0);
++      ncgrp = g > 0 ? g : 0;
++    }
++  cred_ready = 1;
++}
++
++static inline void
++cred_asegurar (void)
++{
++  if (!cred_ready)
++    cred_iniciar (NULL);
++}
++
++/* Con euid 0 virtual el proceso es "root": chown que el kernel rechaza se
++   da por bueno.  */
++static inline int
++root_virtual (void)
++{
++  cred_asegurar ();
++  return cu.e == 0;
++}
++
++/* GLIBC_CRED=... del estado actual, en OUT (al menos KEY_CRED_LEN + 8 * 11 +
++   NGRUPOS * 11 + 1 bytes).  ROOT: el hijo arranca como root (todo en 0, sin
++   grupos), porque el execve pidió GLIBC_FAKEROOT=1 y el proceso no lo traía
++   (el wrapper de sudo).  */
++static void
++cred_serializar (char *out, int root)
++{
++  cred_asegurar ();
++  char *p = out;
++  mcopy (p, KEY_CRED, KEY_CRED_LEN);
++  p += KEY_CRED_LEN;
++  unsigned int v[8] = { cu.r, cu.e, cu.s, cu.f, cg.r, cg.e, cg.s, cg.f };
++  if (root)
++    for (int i = 0; i < 8; i++)
++      v[i] = 0;
++  for (int i = 0; i < 8; i++)
++    {
++      p = utoa (p, v[i]);
++      *p++ = i == 3 || i == 7 ? ':' : ',';
++    }
++  for (int i = 0; i < (root ? 0 : ncgrp); i++)
++    {
++      if (i > 0)
++	*p++ = ',';
++      p = utoa (p, cgrp[i]);
++    }
++  *p = '\0';
++}
++
++/* set*id con las reglas de Linux.  Sin euid 0 solo se pueden elegir ids que
++   el proceso ya tiene (real, efectivo o guardado).  -1 no cambia nada.  */
++static long int
++cred_set (long int nr, long int a0, long int a1, long int a2)
++{
++  cred_asegurar ();
++  int g = nr == __NR_setgid || nr == __NR_setregid || nr == __NR_setresgid;
++  struct ids *d = g ? &cg : &cu;
++  int priv = cu.e == 0;
++  unsigned int a = a0, b = a1, c = a2, nc = -1;
++#define EN3(x) ((x) == d->r || (x) == d->e || (x) == d->s)
++  switch (nr)
++    {
++    case __NR_setuid:
++    case __NR_setgid:
++      if (priv)
++	d->r = d->e = d->s = a;
++      else if (a == d->r || a == d->s)
++	d->e = a;
++      else
++	return -EPERM;
++      break;
++    case __NR_setreuid:
++    case __NR_setregid:
++      {
++	if (!priv && ((a != nc && a != d->r && a != d->e)
++		      || (b != nc && !EN3 (b))))
++	  return -EPERM;
++	unsigned int antes = d->r;
++	if (a != nc)
++	  d->r = a;
++	if (b != nc)
++	  d->e = b;
++	if (a != nc || (b != nc && b != antes))
++	  d->s = d->e;
++	break;
++      }
++    default:
++      if (!priv && ((a != nc && !EN3 (a)) || (b != nc && !EN3 (b))
++		    || (c != nc && !EN3 (c))))
++	return -EPERM;
++      if (a != nc)
++	d->r = a;
++      if (b != nc)
++	d->e = b;
++      if (c != nc)
++	d->s = c;
++      break;
++    }
++#undef EN3
++  d->f = d->e;
++  return 0;
++}
++
+ /* Lee GLIBC_PREFIX, GLIBC_LOADER y GLIBC_FAKEROOT de /proc/self/environ: es el entorno con
+    que arrancó el proceso, no lo cambian setenv ni clearenv.  */
+ static void
+@@ -161,8 +336,10 @@
+       return;
+     }
+   char buf[512];
+-  size_t idx = 0, np = 0, nl = 0;
+-  int mp = 1, ml = 1, mf = 1, md = 1, ms = 1, gotp = 0, gotl = 0;
++  char credbuf[8 * 11 + NGRUPOS * 11 + 16];
++  size_t idx = 0, np = 0, nl = 0, ncr = 0;
++  int mp = 1, ml = 1, mf = 1, md = 1, ms = 1, mc = 1;
++  int gotp = 0, gotl = 0, gotc = 0;
+   for (;;)
+     {
+       long int n = RAW (__NR_read, fd, buf, sizeof buf);
+@@ -174,9 +351,17 @@
+ 	  if (c == '\0')
+ 	    {
+ 	      idx = 0;
+-	      mp = ml = mf = md = ms = 1;
++	      mp = ml = mf = md = ms = mc = 1;
+ 	      continue;
+ 	    }
++	  if (idx < KEY_CRED_LEN)
++	    {
++	      mc &= c == KEY_CRED[idx];
++	      if (idx == KEY_CRED_LEN - 1 && mc)
++		gotc = 1, ncr = 0;
++	    }
++	  else if (mc && ncr < sizeof credbuf - 1)
++	    credbuf[ncr++] = c;
+ 	  if (idx < KEY_FAKEROOT_LEN)
+ 	    mf &= c == KEY_FAKEROOT[idx];
+ 	  else if (idx == KEY_FAKEROOT_LEN && mf)
+@@ -213,6 +398,9 @@
+     }
+   RAW (__NR_close, fd);
+ 
++  credbuf[ncr] = '\0';
++  cred_iniciar (gotc ? credbuf : NULL);
++
+   while (np > 1 && PREFIX[np - 1] == '/')
+     np--;
+   if (!gotp || np < 2 || PREFIX[0] != '/')
+@@ -378,6 +566,138 @@
+   return m != n ? m : strip (buf, n, real_prefix, rlen);
+ }
+ 
++/* Dueño virtual de los archivos (B27, fase 1, solo lectura).  El kernel
++   dice que todo es del UID de la app; stat muestra en su lugar lo que dice el
++   xattr user.linux.owner ("uid:gid") o, si no lo tiene, la regla por
++   ubicación: el sistema (/usr, /etc, /var...) es de root y lo demás del
++   usuario principal.  */
++static int
++comp_es (const char *c, const char *nombre)
++{
++  size_t n = slen (nombre);
++  return starts (c, nombre, n) && (c[n] == '/' || c[n] == '\0');
++}
++
++/* REL es la ruta virtual absoluta.  */
++static int
++zona_root (const char *rel)
++{
++  static const char *const root[] =
++  {
++    "usr", "etc", "var", "opt", "bin", "sbin", "lib", "lib64", "boot", "root",
++    "srv", "run", NULL
++  };
++  const char *c = rel + 1;
++  if (*c == '\0')
++    return 1;
++  if (comp_es (c, "var/tmp") || comp_es (c, "run/user"))
++    return 0;
++  for (int i = 0; root[i] != NULL; i++)
++    if (comp_es (c, root[i]))
++      return 1;
++  return 0;
++}
++
++/* Dueño virtual de lo que está en DIRFD/PATH ("" = el propio DIRFD).  BUF
++   es de PATH_MAX.  0 si no es de la instancia o no se pudo saber.  */
++static int
++dueno_virtual (int dirfd, const char *path, int nofollow, char *buf,
++	       unsigned int *uid, unsigned int *gid)
++{
++  size_t n;
++  if (path != NULL && path[0] == '/')
++    {
++      if (!starts (path, PREFIX, plen)
++	  && (rlen == 0 || !starts (path, real_prefix, rlen)))
++	return 0;
++      n = slen (path);
++      if (n >= PATH_MAX)
++	return 0;
++      mcopy (buf, path, n + 1);
++    }
++  else
++    {
++      const char *rel = path != NULL ? path : "";
++      char link[40];
++      if (dirfd == AT_FDCWD)
++	mcopy (link, "/proc/self/cwd", 15);
++      else
++	{
++	  mcopy (link, "/proc/self/fd/", 14);
++	  *utoa (link + 14, (unsigned int) dirfd) = '\0';
++	}
++      long int r = RAW (__NR_readlinkat, AT_FDCWD, link, buf, PATH_MAX - 2);
++      if (r <= 0 || buf[0] != '/')
++	return 0;
++      n = r;
++      size_t m = slen (rel);
++      if (m > 0)
++	{
++	  if (n + 1 + m >= PATH_MAX)
++	    return 0;
++	  if (buf[n - 1] != '/')
++	    buf[n++] = '/';
++	  mcopy (buf + n, rel, m);
++	  n += m;
++	}
++      buf[n] = '\0';
++    }
++
++  char val[48];
++  long int r = RAW (nofollow ? __NR_lgetxattr : __NR_getxattr, buf,
++		    "user.linux.owner", val, sizeof val - 1);
++  if (r > 0)
++    {
++      unsigned long int v[2] = { 0, 0 };
++      int k = 0, dig = 0;
++      for (long int i = 0; i < r && k < 2; i++)
++	if (val[i] >= '0' && val[i] <= '9')
++	  v[k] = v[k] * 10 + (val[i] - '0'), dig = 1;
++	else if (val[i] == ':' && dig)
++	  k++, dig = 0;
++	else
++	  break;
++      if (k == 1 && dig)
++	{
++	  *uid = v[0];
++	  *gid = v[1];
++	  return 1;
++	}
++    }
++
++  size_t m = unxlat (buf, n);
++  if (m == n)
++    return 0;			/* fuera de la instancia */
++  buf[m] = '\0';
++  if (zona_root (buf))
++    *uid = *gid = 0;
++  else
++    {
++      *uid = base_uid;
++      *gid = base_gid;
++    }
++  return 1;
++}
++
++/* Cambia st_uid/st_gid de un stat ya hecho.  MODE: st_mode (solo archivos,
++   carpetas y enlaces).  */
++static void
++stat_virtual (int dirfd, const char *path, int nofollow, unsigned int mode,
++	      unsigned int *puid, unsigned int *pgid, char *buf)
++{
++  cred_asegurar ();
++  unsigned int tipo = mode & 0170000;
++  if (*puid != base_uid
++      || (tipo != 0100000 && tipo != 0040000 && tipo != 0120000))
++    return;
++  unsigned int u, g;
++  if (dueno_virtual (dirfd, path, nofollow, buf, &u, &g))
++    {
++      *puid = u;
++      *pgid = g;
++    }
++}
++
+ /* Si PATH es el enlace exe del propio proceso (/proc/self/exe,
+    /proc/thread-self/exe o /proc/<pid>/exe), la ruta del programa.  El kernel
+    apunta al cargador (libldp.so), y los programas que buscan sus archivos a
+@@ -579,20 +899,29 @@
+   if (exe != NULL)
+     path = exe;
+   size_t envc = count (envp);
+-  int hasp = 0, hasl = 0;
++  int hasp = 0, hasl = 0, pide_root = 0;
+   for (size_t i = 0; i < envc; i++)
+     {
+       hasp |= starts (envp[i], KEY_PREFIX, KEY_LEN);
+       hasl |= starts (envp[i], KEY_LOADER, KEY_LEN);
+-    }
+-  char *nenvp[envc + 3];
++      if (starts (envp[i], KEY_FAKEROOT, KEY_FAKEROOT_LEN))
++	pide_root = envp[i][KEY_FAKEROOT_LEN] != '\0'
++		    && envp[i][KEY_FAKEROOT_LEN] != '0';
++    }
++  /* Las credenciales viajan siempre, aunque el programa haya limpiado el
++     entorno; se descarta la copia que traiga (puede ser vieja).  */
++  char cred[KEY_CRED_LEN + 8 * 11 + NGRUPOS * 11 + 1];
++  cred_serializar (cred, pide_root && !fakeroot);
++  char *nenvp[envc + 4];
++  size_t k = 0;
+   for (size_t i = 0; i < envc; i++)
+-    nenvp[i] = envp[i];
+-  size_t k = envc;
++    if (!starts (envp[i], KEY_CRED, KEY_CRED_LEN))
++      nenvp[k++] = envp[i];
+   if (!hasp)
+     nenvp[k++] = env_prefix;
+   if (!hasl && LOADER[0] != '\0')
+     nenvp[k++] = env_loader;
++  nenvp[k++] = cred;
+   nenvp[k] = NULL;
+   return do_execve (path, argv, nenvp, buf, 0);
+ }
+@@ -897,28 +1226,6 @@
+       }									\
+   while (0)
+ 
+-/* set*id: el seccomp de las apps no deja usar setuid/setgid & co. (SIGSYS,
+-   ENOSYS aquí), pero muchos programas "bajan privilegios" a los ids que ya
+-   tienen antes de lanzar un hijo (Xwayland con xkbcomp) y abortan si falla.
+-   Si no cambia nada, como en el kernel, se da por bueno.  */
+-static int
+-setxid_igual (long int nr, long int a0, long int a1, long int a2)
+-{
+-  unsigned int r, e, s;
+-  int u = nr == __NR_setuid || nr == __NR_setreuid || nr == __NR_setresuid;
+-  raw (u ? __NR_getresuid : __NR_getresgid, (long int) &r, (long int) &e,
+-       (long int) &s, 0, 0, 0);
+-  if (r != e || e != s)
+-    return 0;
+-  int n = nr == __NR_setuid || nr == __NR_setgid ? 1
+-	  : nr == __NR_setreuid || nr == __NR_setregid ? 2 : 3;
+-  long int a[3] = { a0, a1, a2 };
+-  for (int i = 0; i < n; i++)
+-    if ((unsigned int) a[i] != (unsigned int) -1 && (unsigned int) a[i] != r)
+-      return 0;
+-  return 1;
+-}
+-
+ /* Mandos.  Sin root no se lee /dev/input ni hay uinput: la app (Mandos.java)
+    deja en el /dev/input del prefijo un socket Unix "eventN" por mando y
+    manda por él struct input_event.  Abrirlo es conectarse; los ioctl EVIOC*
+@@ -2211,35 +2518,73 @@
+     case __NR_setregid:
+     case __NR_setresuid:
+     case __NR_setresgid:
++      return cred_set (nr, a0, a1, a2);
++    case __NR_getuid:
++      cred_asegurar ();
++      return cu.r;
++    case __NR_geteuid:
++      cred_asegurar ();
++      return cu.e;
++    case __NR_getgid:
++      cred_asegurar ();
++      return cg.r;
++    case __NR_getegid:
++      cred_asegurar ();
++      return cg.e;
++    case __NR_getresuid:
++    case __NR_getresgid:
+       {
+-	long int r = raw (nr, a0, a1, a2, a3, a4, a5);
+-	if (r != -ENOSYS && r != -EPERM)
+-	  return r;
+-	return fakeroot || setxid_igual (nr, a0, a1, a2) ? 0 : r;
++	cred_asegurar ();
++	struct ids *d = nr == __NR_getresuid ? &cu : &cg;
++	*(unsigned int *) a0 = d->r;
++	*(unsigned int *) a1 = d->e;
++	*(unsigned int *) a2 = d->s;
++	return 0;
+       }
+-    }
+-  if (fakeroot)
+-    switch (nr)
++    case __NR_setfsuid:
++    case __NR_setfsgid:
+       {
+-      case __NR_getuid:
+-      case __NR_geteuid:
+-      case __NR_getgid:
+-      case __NR_getegid:
+-	return 0;
+-      case __NR_getresuid:
+-      case __NR_getresgid:
+-	*(unsigned int *) a0 = *(unsigned int *) a1 = *(unsigned int *) a2 = 0;
++	cred_asegurar ();
++	struct ids *d = nr == __NR_setfsuid ? &cu : &cg;
++	unsigned int antes = d->f, nuevo = a0;
++	if (nuevo != (unsigned int) -1
++	    && (cu.e == 0 || nuevo == d->r || nuevo == d->e || nuevo == d->s
++		|| nuevo == d->f))
++	  d->f = nuevo;
++	return antes;
++      }
++    case __NR_getgroups:
++      cred_asegurar ();
++      if (a0 == 0)
++	return ncgrp;
++      if (a0 < ncgrp)
++	return -EINVAL;
++      for (int i = 0; i < ncgrp; i++)
++	((unsigned int *) a1)[i] = cgrp[i];
++      return ncgrp;
++    case __NR_setgroups:
++      {
++	cred_asegurar ();
++	if (cu.e != 0)
++	  return -EPERM;
++	if (a0 > 65536)
++	  return -EINVAL;
++	int n = a0 > NGRUPOS ? NGRUPOS : a0;
++	for (int i = 0; i < n; i++)
++	  cgrp[i] = ((const unsigned int *) a1)[i];
++	ncgrp = n;
+ 	return 0;
+-      case __NR_fchown:
+-	{
+-	  long int r = raw (nr, a0, a1, a2, a3, a4, a5);
+-	  return r == -EPERM ? 0 : r;
+-	}
+       }
++    case __NR_fchown:
++      {
++	long int r = raw (nr, a0, a1, a2, a3, a4, a5);
++	return r == -EPERM && root_virtual () ? 0 : r;
++      }
++    }
+   if (state != 2)
+     {
+       long int r = raw (nr, a0, a1, a2, a3, a4, a5);
+-      return fakeroot && nr == __NR_fchownat && r == -EPERM ? 0 : r;
++      return nr == __NR_fchownat && r == -EPERM && root_virtual () ? 0 : r;
+     }
+ 
+   char b1[PATH_MAX], b2[PATH_MAX];
+@@ -2305,10 +2650,44 @@
+ 	    return r;
+ 	}
+       break;
+-    case __NR_openat2:
+-    case __NR_faccessat:
+     case __NR_newfstatat:
++      {
++	XLD (a0, a1, b1);
++	long int r = raw (nr, a0, a1, a2, a3, a4, a5);
++	if (r == 0)
++	  {
++	    struct stat *st = (struct stat *) a2;
++	    stat_virtual ((int) a0, (const char *) a1, a3 & AT_SYMLINK_NOFOLLOW,
++			  st->st_mode, &st->st_uid, &st->st_gid, b2);
++	  }
++	return r;
++      }
+     case __NR_statx:
++      {
++	XLD (a0, a1, b1);
++	long int r = raw (nr, a0, a1, a2, a3, a4, a5);
++	if (r == 0)
++	  {
++	    /* struct statx: stx_uid en 20, stx_gid en 24, stx_mode (16 bits) en 28.  */
++	    unsigned int *sx = (unsigned int *) a4;
++	    stat_virtual ((int) a0, (const char *) a1, a2 & AT_SYMLINK_NOFOLLOW,
++			  sx[7] & 0xffff, &sx[5], &sx[6], b2);
++	  }
++	return r;
++      }
++    case __NR_fstat:
++      {
++	long int r = raw (nr, a0, a1, a2, a3, a4, a5);
++	if (r == 0)
++	  {
++	    struct stat *st = (struct stat *) a1;
++	    stat_virtual ((int) a0, "", 0, st->st_mode, &st->st_uid,
++			  &st->st_gid, b2);
++	  }
++	return r;
++      }
++    case __NR_openat2:
++    case __NR_faccessat:
+     case __NR_mkdirat:
+     case __NR_mknodat:
+     case __NR_unlinkat:
+@@ -2325,7 +2704,7 @@
+       {
+ 	XLD (a0, a1, b1);
+ 	long int r = raw (nr, a0, a1, a2, a3, a4, a5);
+-	return fakeroot && r == -EPERM ? 0 : r;
++	return r == -EPERM && root_virtual () ? 0 : r;
+       }
+ 
+     case __NR_linkat:
+--- a/sysdeps/unix/sysv/linux/aarch64/sysdep.h
++++ b/sysdeps/unix/sysv/linux/aarch64/sysdep.h
+@@ -219,6 +219,8 @@
+     case __NR_getresuid: case __NR_getresgid: case __NR_fchown:
+     case __NR_setuid: case __NR_setgid: case __NR_setreuid:
+     case __NR_setregid: case __NR_setresuid: case __NR_setresgid:
++    case __NR_getgroups: case __NR_setgroups: case __NR_setfsuid:
++    case __NR_setfsgid: case __NR_fstat:
+     /* Para que salgan con la marca de la capa seccomp propia.  */
+     case __NR_rt_sigaction: case __NR_rt_sigprocmask:
+       return 1;
+--- a/sysdeps/unix/sysv/linux/aarch64/getgroups.c
++++ b/sysdeps/unix/sysv/linux/aarch64/getgroups.c
+@@ -0,0 +1,13 @@
++/* Android: en C (no stub generado) para que pase por INTERNAL_SYSCALL_RAW
++   (android-path.c): credenciales virtuales.  */
++
++#include <unistd.h>
++#include <sysdep.h>
++
++int
++__getgroups (int size, gid_t list[])
++{
++  return INLINE_SYSCALL_CALL (getgroups, size, list);
++}
++
++weak_alias (__getgroups, getgroups)
+--- a/sysdeps/unix/sysv/linux/aarch64/setfsuid.c
++++ b/sysdeps/unix/sysv/linux/aarch64/setfsuid.c
+@@ -0,0 +1,11 @@
++/* Android: en C (no stub generado) para que pase por INTERNAL_SYSCALL_RAW
++   (android-path.c): credenciales virtuales.  */
++
++#include <sys/fsuid.h>
++#include <sysdep.h>
++
++int
++setfsuid (uid_t uid)
++{
++  return INTERNAL_SYSCALL_CALL (setfsuid, uid);
++}
+--- a/sysdeps/unix/sysv/linux/aarch64/setfsgid.c
++++ b/sysdeps/unix/sysv/linux/aarch64/setfsgid.c
+@@ -0,0 +1,11 @@
++/* Android: en C (no stub generado) para que pase por INTERNAL_SYSCALL_RAW
++   (android-path.c): credenciales virtuales.  */
++
++#include <sys/fsuid.h>
++#include <sysdep.h>
++
++int
++setfsgid (gid_t gid)
++{
++  return INTERNAL_SYSCALL_CALL (setfsgid, gid);
++}

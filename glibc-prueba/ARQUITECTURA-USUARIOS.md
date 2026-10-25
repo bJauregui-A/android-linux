@@ -1,6 +1,6 @@
 # Usuarios y permisos virtuales
 
-Diseño para que los programas Linux **oficiales** (`sudo`, `useradd`, `groupadd`, `passwd`, `chown`, `sshd`, apache, postgres...) funcionen como en un PC dentro de la app, sin wrappers. Ítem B27 de `BACKLOG.md`. Escrito el 2026-10-25; nada implementado todavía.
+Diseño para que los programas Linux **oficiales** (`sudo`, `useradd`, `groupadd`, `passwd`, `chown`, `sshd`, apache, postgres...) funcionen como en un PC dentro de la app, sin wrappers. Ítem B27 de `BACKLOG.md`. Escrito el 2026-10-25. **Fase 1 implementada** (80ª sesión, parche 0026); el resto sigue en diseño.
 
 ## Por qué
 
@@ -94,7 +94,7 @@ Al verse como root, los programas toman caminos privilegiados que antes no tomab
 
 ## Fases
 
-1. **Credenciales virtuales** (pieza 1) + `stat` con dueño virtual y regla por ubicación (pieza 2, solo lectura). Criterio: `id`, `ls -l /etc/shadow` (root), `ls -l ~` (usuario) y `sudo -u nobody id` con el wrapper actual.
+1. ✅ **Credenciales virtuales** (pieza 1) + `stat` con dueño virtual y regla por ubicación (pieza 2, solo lectura). Criterio: `id`, `ls -l /etc/shadow` (root), `ls -l ~` (usuario) y `sudo -u nobody id` con el wrapper actual.
 2. **`chown` persistente + archivos nuevos + bloqueo de shadow** (piezas 2 y 5). Criterio: `sudo groupadd prueba`, `sudo useradd -m prueba`, y `apt install apache2` en Debian sin error de `ssl-cert` (`dpkg --configure -a` limpio).
 3. **setuid virtual + `sudo` real** (pieza 3). Criterio: retirar el wrapper; `sudo -l`, `sudo -i`, contraseña por PAM, `/etc/sudoers` respetado.
 4. **Operaciones de root** (pieza 4, sobre todo `chroot` virtual con B26). Criterio: `sshd` iniciado por el supervisor como root, con privsep; apache con workers como `www-data` (`ps` o `/proc` sintético).
@@ -102,9 +102,17 @@ Al verse como root, los programas toman caminos privilegiados que antes no tomab
 
 Cada fase: libc nueva probada aislada antes de instalarla (AGENTS.md), con respaldo `libc.so.6.00NN`, y empaquetada en `jniLibs`/capa.
 
+## Decisiones tomadas en la fase 1 (80ª)
+
+- **El usuario principal conserva el UID real de la app** (10478): no se migra nada.
+- **Regla por ubicación sin xattr:** root en `/`, `/usr`, `/etc`, `/var`, `/opt`, `/bin`, `/sbin`, `/lib`, `/lib64`, `/boot`, `/root`, `/srv` y `/run` (salvo `/var/tmp` y `/run/user`); usuario principal en el resto (`/home`, `/tmp`, `/mnt`...). Más fina que "root fuera de `/home`": `/tmp` y `/run/user` deben ser del usuario (tmux, Qt y dbus comprueban el dueño).
+- **`GLIBC_CRED`** = `r,e,s,f:r,e,s,f:grupos`, reinyectada en cada `execve`. `GLIBC_FAKEROOT=1` recién pedido da todo en 0; no se puede falsificar por entorno.
+- "Privilegiado" (equivale a CAP_SETUID/SETGID/CHOWN) = euid virtual 0.
+- Trampa de compilación: las syscalls de `syscalls.list` (`getgroups`, `setfsuid`...) necesitan un `.c` propio y borrar `build/sysd-syscalls` y los `.o` viejos.
+
 ## Preguntas abiertas
 
-- ¿El usuario principal mantiene el UID real de la app (compatibilidad con instancias existentes) o pasa a 1000 como en un PC? Lo segundo es más "normal", pero exige migrar `/etc/passwd` y los archivos de `/home`.
+- ~~¿El usuario principal mantiene el UID real?~~ Sí (ver arriba).
 - Nombre y formato final de los xattr (`user.linux.owner`, `user.linux.nlink`). Ojo: `cp -a`, `tar --xattrs` y `rsync -X` los copian, y eso está bien (el dueño viaja con el archivo).
 - ¿El `/proc` sintético debe mostrar los usuarios virtuales desde la fase 1?
 
