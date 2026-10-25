@@ -276,11 +276,22 @@ public final class RedManager {
                         java.io.File hosts = new java.io.File(etc, "hosts");
                         try (java.io.FileWriter fw = new java.io.FileWriter(hosts, false)) {
                             fw.write(content);
+                            // El nombre de equipo propio, como en Debian; sin él sudo avisa "unable to resolve host".
+                            String h = nombreEquipo(new java.io.File(etc, "hostname"));
+                            if (h != null) fw.write("127.0.1.1\t" + h + "\n");
                         } catch (Exception ignored) { }
                     }
                 }
             }
         } catch (Exception ignored) { }
+    }
+
+    private static String nombreEquipo(java.io.File f) {
+        try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(f))) {
+            String h = r.readLine();
+            if (h != null && h.trim().matches("[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?")) return h.trim();
+        } catch (java.io.IOException ignorada) { }
+        return null;
     }
 
     public static String obtenerSubred(Context c) {
