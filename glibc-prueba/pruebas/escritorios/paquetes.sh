@@ -14,5 +14,8 @@ printf '# comentario\nxfce4 xfwm4\nxterm\n' > $ED/xfce/paquetes-debian-12.txt
 DISTRO=debian-12
 caso "da los paquetes declarados para debian-12"  '[ "$(paquetes_escritorio xfce)" = "xfce4 xfwm4 xterm" ]'
 
+mkdir -p $ED/solo-arch; printf 'foot\n' > $ED/solo-arch/paquetes-arch.txt; printf 'foot labwc\n' > $ED/solo-arch/paquetes-debian-13.txt
+caso "vacío si solo los declara para arch y debian-13"  '[ -z "$(paquetes_escritorio solo-arch)" ]'
+
 echo "fallas: $fallas"
 [ $fallas -eq 0 ]
