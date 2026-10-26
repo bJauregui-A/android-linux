@@ -1,0 +1,4 @@
+#!/bin/bash
+export DISPLAY=${DISPLAY:-:0}
+export XDG_CURRENT_DESKTOP=GNOME-Flashback:GNOME XDG_SESSION_TYPE=x11
+exec gnome-session --session=gnome-flashback-metacity

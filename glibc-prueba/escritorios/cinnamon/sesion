@@ -1,0 +1,4 @@
+#!/bin/bash
+export DISPLAY=${DISPLAY:-:0}
+export XDG_CURRENT_DESKTOP=X-Cinnamon XDG_SESSION_TYPE=x11
+exec cinnamon-session

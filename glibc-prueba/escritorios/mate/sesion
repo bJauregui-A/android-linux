@@ -1,0 +1,4 @@
+#!/bin/bash
+export DISPLAY=${DISPLAY:-:0}
+export XDG_CURRENT_DESKTOP=MATE XDG_SESSION_TYPE=x11
+exec mate-session

@@ -1,0 +1,20 @@
+--- a/hw/meson.build
++++ b/hw/meson.build
+@@ -1,3 +1,5 @@
++subdir('android')
++
+ if get_option('xephyr')
+     subdir('kdrive')
+ endif
+--- a/os/utils.c
++++ b/os/utils.c
+@@ -267,7 +267,8 @@
+ {
+     char tmp[PATH_MAX], pid_str[12];
+     int lfd, i, haslock, l_pid, t;
+-    const char *tmppath = LOCK_DIR;
++    /* Android: la app pasa la carpeta del lock en X11_LOCK_DIR (no hay /tmp) */
++    const char *tmppath = getenv("X11_LOCK_DIR") ? getenv("X11_LOCK_DIR") : LOCK_DIR;
+     int len;
+     char port[20];
+ 

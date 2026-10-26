@@ -1,0 +1,25 @@
+--- a/Xtranssock.c
++++ b/Xtranssock.c
+@@ -215,8 +215,20 @@
+ 
+ 
+ #if defined(X11_t)
+-#define UNIX_PATH "/tmp/.X11-unix/X"
+-#define UNIX_DIR "/tmp/.X11-unix"
++/* Android: la app pasa la carpeta del socket en X11_UNIX_DIR (no hay /tmp) */
++static const char *x11_unix_dir(void)
++{
++    const char *d = getenv("X11_UNIX_DIR");
++    return (d && *d) ? d : "/tmp/.X11-unix";
++}
++static const char *x11_unix_path(void)
++{
++    static char p[256];
++    snprintf(p, sizeof(p), "%s/X", x11_unix_dir());
++    return p;
++}
++#define UNIX_PATH x11_unix_path()
++#define UNIX_DIR x11_unix_dir()
+ #endif /* X11_t */
+ #if defined(XIM_t)
+ #define UNIX_PATH "/tmp/.XIM-unix/XIM"

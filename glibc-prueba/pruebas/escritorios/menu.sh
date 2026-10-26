@@ -23,9 +23,10 @@ touch $ED/xfce-x11/paquetes-debian-13.txt $ED/sin-sesion/paquetes-debian-13.txt
 DISTRO=debian-13
 caso "debian-13: sin sesión no aparece"  '[ "$(menu_escritorios | tr "\n" " ")" = "xfce-x11 sin-entorno " ]'
 
-# Arch: los mismos escritorios que hoy, en el mismo orden, sobre las carpetas reales del repo.
+# Arch: los mismos escritorios que hoy, en el mismo orden, sobre las carpetas reales del repo
+# (B11 sumó openbox y xfce-x11, criterio 6).
 ED=escritorios DISTRO=arch
-caso "arch: los de siempre, en su orden"  '[ "$(menu_escritorios | tr "\n" " ")" = "sway hyprland labwc xfce lxqt kde plasma-movil phosh niri cosmic wayfire river qtile weston sin-entorno " ]'
+caso "arch: los de siempre, en su orden"  '[ "$(menu_escritorios | tr "\n" " ")" = "sway hyprland labwc xfce lxqt kde plasma-movil phosh niri cosmic wayfire river qtile weston openbox xfce-x11 sin-entorno " ]'
 
 echo "fallas: $fallas"
 [ $fallas -eq 0 ]

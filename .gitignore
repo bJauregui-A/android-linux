@@ -1,4 +1,4 @@
-# Generados o descargables: se reconstruyen con los scripts (ver README.md)
+# Generados o descargables: se reconstruyen con los scripts (ver TECNICO.md)
 .gradle/
 build/
 .cxx/
@@ -11,6 +11,11 @@ glibc-prueba/glibc/salida/
 glibc-prueba/glibc/build.log
 glibc-prueba/wayland/fuentes/
 glibc-prueba/wayland/salida/
+glibc-prueba/x11/fuentes/
+glibc-prueba/x11/build/
+glibc-prueba/x11/prefijo/
+glibc-prueba/x11/salida/
+glibc-prueba/x11/assets/
 .idea/
 
 # Herramientas de agentes/editor y material suelto: no van al repo
