@@ -40,6 +40,8 @@ public class TerminalService extends Service implements TerminalSessionClient {
     static final String CERRAR_SESION = "dev.ben4shot.glibcprueba.CERRAR_SESION";
     // Cierra solo el escritorio de la instancia (su compositor o servidor X11), dejando terminal y archivos.
     static final String CERRAR_ESCRITORIO = "dev.ben4shot.glibcprueba.CERRAR_ESCRITORIO";
+    // Solo depuración (B11): instala una instancia recién creada sin abrir ninguna actividad.
+    static final String INSTALAR_SIN_PANTALLA = "dev.ben4shot.glibcprueba.INSTALAR_SIN_PANTALLA";
     static final String CERRAR_INSTANCIA = "dev.ben4shot.glibcprueba.CERRAR_INSTANCIA";
     static final String EXTRA_INSTANCIA_ID = "instancia_id";
     // Solo depuración (B29): lo manda ReceptorPruebas, que existe únicamente en src/debug.
@@ -51,6 +53,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
         public Process procesoEscritorio;
         public List<String> entornoEscritorio;
         public boolean instalando;
+        public boolean sinPantalla;     // al terminar la instalación no se abre ninguna actividad
 
         public SesionInstancia(String id) {
             this.id = id;
@@ -152,6 +155,22 @@ public class TerminalService extends Service implements TerminalSessionClient {
                 cerrarSoloCompositor(s);
                 if (s != null && !s.estaViva()) sesiones.remove(id);
                 terminarSiNoQuedaNada();
+            }
+            if (INSTALAR_SIN_PANTALLA.equals(accion)) {
+                if (!BuildConfig.DEBUG) {
+                    Log.w(TAG, "INSTALAR_SIN_PANTALLA ignorada: no es una compilación de depuración");
+                } else {
+                    if (id == null) id = SistemaLinux.seleccionado(this);
+                    SesionInstancia nueva = sesiones.get(id);
+                    if (nueva == null) {
+                        nueva = new SesionInstancia(id);
+                        sesiones.put(id, nueva);
+                    }
+                    nueva.sinPantalla = true;
+                    // el proceso de una TerminalSession arranca con el primer updateSize, que da la vista: sin vista, aquí
+                    TerminalSession instalacion = sesionPara(id);
+                    if (instalacion != null) instalacion.updateSize(100, 40, 10, 20);
+                }
             }
             if (INICIAR_ESCRITORIO.equals(accion)) {
                 if (id == null) id = SistemaLinux.seleccionado(this);
@@ -884,6 +903,19 @@ public class TerminalService extends Service implements TerminalSessionClient {
     @Override
     public void onTitleChanged(TerminalSession s) { }
 
+    // Solo instalaciones sin pantalla (depuración): nadie vio la salida del instalador, se deja en un archivo.
+    private void guardarTranscripcion(TerminalSession s, String id) {
+        try {
+            File dir = new File(getFilesDir(), "pruebas");
+            dir.mkdirs();
+            String texto = s.getEmulator() != null ? s.getEmulator().getScreen().getTranscriptText() : "(sin emulador)";
+            java.nio.file.Files.write(new File(dir, "instalacion-" + id + ".log").toPath(),
+                    (texto + "\nsalida=" + s.getExitStatus() + "\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } catch (Exception e) {
+            Log.w(TAG, "transcripción", e);
+        }
+    }
+
     @Override
     public void onSessionFinished(TerminalSession s) {
         SesionInstancia dueña = null;
@@ -893,11 +925,19 @@ public class TerminalService extends Service implements TerminalSessionClient {
                 break;
             }
         }
+        if (dueña != null && dueña.sinPantalla) guardarTranscripcion(s, dueña.id);
         if (dueña != null) {
             if (dueña.instalando) {
                 dueña.instalando = false;
                 dueña.sesionTerminal = null;
                 AdaptadorInstalacion adp = SistemaLinux.adaptador(this, dueña.id);
+                if (adp != null && adp.instalada(this) && dueña.sinPantalla) {
+                    dueña.sinPantalla = false;
+                    if (!dueña.estaViva()) sesiones.remove(dueña.id);
+                    terminarSiNoQuedaNada();
+                    actualizarNotificacion();
+                    return;
+                }
                 if (adp != null && adp.instalada(this)) {
                     boolean esSinEntorno = "sin-entorno".equals(SistemaLinux.leerEscritorio(this, dueña.id));
                     if (esSinEntorno) {

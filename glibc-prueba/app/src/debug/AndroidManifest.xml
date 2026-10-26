@@ -11,5 +11,14 @@
                 <action android:name="dev.ben4shot.glibcprueba.PRUEBA" />
             </intent-filter>
         </receiver>
+        <!-- B11: crea una instancia de prueba e inicia su instalación, sin pantalla -->
+        <receiver
+            android:name=".ReceptorCrearInstancia"
+            android:exported="true"
+            android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="dev.ben4shot.glibcprueba.CREAR_INSTANCIA" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

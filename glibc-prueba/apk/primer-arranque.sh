@@ -289,6 +289,30 @@ caja_lin '\e[1;38;5;141m' '  \e[1;38;5;51mCONFIGURACIÓN INICIAL DEL ENTORNO\e[0
 caja_lin '\e[1;38;5;141m' '  \e[38;5;250mAsistente interactivo de personalización e instalación\e[0m'
 caja_inf '\e[1;38;5;141m'
 
+# Escribe (o reemplaza) la línea del usuario en /etc/shadow con el hash dado.
+guardar_hash() {
+    local n=$1 h=$2 s=${SHADOW_ARCHIVO:-/etc/shadow}
+    touch "$s" && chmod 600 "$s"
+    if grep -q "^$n:" "$s"; then
+        H=$h D=$(( $(date +%s) / 86400 )) awk -F: -v OFS=: -v n="$n" \
+            '$1 == n { $2 = ENVIRON["H"]; $3 = ENVIRON["D"] } { print }' "$s" > "$s.nuevo" \
+            && cat "$s.nuevo" > "$s" && rm -f "$s.nuevo" || return 1
+    else
+        printf '%s:%s:%s:0:99999:7:::\n' "$n" "$h" "$(( $(date +%s) / 86400 ))" >> "$s"
+    fi
+    chmod 600 "$s"
+}
+# Respuestas que deja la app en $E (receptor de depuración de B11): la base se extrae después de que la app
+# escribe, así que lo que fuera de /etc/ sobrevive y aquí se pasa a su sitio, antes de preguntar.
+sembrar_hostname() {
+    local h=${HOSTNAME_ARCHIVO:-/etc/hostname}
+    [ -s "$E/hostname" ] && [ ! -s "$h" ] && cp "$E/hostname" "$h"
+    return 0
+}
+sembrar_hash() {
+    [ -s "$E/hash" ] || return 0
+    guardar_hash "$1" "$(head -n 1 "$E/hash")" && rm -f "$E/hash"
+}
 # Usuario y nombre del dispositivo (una vez; quedan en $E/usuario y /etc/hostname, que la app
 # y la glibc leen: TerminalService.usuario(), uname/gethostname desde la 0019)
 if [ ! -s $E/usuario ]; then
@@ -303,6 +327,7 @@ if [ ! -s $E/usuario ]; then
     echo "$N" > $E/usuario
 fi
 N=$(cat $E/usuario)
+sembrar_hostname
 if [ ! -s /etc/hostname ]; then
     S=$(echo "${ANDROID_MODELO:-android}" | tr 'A-Z ' 'a-z-' | tr -cd 'a-z0-9-' | sed 's/^-*//; s/-*$//')
     while :; do
@@ -368,15 +393,7 @@ pedir_contrasena() {
         h=$(python3 -c "import crypt; print(crypt.crypt('''$p1''', crypt.mksalt(crypt.METHOD_SHA512)))" 2>/dev/null)
     fi
     [ -n "$h" ] || return 1
-    touch /etc/shadow && chmod 600 /etc/shadow
-    if grep -q "^$N:" /etc/shadow; then
-        H=$h D=$(( $(date +%s) / 86400 )) awk -F: -v OFS=: -v n="$N" \
-            '$1 == n { $2 = ENVIRON["H"]; $3 = ENVIRON["D"] } { print }' /etc/shadow > /etc/shadow.nuevo \
-            && cat /etc/shadow.nuevo > /etc/shadow && rm -f /etc/shadow.nuevo || return 1
-    else
-        printf '%s:%s:%s:0:99999:7:::\n' "$N" "$h" "$(( $(date +%s) / 86400 ))" >> /etc/shadow
-    fi
-    chmod 600 /etc/shadow
+    guardar_hash "$N" "$h" || return 1
     caja_lin '\e[1;38;5;111m' '  \e[1;38;5;48m✔ Contraseña guardada correctamente\e[0m'
     caja_inf '\e[1;38;5;111m'
 }
@@ -384,6 +401,7 @@ if [ "$1" = --contrasena ]; then
     pedir_contrasena || falla "no se pudo guardar la contraseña"
     exit 0
 fi
+sembrar_hash "$N"
 contrasena_definida || pedir_contrasena || falla "no se pudo guardar la contraseña"
 export HOME=/home/$N USER=$N LOGNAME=$N
 cd ~
