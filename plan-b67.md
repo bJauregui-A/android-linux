@@ -79,4 +79,4 @@ Integración (se comprueba en el teléfono):
 12. XFCE arranca y se ve (captura con `grim`), y vuelve a arrancar tras cerrar y abrir la app. Entonces se marca probado en `debian-12`.
     - Riesgo: la vía X11 directa (B11) no está validada. Si falla aquí, parar y decidir antes de seguir.
 
-Al cerrar: actualizar `README.md` (cómo se declaran los paquetes y el estado por distro y versión, y el menú por instalador).
+Al cerrar: actualizar `TECNICO.md` (cómo se declaran los paquetes y el estado por distro y versión, y el menú por instalador).
