@@ -13,5 +13,8 @@ export OS_RELEASE_ARCHIVO=$d/os-release
 printf 'PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"\nVERSION_ID="12"\nID=debian\n' > $OS_RELEASE_ARCHIVO
 caso "Debian 12 es debian-12"               '[ "$(distro_version)" = debian-12 ]'
 
+printf 'NAME="Arch Linux ARM"\nPRETTY_NAME="Arch Linux ARM"\nID=archarm\nID_LIKE=arch\n' > $OS_RELEASE_ARCHIVO
+caso "Arch ARM (rolling, sin versión) es arch"  '[ "$(distro_version)" = arch ]'
+
 echo "fallas: $fallas"
 [ $fallas -eq 0 ]

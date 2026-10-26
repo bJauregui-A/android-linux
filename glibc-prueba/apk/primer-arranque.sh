@@ -208,7 +208,13 @@ backend_instalar() {
 
 # Distro y versión de la instancia (debian-12, arch...): con ella se eligen los paquetes y el estado de cada escritorio
 distro_version() {
-    ( . "${OS_RELEASE_ARCHIVO:-/etc/os-release}"; echo "$ID-$VERSION_ID" )
+    (
+        . "${OS_RELEASE_ARCHIVO:-/etc/os-release}"
+        case " $ID $ID_LIKE " in
+            *" arch "*|*" archarm "*) echo arch ;;
+            *) echo "$ID-$VERSION_ID" ;;
+        esac
+    )
 }
 
 resolver_archivo() {
