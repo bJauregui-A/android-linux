@@ -217,6 +217,12 @@ distro_version() {
     )
 }
 
+# Paquetes de un escritorio para esta distro y versión ($DISTRO); vacío si no los declara
+paquetes_escritorio() {
+    local f=$ED/$1/paquetes-$DISTRO.txt
+    [ -f "$f" ] && sed 's/#.*//' "$f" | tr -s ' \n' '  ' | sed 's/^ //; s/ $//'
+}
+
 resolver_archivo() {
     local base=$1
     if [ -f "$D/${base}-${BACKEND}.txt" ]; then
