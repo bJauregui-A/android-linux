@@ -386,8 +386,9 @@ fi
 [ "$1" = --elegir ] && rm -f $E/opcionales $E/escritorio
 [ "$1" = --escritorio ] && rm -f $E/escritorio
 ED=$D/escritorios
+DISTRO=$(distro_version)
 if [ ! -s $E/escritorio ]; then
-    mapfile -t IDS < <(grep -v '^#' $ED/orden)
+    mapfile -t IDS < <(menu_escritorios)
     idx_esc=0
     num_esc=${#IDS[@]}
 
@@ -775,13 +776,7 @@ else
     f_esc=$(resolver_archivo "paquetes-escritorio")
     [ -n "$f_esc" ] && PAQUETES_A_INSTALAR+=($(sed 's/#.*//' "$f_esc"))
     # Paquetes específicos del entorno seleccionado
-    f_entorno=""
-    if [ -f "$ED/$ESC/paquetes-${BACKEND}.txt" ]; then
-        f_entorno="$ED/$ESC/paquetes-${BACKEND}.txt"
-    elif [ -f "$ED/$ESC/paquetes.txt" ]; then
-        f_entorno="$ED/$ESC/paquetes.txt"
-    fi
-    [ -n "$f_entorno" ] && PAQUETES_A_INSTALAR+=($(sed 's/#.*//' "$f_entorno"))
+    PAQUETES_A_INSTALAR+=($(paquetes_escritorio "$ESC"))
 fi
 AUR_A_INSTALAR=()
 

@@ -32,7 +32,7 @@ required() {
     esac
 }
 
-for id in $(sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d' "$D/orden"); do
+for id in $(sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d' "$D/orden-arch"); do
     [ "$id" = sway ] && continue
     if [ ! -f "$D/$id/sesion" ]; then
         printf '%-14s SIN PERFIL\n' "$id" | tee -a "$R"

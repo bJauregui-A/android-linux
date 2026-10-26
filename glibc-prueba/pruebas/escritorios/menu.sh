@@ -16,5 +16,9 @@ touch $ED/xfce-x11/paquetes-debian-12.txt $ED/lxqt/paquetes-debian-12.txt $ED/kd
 DISTRO=debian-12
 caso "debian-12: los que tienen paquetes, en orden, y la consola"  '[ "$(menu_escritorios | tr "\n" " ")" = "xfce-x11 lxqt sin-entorno " ]'
 
+# Arch: los mismos escritorios que hoy, en el mismo orden, sobre las carpetas reales del repo.
+ED=escritorios DISTRO=arch
+caso "arch: los de siempre, en su orden"  '[ "$(menu_escritorios | tr "\n" " ")" = "sway hyprland labwc xfce lxqt kde plasma-movil phosh niri cosmic wayfire river qtile weston sin-entorno " ]'
+
 echo "fallas: $fallas"
 [ $fallas -eq 0 ]

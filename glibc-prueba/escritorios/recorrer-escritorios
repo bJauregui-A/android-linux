@@ -26,7 +26,7 @@ fi
 if [ "$#" -gt 0 ]; then
     IDS=("$@")
 else
-    mapfile -t IDS < <(sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d' "$D/orden")
+    mapfile -t IDS < <(sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d' "$D/orden-arch")
 fi
 
 anterior=$(cat "$E/escritorio" 2>/dev/null || echo sway)
