@@ -223,6 +223,16 @@ paquetes_escritorio() {
     [ -f "$f" ] && sed 's/#.*//' "$f" | tr -s ' \n' '  ' | sed 's/^ //; s/ $//'
 }
 
+# Escritorios del menú, uno por línea: los de orden-$DISTRO con carpeta y paquetes para esta distro y versión
+# (la consola, sin-entorno, siempre aparece)
+menu_escritorios() {
+    local id
+    while read -r id; do
+        [ -d "$ED/$id" ] || continue
+        [ "$id" = sin-entorno ] || [ -f "$ED/$id/paquetes-$DISTRO.txt" ] && echo "$id"
+    done < <(grep -v '^#' "$ED/orden-$DISTRO")
+}
+
 resolver_archivo() {
     local base=$1
     if [ -f "$D/${base}-${BACKEND}.txt" ]; then
