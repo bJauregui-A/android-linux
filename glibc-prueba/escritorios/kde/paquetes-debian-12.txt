@@ -1,0 +1,3 @@
+# Plasma 5.27 de Debian 12 (kwin se divide en kwin-x11 y kwin-wayland; breeze-icons es breeze-icon-theme)
+plasma-desktop plasma-workspace kwin-wayland kwin-x11 kscreen systemsettings plasma-integration breeze
+breeze-icon-theme xdg-desktop-portal-kde konsole dolphin

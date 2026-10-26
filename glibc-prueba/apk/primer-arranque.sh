@@ -223,13 +223,13 @@ paquetes_escritorio() {
     [ -f "$f" ] && sed 's/#.*//' "$f" | tr -s ' \n' '  ' | sed 's/^ //; s/ $//'
 }
 
-# Escritorios del menú, uno por línea: los de orden-$DISTRO con carpeta y paquetes para esta distro y versión
-# (la consola, sin-entorno, siempre aparece)
+# Escritorios del menú, uno por línea: los de orden-$DISTRO con carpeta, sesión y paquetes para esta distro y
+# versión (la consola, sin-entorno, siempre aparece)
 menu_escritorios() {
     local id
     while read -r id; do
         [ -d "$ED/$id" ] || continue
-        [ "$id" = sin-entorno ] || [ -f "$ED/$id/paquetes-$DISTRO.txt" ] && echo "$id"
+        [ "$id" = sin-entorno ] || { [ -f "$ED/$id/sesion" ] && [ -f "$ED/$id/paquetes-$DISTRO.txt" ]; } && echo "$id"
     done < <(grep -v '^#' "$ED/orden-$DISTRO")
 }
 

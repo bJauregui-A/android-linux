@@ -1,0 +1,1 @@
+mate-session-manager mate-panel marco caja mate-terminal mate-control-center mate-desktop-environment-core dbus-x11

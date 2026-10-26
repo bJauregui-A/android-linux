@@ -1,0 +1,3 @@
+# Sin labwc (no está en bookworm): la sesión sobre X11 queda por resolver
+lxqt-session lxqt-panel lxqt-config lxqt-qtplugin lxqt-runner lxqt-globalkeys lxqt-themes lxqt-sudo
+pcmanfm-qt qterminal openbox breeze-icon-theme

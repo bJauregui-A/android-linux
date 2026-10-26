@@ -1,0 +1,1 @@
+cinnamon cinnamon-session nemo gnome-terminal dbus-x11

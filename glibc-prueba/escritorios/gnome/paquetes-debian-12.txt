@@ -1,0 +1,1 @@
+gnome-shell gnome-session gnome-control-center gnome-terminal nautilus mutter dbus-x11

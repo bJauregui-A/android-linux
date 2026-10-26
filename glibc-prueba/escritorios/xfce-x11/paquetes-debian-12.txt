@@ -1,0 +1,2 @@
+# Xfce como lo instala Debian 12: X11 con xfwm4
+xfce4 xfwm4 xterm xclip dbus-x11

@@ -1,0 +1,11 @@
+# Orden del menú de Debian 12: el de tasksel (selección de software del instalador) y la consola.
+# Un escritorio aparece solo si tiene carpeta y paquetes-debian-12.txt; sin-entorno siempre.
+gnome
+xfce-x11
+gnome-flashback
+kde
+cinnamon
+mate
+lxde
+lxqt
+sin-entorno
