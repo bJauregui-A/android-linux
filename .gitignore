@@ -32,3 +32,6 @@ practica/
 transcripcion_android_linux.txt
 __pycache__/
 glibc-prueba/pruebas/raiz/estatico-arm64
+# Bibliotecas del servidor X11 (B11): las copia apk/armar.sh desde x11/salida/; solo libldp.so va en git
+glibc-prueba/app/src/main/jniLibs/arm64-v8a/*
+!glibc-prueba/app/src/main/jniLibs/arm64-v8a/libldp.so

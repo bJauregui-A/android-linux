@@ -33,5 +33,8 @@ done
 caso "todo lo de salida/ se llama lib<nombre>.so (jniLibs no extrae otros nombres)"  '
   ! ls x11/salida | grep -qvE "^lib[A-Za-z0-9_+-]+\.so$"'
 
+# libX11 sin xlocale dejaba _Xi18n_lock sin definir y xkbcomp no enlazaba en el teléfono (CANNOT LINK EXECUTABLE)
+[ -f x11/salida/libX11.so ] && caso "libX11.so no deja sin definir símbolos propios (_X*)"  '! nm -D --undefined-only x11/salida/libX11.so | grep -q " _X"'
+
 echo "fallas: $fallas"
 [ $fallas -eq 0 ]

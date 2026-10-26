@@ -30,3 +30,17 @@ rm trabajo/base-$V.tar trabajo/capa-$V.tar
 cp apk/instalar.sh $OUT/
 cp glibc/salida/usr/lib/ld-linux-aarch64.so.1 app/src/main/jniLibs/arm64-v8a/libldp.so
 du -h $OUT/*
+
+# Servidor X11 propio (B11): x11/compilar.sh deja libxserver.so, libxkbcomp.so y sus bibliotecas en x11/salida/.
+# Van a jniLibs (nativeLibraryDir es la única carpeta ejecutable) y los datos de teclado a los assets.
+[ -f x11/salida/libxserver.so ] || x11/compilar.sh xserver
+[ -d x11/assets/xkb ] || x11/compilar.sh xkb
+cp x11/salida/*.so app/src/main/jniLibs/arm64-v8a/
+python3 - $OUT/x11-xkb.zip <<'PY'
+import os, sys, zipfile
+with zipfile.ZipFile(sys.argv[1], "w", zipfile.ZIP_DEFLATED) as z:
+    for d, _, fs in os.walk("x11/assets/xkb"):
+        for f in sorted(fs):
+            p = os.path.join(d, f)
+            z.write(p, os.path.relpath(p, "x11/assets"))
+PY

@@ -18,3 +18,65 @@
      int len;
      char port[20];
  
+@@ -326,7 +327,8 @@
+     i = 0;
+     haslock = 0;
+     while ((!haslock) && (i++ < 3)) {
+-        haslock = (link(tmp, LockFile) == 0);
++        /* Android: SELinux niega link() en los datos de la app; rename() deja el mismo lock */
++        haslock = (rename(tmp, LockFile) == 0);
+         if (haslock) {
+             /*
+              * We're done.
+@@ -1394,10 +1396,7 @@
+         p = -1;
+         break;
+     case 0:                    /* child */
+-        if (setgid(getgid()) == -1)
+-            _exit(127);
+-        if (setuid(getuid()) == -1)
+-            _exit(127);
++        /* Android: el seccomp de la app mata setuid/setgid (SIGSYS) y aquí no cambian nada */
+         execl("/bin/sh", "sh", "-c", command, (char *) NULL);
+         _exit(127);
+     default:                   /* parent */
+@@ -1464,10 +1463,7 @@
+ #endif
+         return NULL;
+     case 0:                    /* child */
+-        if (setgid(getgid()) == -1)
+-            _exit(127);
+-        if (setuid(getuid()) == -1)
+-            _exit(127);
++        /* Android: el seccomp de la app mata setuid/setgid (SIGSYS) y aquí no cambian nada */
+         if (*type == 'r') {
+             if (pdes[1] != 1) {
+                 /* stdout */
+@@ -1542,10 +1538,7 @@
+         free(cur);
+         return NULL;
+     case 0:                    /* child */
+-        if (setgid(getgid()) == -1)
+-            _exit(127);
+-        if (setuid(getuid()) == -1)
+-            _exit(127);
++        /* Android: el seccomp de la app mata setuid/setgid (SIGSYS) y aquí no cambian nada */
+         if (*type == 'r') {
+             if (pdes[1] != 1) {
+                 /* stdout */
+--- a/xkb/ddxLoad.c
++++ b/xkb/ddxLoad.c
+@@ -68,7 +68,12 @@
+ 
+ #ifndef WIN32
+     /* Can we write an xkm and then open it too? */
+-    if (access(XKM_OUTPUT_DIR, W_OK | X_OK) == 0) {
++    /* Android: la app pasa la carpeta de salida en X11_XKM_DIR (no hay /tmp) */
++    if (getenv("X11_XKM_DIR") && access(getenv("X11_XKM_DIR"), W_OK | X_OK) == 0) {
++        directory = getenv("X11_XKM_DIR");
++        pathsep = "/";
++    }
++    else if (access(XKM_OUTPUT_DIR, W_OK | X_OK) == 0) {
+         directory = XKM_OUTPUT_DIR;
+         if (XKM_OUTPUT_DIR[strlen(XKM_OUTPUT_DIR) - 1] != '/')
+             pathsep = "/";

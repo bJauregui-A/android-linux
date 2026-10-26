@@ -64,6 +64,12 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Mantiene vivos los procesos Linux del usuario (sway, terminal)" />
         </service>
+
+        <!-- Servidor X11 propio (B11): proceso aparte, no se puede reiniciar dentro del mismo -->
+        <service
+            android:name=".ServicioX11"
+            android:process=":x11"
+            android:exported="false" />
     </application>
 
 </manifest>

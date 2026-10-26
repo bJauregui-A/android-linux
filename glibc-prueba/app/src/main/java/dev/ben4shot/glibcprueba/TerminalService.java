@@ -38,6 +38,8 @@ public class TerminalService extends Service implements TerminalSessionClient {
     static final String INICIAR_ESCRITORIO = "dev.ben4shot.glibcprueba.INICIAR_ESCRITORIO";
     static final String REAJUSTAR_PANTALLA = "dev.ben4shot.glibcprueba.REAJUSTAR_PANTALLA";
     static final String CERRAR_SESION = "dev.ben4shot.glibcprueba.CERRAR_SESION";
+    // Cierra solo el escritorio de la instancia (su compositor o servidor X11), dejando terminal y archivos.
+    static final String CERRAR_ESCRITORIO = "dev.ben4shot.glibcprueba.CERRAR_ESCRITORIO";
     static final String CERRAR_INSTANCIA = "dev.ben4shot.glibcprueba.CERRAR_INSTANCIA";
     static final String EXTRA_INSTANCIA_ID = "instancia_id";
     // Solo depuración (B29): lo manda ReceptorPruebas, que existe únicamente en src/debug.
@@ -143,6 +145,13 @@ public class TerminalService extends Service implements TerminalSessionClient {
                 if (id == null) id = SistemaLinux.seleccionado(this);
                 cerrarInstancia(id);
                 return START_NOT_STICKY;
+            }
+            if (CERRAR_ESCRITORIO.equals(accion)) {
+                if (id == null) id = SistemaLinux.seleccionado(this);
+                SesionInstancia s = sesiones.get(id);
+                cerrarSoloCompositor(s);
+                if (s != null && !s.estaViva()) sesiones.remove(id);
+                terminarSiNoQuedaNada();
             }
             if (INICIAR_ESCRITORIO.equals(accion)) {
                 if (id == null) id = SistemaLinux.seleccionado(this);
@@ -384,6 +393,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
         try {
             Wayland.limpiarPantalla();
         } catch (Throwable ignorada) { }
+        ClienteX11.cerrar(this);
         if (s.procesoEscritorio != null) {
             try {
                 s.procesoEscritorio.destroyForcibly();
@@ -400,7 +410,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
             try {
                 String[] cmd = new String[]{
                     "/system/bin/sh", "-c",
-                    "rm -f " + path + "/tmp/linux-session-display " + path + "/tmp/arch-android-display " + path + "/run/user/*/wayland-[1-9]* " + path + "/run/user/*/sway-ipc.*.sock 2>/dev/null"
+                    "rm -f " + path + "/tmp/linux-session-display " + path + "/tmp/arch-android-display " + path + "/run/user/*/wayland-[1-9]* " + path + "/run/user/*/sway-ipc.*.sock " + path + "/tmp/.X11-unix/X0 2>/dev/null"
                 };
                 Runtime.getRuntime().exec(cmd).waitFor();
             } catch (Exception ignorada) { }
@@ -583,6 +593,8 @@ public class TerminalService extends Service implements TerminalSessionClient {
         if (!BuildConfig.DIAGNOSTICO && !CapaSesion.actualizar(this, instalacion, prefijo)) return;
         String cargador = instalacion.cargador(this);
         sesionInst.entornoEscritorio = entorno(idActual, instalacion, prefijo);
+        // El estado de una sesión anterior (FALLO...) lo leería la vista antes de que el supervisor escriba el nuevo.
+        new File(prefijo, Wayland.runtimeDir().substring(1) + "/linux-session.estado").delete();
         String sesion = instalacion.supervisorSesion();
         boolean supervisor = !BuildConfig.DIAGNOSTICO && new File(prefijo, sesion).isFile();
         if (!BuildConfig.DIAGNOSTICO && !supervisor) {

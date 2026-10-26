@@ -174,6 +174,7 @@ pid_file="$XDG_RUNTIME_DIR/linux-session.pid"
 estado_file="$XDG_RUNTIME_DIR/linux-session.estado"
 boot_file="$XDG_RUNTIME_DIR/linux-session-boot.log"
 : > "$boot_file"
+rm -f "$estado_file"   # el de una sesión anterior (FALLO...) no es el de esta
 
 boot_ok() { printf '\e[1;32m[  OK  ]\e[0m %s\n' "$*" >> "$boot_file"; }
 boot_fail() { printf '\e[1;31m[FAILED]\e[0m %s\n' "$*" >> "$boot_file"; }
@@ -218,7 +219,18 @@ perfil_file="$XDG_RUNTIME_DIR/linux-session.profile"
 perfil_tmp="$perfil_file.$$"
 printf '%s\n' "$id" > "$perfil_tmp" && mv -f "$perfil_tmp" "$perfil_file"
 # Guardar sockets que ya existían para no confundir restos de una sesión anterior con la nueva.
-anteriores=" $(for s in "$XDG_RUNTIME_DIR"/wayland-* /tmp/.X11-unix/X*; do
+# El servidor X11 es de la app, no hijo de la sesión: tiene que existir antes que los clientes (xrdb,
+# xfce4-session...), que si no mueren al arrancar y el supervisor da "sin readiness". La app borra el socket
+# viejo antes de arrancarlo, así que el que aparezca aquí es el nuevo y no cuenta como resto previo.
+x11_previos=/tmp/.X11-unix/X*
+if [ "$COMPROBACION_READY" = socket-x11 ]; then
+    x11_previos=
+    for _ in $(seq $((TIEMPO_READY * 4))); do
+        [ -S /tmp/.X11-unix/X0 ] && break
+        sleep 0.25
+    done
+fi
+anteriores=" $(for s in "$XDG_RUNTIME_DIR"/wayland-* $x11_previos; do
     [ -S "$s" ] || continue
     printf '%s:%s ' "${s##*/}" "$(stat -c %i "$s" 2>/dev/null)"
 done) "

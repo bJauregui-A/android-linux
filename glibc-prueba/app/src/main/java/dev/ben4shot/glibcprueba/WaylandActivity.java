@@ -74,8 +74,8 @@ public class WaylandActivity extends Activity {
     private final Runnable mantener = () -> {
         if (arrastrando || desplazando) return;
         gestoUsado = true;
-        Wayland.boton(BTN_DER, true);
-        Wayland.boton(BTN_DER, false);
+        Pantalla.boton(BTN_DER, true);
+        Pantalla.boton(BTN_DER, false);
     };
 
     // Teclas sin carácter: código de Android -> evdev
@@ -149,6 +149,7 @@ public class WaylandActivity extends Activity {
             return;
         }
         Wayland.iniciarPara(this, instanciaId);
+        Pantalla.usar(this, instanciaId);
         // El escritorio elegido arranca solo si aún no está corriendo.
         startForegroundService(new Intent(this, TerminalService.class)
                 .setAction(TerminalService.INICIAR_ESCRITORIO)
@@ -189,7 +190,7 @@ public class WaylandActivity extends Activity {
             @Override
             public void surfaceChanged(SurfaceHolder h, int formato, int ancho, int alto) {
                 DisplayMetrics dm = getResources().getDisplayMetrics();
-                Wayland.ventana(h.getSurface(), ancho, alto,
+                Pantalla.ventana(h.getSurface(), ancho, alto,
                         Math.round(ancho / dm.xdpi * 25.4f), Math.round(alto / dm.ydpi * 25.4f));
                 startService(new Intent(WaylandActivity.this, TerminalService.class)
                         .setAction(TerminalService.REAJUSTAR_PANTALLA));
@@ -197,7 +198,7 @@ public class WaylandActivity extends Activity {
 
             @Override
             public void surfaceDestroyed(SurfaceHolder h) {
-                Wayland.ventana(null, 0, 0, 0, 0);
+                Pantalla.ventana(null, 0, 0, 0, 0);
             }
         });
         vista.setOnTouchListener((v, e) -> {
@@ -269,7 +270,7 @@ public class WaylandActivity extends Activity {
             int alto = vista.getHeight();
             if (ancho > 0 && alto > 0) {
                 DisplayMetrics dm = getResources().getDisplayMetrics();
-                Wayland.ventana(vista.getHolder().getSurface(), ancho, alto,
+                Pantalla.ventana(vista.getHolder().getSurface(), ancho, alto,
                         Math.round(ancho / dm.xdpi * 25.4f), Math.round(alto / dm.ydpi * 25.4f));
                 startService(new Intent(this, TerminalService.class)
                         .setAction(TerminalService.REAJUSTAR_PANTALLA));
@@ -303,18 +304,18 @@ public class WaylandActivity extends Activity {
                 inicioX = ultX = e.getX();
                 inicioY = ultY = e.getY();
                 arrastrando = desplazando = deslizando = recentrar = gestoUsado = false;
-                Wayland.mover(ultX, ultY);
+                Pantalla.mover(ultX, ultY);
                 handler.postDelayed(mantener, MANTENER_MS);
                 break;
             case MotionEvent.ACTION_POINTER_DOWN:
                 handler.removeCallbacks(mantener);
-                if (arrastrando) Wayland.boton(BTN_IZQ, false);
+                if (arrastrando) Pantalla.boton(BTN_IZQ, false);
                 arrastrando = false;
                 if (e.getPointerCount() >= 3 && !deslizando) {
-                    if (desplazando) Wayland.eje(0, 0);
+                    if (desplazando) Pantalla.eje(0, 0);
                     desplazando = false;
                     deslizando = true;
-                    Wayland.gesto(0, e.getPointerCount(), 0, 0);
+                    Pantalla.gesto(0, e.getPointerCount(), 0, 0);
                 } else if (!deslizando) {
                     desplazando = true;
                 }
@@ -329,10 +330,10 @@ public class WaylandActivity extends Activity {
                     if (recentrar) {
                         recentrar = false;
                     } else if (deslizando) {
-                        Wayland.gesto(1, 0, cx - ultX, cy - ultY);
+                        Pantalla.gesto(1, 0, cx - ultX, cy - ultY);
                     } else {
                         // natural: el dedo sube -> el contenido sube (scroll hacia abajo)
-                        Wayland.eje((ultX - cx) * SCROLL, (ultY - cy) * SCROLL);
+                        Pantalla.eje((ultX - cx) * SCROLL, (ultY - cy) * SCROLL);
                     }
                     ultX = cx;
                     ultY = cy;
@@ -340,30 +341,30 @@ public class WaylandActivity extends Activity {
                     if (!arrastrando && Math.hypot(e.getX() - inicioX, e.getY() - inicioY) > slop) {
                         handler.removeCallbacks(mantener);
                         arrastrando = true;
-                        Wayland.boton(BTN_IZQ, true);
+                        Pantalla.boton(BTN_IZQ, true);
                     }
-                    if (arrastrando) Wayland.mover(e.getX(), e.getY());
+                    if (arrastrando) Pantalla.mover(e.getX(), e.getY());
                 }
                 break;
             case MotionEvent.ACTION_UP:
                 handler.removeCallbacks(mantener);
                 if (arrastrando) {
-                    Wayland.boton(BTN_IZQ, false);
+                    Pantalla.boton(BTN_IZQ, false);
                 } else if (deslizando) {
-                    Wayland.gesto(2, 0, 0, 0);
+                    Pantalla.gesto(2, 0, 0, 0);
                 } else if (desplazando) {
-                    Wayland.eje(0, 0);
+                    Pantalla.eje(0, 0);
                 } else if (!gestoUsado) {
-                    Wayland.boton(BTN_IZQ, true);
-                    Wayland.boton(BTN_IZQ, false);
+                    Pantalla.boton(BTN_IZQ, true);
+                    Pantalla.boton(BTN_IZQ, false);
                 }
                 arrastrando = desplazando = deslizando = false;
                 break;
             case MotionEvent.ACTION_CANCEL:
                 handler.removeCallbacks(mantener);
-                if (arrastrando) Wayland.boton(BTN_IZQ, false);
-                if (desplazando) Wayland.eje(0, 0);
-                if (deslizando) Wayland.gesto(3, 0, 0, 0);
+                if (arrastrando) Pantalla.boton(BTN_IZQ, false);
+                if (desplazando) Pantalla.eje(0, 0);
+                if (deslizando) Pantalla.gesto(3, 0, 0, 0);
                 arrastrando = desplazando = deslizando = false;
                 break;
         }
@@ -700,9 +701,9 @@ public class WaylandActivity extends Activity {
             case "SALIR":
                 mostrarMenuSalida();
                 return;
-            case "CTRL": ctrl = !ctrl; Wayland.tecla(CTRL, ctrl); marcar(); return;
-            case "ALT": alt = !alt; Wayland.tecla(ALT, alt); marcar(); return;
-            case "SUPER": sup = !sup; Wayland.tecla(SUPER, sup); marcar(); return;
+            case "CTRL": ctrl = !ctrl; Pantalla.tecla(CTRL, ctrl); marcar(); return;
+            case "ALT": alt = !alt; Pantalla.tecla(ALT, alt); marcar(); return;
+            case "SUPER": sup = !sup; Pantalla.tecla(SUPER, sup); marcar(); return;
             case "ESC": pulsar(1); return;
             case "TAB": pulsar(15); return;
             case "←": pulsar(105); return;
@@ -919,7 +920,7 @@ public class WaylandActivity extends Activity {
                     volverAlInicio();
                 })
                 .setNegativeButton("✕ Cerrar sesión", (d, w) -> {
-                    Wayland.ventana(null, 0, 0, 0, 0);
+                    Pantalla.ventana(null, 0, 0, 0, 0);
                     Intent i = new Intent(this, TerminalService.class)
                             .setAction(TerminalService.CERRAR_INSTANCIA)
                             .putExtra(TerminalService.EXTRA_INSTANCIA_ID, instanciaId);
@@ -959,7 +960,7 @@ public class WaylandActivity extends Activity {
             }
             if (ancho > 0 && alto > 0) {
                 DisplayMetrics dm = getResources().getDisplayMetrics();
-                Wayland.ventana(vista.getHolder().getSurface(), ancho, alto,
+                Pantalla.ventana(vista.getHolder().getSurface(), ancho, alto,
                         Math.round(ancho / dm.xdpi * 25.4f), Math.round(alto / dm.ydpi * 25.4f));
             }
         }
@@ -993,9 +994,9 @@ public class WaylandActivity extends Activity {
 
     // Los modificadores de la fila valen para una sola tecla, como en la terminal.
     private void soltarModificadores() {
-        if (ctrl) Wayland.tecla(CTRL, false);
-        if (alt) Wayland.tecla(ALT, false);
-        if (sup) Wayland.tecla(SUPER, false);
+        if (ctrl) Pantalla.tecla(CTRL, false);
+        if (alt) Pantalla.tecla(ALT, false);
+        if (sup) Pantalla.tecla(SUPER, false);
         if (ctrl || alt || sup) {
             ctrl = alt = sup = false;
             marcar();
@@ -1005,8 +1006,8 @@ public class WaylandActivity extends Activity {
     // --- teclado ---
 
     private void pulsar(int codigo) {
-        Wayland.tecla(codigo, true);
-        Wayland.tecla(codigo, false);
+        Pantalla.tecla(codigo, true);
+        Pantalla.tecla(codigo, false);
         soltarModificadores();
     }
 
@@ -1021,14 +1022,14 @@ public class WaylandActivity extends Activity {
         // El carácter manda: Shift/AltGr quedan como pide la tabla durante la tecla
         boolean soltarFisico = shiftFisico != 0 && !shift;
         boolean ponerShift = shift && shiftFisico == 0;
-        if (soltarFisico) Wayland.tecla(shiftFisico, false);
-        if (ponerShift) Wayland.tecla(SHIFT, true);
-        if (altgr) Wayland.tecla(ALTGR, true);
-        Wayland.tecla(v & 0xffff, true);
-        Wayland.tecla(v & 0xffff, false);
-        if (altgr) Wayland.tecla(ALTGR, false);
-        if (ponerShift) Wayland.tecla(SHIFT, false);
-        if (soltarFisico) Wayland.tecla(shiftFisico, true);
+        if (soltarFisico) Pantalla.tecla(shiftFisico, false);
+        if (ponerShift) Pantalla.tecla(SHIFT, true);
+        if (altgr) Pantalla.tecla(ALTGR, true);
+        Pantalla.tecla(v & 0xffff, true);
+        Pantalla.tecla(v & 0xffff, false);
+        if (altgr) Pantalla.tecla(ALTGR, false);
+        if (ponerShift) Pantalla.tecla(SHIFT, false);
+        if (soltarFisico) Pantalla.tecla(shiftFisico, true);
     }
 
     // Teclado físico (distribución US u otra, la que Android tenga configurada):
@@ -1040,7 +1041,7 @@ public class WaylandActivity extends Activity {
         if (KeyEvent.isModifierKey(e.getKeyCode())) {
             if (sc == SHIFT || sc == 54) shiftFisico = abajo ? sc : 0;
             if (sc == ALTGR) sc = ALT;	// en un teclado US el Alt derecho es Alt, no AltGr
-            if (e.getRepeatCount() == 0) Wayland.tecla(sc, abajo);
+            if (e.getRepeatCount() == 0) Pantalla.tecla(sc, abajo);
             return;
         }
         // Letras y espacio están en el mismo lugar en US y latam (y los números sin
@@ -1053,7 +1054,7 @@ public class WaylandActivity extends Activity {
                 || kc == KeyEvent.KEYCODE_SPACE || (!shift && kc >= KeyEvent.KEYCODE_0 && kc <= KeyEvent.KEYCODE_9)))) {
             if (e.getRepeatCount() == 0) {
                 if (abajo) crudas.add(sc); else crudas.remove(sc);
-                Wayland.tecla(sc, abajo);
+                Pantalla.tecla(sc, abajo);
             }
             return;
         }
@@ -1061,7 +1062,7 @@ public class WaylandActivity extends Activity {
         int c = TECLAS.get(e.getKeyCode(), -1) >= 0 ? 0 : e.getUnicodeChar(sinCtrlAlt);
         if (c == 0 || (c & KeyCharacterMap.COMBINING_ACCENT) != 0) {
             // las repeticiones las hace el cliente (repeat_info de sway)
-            if (e.getRepeatCount() == 0) Wayland.tecla(sc, abajo);
+            if (e.getRepeatCount() == 0) Pantalla.tecla(sc, abajo);
             return;
         }
         // con carácter: Android ya repite la tecla mantenida
@@ -1132,8 +1133,8 @@ public class WaylandActivity extends Activity {
         if (codigo >= 0) {
             if (abajo) {
                 conModificadores(e, true);
-                Wayland.tecla(codigo, true);
-                Wayland.tecla(codigo, false);
+                Pantalla.tecla(codigo, true);
+                Pantalla.tecla(codigo, false);
                 conModificadores(e, false);
                 soltarModificadores();
             }
@@ -1152,10 +1153,10 @@ public class WaylandActivity extends Activity {
 
     // Shift (solo para teclas sin carácter), Ctrl, Alt y Meta del estado del evento.
     private void conModificadores(KeyEvent e, boolean pulsar) {
-        if (e.isShiftPressed() && TECLAS.get(e.getKeyCode(), -1) >= 0) Wayland.tecla(SHIFT, pulsar);
-        if (e.isCtrlPressed()) Wayland.tecla(CTRL, pulsar);
-        if (e.isAltPressed()) Wayland.tecla(ALT, pulsar);
-        if (e.isMetaPressed()) Wayland.tecla(SUPER, pulsar);
+        if (e.isShiftPressed() && TECLAS.get(e.getKeyCode(), -1) >= 0) Pantalla.tecla(SHIFT, pulsar);
+        if (e.isCtrlPressed()) Pantalla.tecla(CTRL, pulsar);
+        if (e.isAltPressed()) Pantalla.tecla(ALT, pulsar);
+        if (e.isMetaPressed()) Pantalla.tecla(SUPER, pulsar);
     }
 
     // Mantener pulsado el ícono -> "Terminal": rescate si sway no arranca.

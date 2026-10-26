@@ -67,6 +67,10 @@ from The Open Group.
 #include "miline.h"
 #include "glx_extinit.h"
 #include "randrstr.h"
+#include "damage.h"
+#include <android/native_window.h>
+#include "android.h"
+#include <signal.h>
 
 #define VFB_DEFAULT_WIDTH      1280
 #define VFB_DEFAULT_HEIGHT     1024
@@ -713,6 +717,126 @@ static miPointerScreenFuncRec vfbPointerCursorFuncs = {
     miPointerWarpCursor
 };
 
+
+/* B11: la copia a la surface. Damage anota lo que dibujan los clientes y el block handler
+ * (lo que corre antes de que el servidor duerma) copia solo esos rectángulos. */
+static ANativeWindow *ventana;
+static DamagePtr danio;
+static Bool ventana_nueva;
+
+#define HAL_BGRA_8888 5
+
+void
+androidVentana(ANativeWindow *nueva)
+{
+    vfbScreenInfoPtr pvfb = &vfbScreens[0];
+
+    if (ventana)
+        ANativeWindow_release(ventana);
+    ventana = nueva;
+    ventana_nueva = TRUE;
+    if (ventana &&
+        ANativeWindow_setBuffersGeometry(ventana, pvfb->width, pvfb->height, HAL_BGRA_8888) != 0)
+        ANativeWindow_setBuffersGeometry(ventana, pvfb->width, pvfb->height,
+                                         WINDOW_FORMAT_RGBX_8888);
+}
+
+/* Una fila [x1, x2) del framebuffer a la surface; BGRA va tal cual, RGBX necesita cambiar R y B. */
+static void
+androidFila(vfbScreenInfoPtr pvfb, ANativeWindow_Buffer *out, int y, int x1, int x2)
+{
+    const CARD32 *src = (CARD32 *) (pvfb->pfbMemory + (size_t) y * pvfb->paddedBytesWidth) + x1;
+    CARD32 *dst = (CARD32 *) out->bits + (size_t) y * out->stride + x1;
+    int x, w = x2 - x1;
+
+    if (out->format == HAL_BGRA_8888) {
+        memcpy(dst, src, w * 4);
+        return;
+    }
+    for (x = 0; x < w; x++)
+        dst[x] = (src[x] & 0xff00ff00) | ((src[x] & 0xff) << 16) | ((src[x] >> 16) & 0xff);
+}
+
+static void
+androidCopiar(vfbScreenInfoPtr pvfb, RegionPtr region)
+{
+    ANativeWindow_Buffer out;
+    ARect sucio;
+    BoxPtr cajas = RegionRects(region);
+    int i, n = RegionNumRects(region);
+    BoxPtr ext = RegionExtents(region);
+
+    sucio.left = ext->x1; sucio.top = ext->y1; sucio.right = ext->x2; sucio.bottom = ext->y2;
+    if (ANativeWindow_lock(ventana, &out, &sucio) != 0)
+        return;
+    for (i = 0; i < n; i++) {
+        int y;
+
+        if (cajas[i].x2 > out.width || cajas[i].y2 > out.height)
+            continue;
+        for (y = cajas[i].y1; y < cajas[i].y2; y++)
+            androidFila(pvfb, &out, y, cajas[i].x1, cajas[i].x2);
+    }
+    /* lock puede agrandar el rectángulo sucio: lo de fuera de lo que pedimos no lo conserva, hay que copiarlo */
+    if (sucio.left < ext->x1 || sucio.top < ext->y1 || sucio.right > ext->x2 || sucio.bottom > ext->y2) {
+        int y, x1 = max(sucio.left, 0), x2 = min(min(sucio.right, out.width), pvfb->width);
+        int y2 = min(min(sucio.bottom, out.height), pvfb->height);
+
+        for (y = max(sucio.top, 0); y < y2 && x1 < x2; y++)
+            androidFila(pvfb, &out, y, x1, x2);
+    }
+    ANativeWindow_unlockAndPost(ventana);
+}
+
+/* Damage destruye lo que cuelga de un pixmap cuando este se libera (p. ej. RandR cambia la pantalla): el
+ * puntero ya no vale, se registra otro y se copia todo, porque lo anotado en el viejo se perdió. */
+static void
+androidDanioDestruido(DamagePtr d, void *closure)
+{
+    if (d == danio)
+        danio = NULL;
+    ventana_nueva = TRUE;
+}
+
+static void
+androidBlockHandler(void *blockData, void *timeout)
+{
+    vfbScreenInfoPtr pvfb = &vfbScreens[0];
+    ScreenPtr pScreen = screenInfo.screens[0];
+    RegionRec todo;
+
+    if (!danio) {
+        if (!DamageSetup(pScreen))
+            return;
+        danio = DamageCreate(NULL, androidDanioDestruido, DamageReportNone, TRUE, pScreen, NULL);
+        if (!danio)
+            return;
+        DamageRegister(&pScreen->GetScreenPixmap(pScreen)->drawable, danio);
+    }
+    if (!ventana)
+        return;
+    if (ventana_nueva) {
+        BoxRec todaLaPantalla = { 0, 0, pvfb->width, pvfb->height };
+
+        ventana_nueva = FALSE;
+        RegionInit(&todo, &todaLaPantalla, 1);
+    }
+    else if (RegionNotEmpty(DamageRegion(danio))) {
+        RegionInit(&todo, NULL, 0);
+        RegionCopy(&todo, DamageRegion(danio));
+    }
+    else
+        return;
+    DamageEmpty(danio);
+    androidCopiar(pvfb, &todo);
+    RegionUninit(&todo);
+}
+
+static void
+androidWakeupHandler(void *blockData, int result)
+{
+}
+
 static Bool
 vfbCloseScreen(ScreenPtr pScreen)
 {
@@ -936,6 +1060,9 @@ vfbScreenInit(ScreenPtr pScreen, int argc, char **argv)
 
     miDCInitialize(pScreen, &vfbPointerCursorFuncs);
 
+    if (!RegisterBlockAndWakeupHandlers(androidBlockHandler, androidWakeupHandler, NULL))
+        return FALSE;
+
     vfbWriteXWDFileHeader(pScreen);
 
     pScreen->blackPixel = pvfb->blackPixel;
@@ -952,9 +1079,22 @@ vfbScreenInit(ScreenPtr pScreen, int argc, char **argv)
 
 }                               /* end vfbScreenInit */
 
+/* Depuración: con X11_CRASH_PASSTHRU Xorg no se traga el segfault; se restaura la acción por defecto, la
+ * instrucción que falló se repite y Android escribe el tombstone con la pila. */
+static int
+androidSignal(int signo)
+{
+    if (!getenv("X11_CRASH_PASSTHRU"))
+        return 1;
+    signal(signo, SIG_DFL);
+    return 0;
+}
+
 void
 InitOutput(ScreenInfo * screen_info, int argc, char **argv)
 {
+    OsRegisterSigWrapper(androidSignal);
+
     int i;
     int NumFormats = 0;
 
@@ -1014,3 +1154,15 @@ InitOutput(ScreenInfo * screen_info, int argc, char **argv)
     }
 
 }                               /* end InitOutput */
+
+int
+androidAncho(void)
+{
+    return vfbScreens[0].width;
+}
+
+int
+androidAlto(void)
+{
+    return vfbScreens[0].height;
+}

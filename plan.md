@@ -12,7 +12,10 @@ B67 queda en pausa (`plan-b67.md`): su paso 12 (Xfce en Debian 12) espera esta h
   - libXfont2 sin freetype; nettle estático; datos de teclado en `x11/assets/xkb/`.
   - `openbox` y `xfce-x11` en `orden-arch` con `PROBADO_EN` vacío; `sesion` nueva (sin probar) para gnome, gnome-flashback, cinnamon, mate y lxde.
 - **Pendiente de autorización:** `pruebas/escritorios/menu.sh` fija la lista exacta de Arch y falla porque `orden-arch` ahora incluye `openbox xfce-x11` (criterio 6). Propuesta: actualizar solo el valor esperado.
-- **Siguiente:** completar el DDX (Damage, copia a la surface, entrada por tubería), `ServicioX11` en Java, empaquetado en `apk/armar.sh`; luego las pruebas 5–13 en el teléfono (instala un APK: avisar antes).
+- **Hecho después (sin commit):** DDX completo (Damage, copia, entrada por socketpair), `ServicioX11`/`ClienteX11`/`Pantalla`, `CERRAR_ESCRITORIO`, `armar.sh`, receptor de depuración `CREAR_INSTANCIA` + `scripts/crear-en-telefono.sh`. Corregido al probar en el teléfono: lock sin `link()`, sin `setuid/setgid` (SIGSYS), `libX11` con xlocale, `geometry/pc` en los datos xkb, salida de `xkbcomp` en `X11_XKM_DIR`, Damage destruido por RandR, servidor arrancado al abrir la vista, socket viejo borrado, `WAYLAND_DISPLAY` fuera del entorno X11, `sesion-android` espera el socket y borra el estado viejo, `distro_version` sin `/etc/os-release` (Arch nuevo no instalaba los paquetes del escritorio).
+- **Pruebas en el teléfono (26-oct):** 5 y 6 (Arch y Debian: `xdpyinfo` 1080x2340, 20 extensiones, sin GLX/MIT-SHM/DRI), 8 (`xterm` visible y `xwd` no negro), 9 (matar `:x11`: app viva, vista y escritorio se cierran, reabrir arranca otro servidor), 10 (Openbox en Arch: `openbox` y `tint2`), 11 (XFCE X11 en Arch: panel, iconos y fondo). 7 solo con adb (`/proc/net` vedado en la app): sin socket abstracto ni TCP. Pendiente a mano (usuario): teclado y mouse.
+- **Abierto:** 12 (Xfce en Debian 12): arranca `xfwm4`, `xfdesktop` y `Thunar`, pero `xfce4-panel` muere al segundo sin señal ni log. 13 (los otros cinco de Debian). Tras cerrar el escritorio quedan `dbus-daemon`, `xfconfd` y `ssh-agent` huérfanos (igual que con Wayland). ANR de `SistemaActivity` visto una vez.
+- **(antes) Siguiente:** completar el DDX (Damage, copia a la surface, entrada por tubería), `ServicioX11` en Java, empaquetado en `apk/armar.sh`; luego las pruebas 5–13 en el teléfono (instala un APK: avisar antes).
 
 ## Estado de partida (26-oct)
 
@@ -167,7 +170,7 @@ En el teléfono (`scripts/probar-en-telefono.sh`, solo lectura salvo que se indi
 6. **Arranque en Debian 12.** Lo mismo, con `xdpyinfo` de `x11-utils`.
 7. **Sin socket abstracto ni TCP.** `/proc/net/unix` no tiene `@/tmp/.X11-unix/X0`, y no hay nadie escuchando en el puerto 6000.
 8. **Imagen.** Un cliente simple (`xterm`) se dibuja. `xwd -root -display :0` desde la instancia da una imagen que no está toda negra.
-9. **Proceso aparte.** Matar el proceso del servidor no cierra la app, y reabrir el escritorio lo arranca otra vez. Toca el teléfono: avisar antes.
+9. **Proceso aparte.** Matar el proceso del servidor no cierra la app: la vista se cierra y `TerminalService` cierra el escritorio de esa instancia (`CERRAR_ESCRITORIO`, sin quedar procesos de la sesión ni el enlace `X0`); reabrir el escritorio arranca otro servidor. Toca el teléfono: avisar antes.
 10. **Openbox en Arch.** Se instala desde el menú y arranca. Captura con `xwd`. Teclado y mouse los comprueba el usuario a mano.
 11. **XFCE X11 en Arch.** Igual que la 10.
 12. **Xfce en Debian 12.** Igual que la 10. Destraba el paso 12 de B67.

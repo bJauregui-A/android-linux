@@ -49,7 +49,7 @@ XORG=https://www.x.org/releases/individual
 copiar_necesarias() {
   local n
   for n in $(readelf -d "$1" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p'); do
-    if [ -f "$PREFIJO/lib/$n" ] && [ ! -f "$SALIDA/$n" ]; then
+    if [ -f "$PREFIJO/lib/$n" ] && [ ! "$SALIDA/$n" -nt "$PREFIJO/lib/$n" ]; then
       cp -L "$PREFIJO/lib/$n" "$SALIDA/$n"; llvm-strip --strip-unneeded "$SALIDA/$n"
       copiar_necesarias "$SALIDA/$n"
     fi
@@ -62,7 +62,7 @@ dependencias_xkbcomp() {
   autotools libXau-1.0.11 $XORG/lib
   autotools libxcb-1.17.0 https://xcb.freedesktop.org/dist --disable-devel-docs --without-launchd
   autotools xtrans-1.5.2 $XORG/lib
-  autotools libX11-1.8.10 $XORG/lib --disable-xcms --disable-xlocale --disable-loadable-i18n \
+  autotools libX11-1.8.10 $XORG/lib --disable-xcms --disable-loadable-i18n \
     --disable-ipv6 --disable-unix-transport --disable-local-transport --disable-tcp-transport
   autotools libxkbfile-1.1.3 $XORG/lib
 }
@@ -71,7 +71,7 @@ dependencias_xkbcomp() {
 copiar_necesarias() {
   local n
   for n in $(readelf -d "$1" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p'); do
-    if [ -f "$PREFIJO/lib/$n" ] && [ ! -f "$SALIDA/$n" ]; then
+    if [ -f "$PREFIJO/lib/$n" ] && [ ! "$SALIDA/$n" -nt "$PREFIJO/lib/$n" ]; then
       cp -L "$PREFIJO/lib/$n" "$SALIDA/$n"; llvm-strip --strip-unneeded "$SALIDA/$n"
       copiar_necesarias "$SALIDA/$n"
     fi
@@ -86,10 +86,11 @@ xkbcomp() {
   copiar_necesarias "$SALIDA/libxkbcomp.so"
 }
 
-# meson <nombre> <url> [opciones]: compila e instala con un archivo de compilación cruzada
+# meson <nombre> <url> [opciones]: compila e instala con un archivo de compilación cruzada.
+# La marca .listo vale solo para descarga y configuración; ninja corre siempre (es incremental).
 meson_cruzado() {
   local n=$1 url=$2; shift 2
-  [ -f "$BUILD/$n.listo" ] && return
+  if [ ! -f "$BUILD/$n.listo" ]; then
   bajar "$n" "$url"
   cat > "$BUILD/cruzado.ini" <<INI
 [binaries]
@@ -113,8 +114,9 @@ endian = 'little'
 INI
   rm -rf "$BUILD/$n"
   meson setup "$BUILD/$n" "$FUENTES/$n" --cross-file "$BUILD/cruzado.ini" --prefix="$PREFIJO" --libdir=lib "$@"
-  ninja -C "$BUILD/$n"; ninja -C "$BUILD/$n" install
   touch "$BUILD/$n.listo"
+  fi
+  ninja -C "$BUILD/$n"; ninja -C "$BUILD/$n" install
 }
 
 dependencias_xserver() {
@@ -154,6 +156,8 @@ xkb() {
   DESTDIR=$t meson install -C "$BUILD/$n" >/dev/null
   mkdir -p "$RAIZ/assets/xkb"
   for d in keycodes types compat symbols rules; do cp -r "$t/usr/share/X11/xkb/$d" "$RAIZ/assets/xkb/$d"; done
+  # el servidor pide xkb_geometry { include "pc" }; solo ese archivo (el resto de geometry son teclados concretos)
+  mkdir -p "$RAIZ/assets/xkb/geometry"; cp "$t/usr/share/X11/xkb/geometry/pc" "$RAIZ/assets/xkb/geometry/pc"
   rm -rf "$t"
 }
 
