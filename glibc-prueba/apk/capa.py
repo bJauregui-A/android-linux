@@ -166,7 +166,7 @@ def main():
     for d, _, fs in os.walk(os.path.join(RAIZ, "escritorios")):
         for f in sorted(fs):
             rel = os.path.relpath(os.path.join(d, f), RAIZ)
-            if os.path.dirname(rel) == "escritorios" and f != "orden":
+            if os.path.dirname(rel) == "escritorios" and not f.startswith("orden-"):
                 continue  # sesion-android y autostart-android van a /usr/local/bin
             modo = 0o755 if os.access(os.path.join(RAIZ, rel), os.X_OK) else 0o644
             escritorios.append((rel, f"{D}/{rel}", modo))
