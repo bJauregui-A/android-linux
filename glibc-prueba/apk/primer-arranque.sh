@@ -209,7 +209,10 @@ backend_instalar() {
 # Distro y versión de la instancia (debian-12, arch...): con ella se eligen los paquetes y el estado de cada escritorio
 distro_version() {
     (
-        . "${OS_RELEASE_ARCHIVO:-/etc/os-release}"
+        f=${OS_RELEASE_ARCHIVO:-/etc/os-release}
+        # En Arch el enlace /etc/os-release lo crea el paquete filesystem durante la instalación: antes no existe
+        [ -e "$f" ] || f=${OS_RELEASE_RESPALDO:-/usr/lib/os-release}
+        . "$f"
         case " $ID $ID_LIKE " in
             *" arch "*|*" archarm "*) echo arch ;;
             *) echo "$ID-$VERSION_ID" ;;

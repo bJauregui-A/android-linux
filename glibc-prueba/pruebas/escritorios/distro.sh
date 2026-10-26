@@ -16,5 +16,13 @@ caso "Debian 12 es debian-12"               '[ "$(distro_version)" = debian-12 ]
 printf 'NAME="Arch Linux ARM"\nPRETTY_NAME="Arch Linux ARM"\nID=archarm\nID_LIKE=arch\n' > $OS_RELEASE_ARCHIVO
 caso "Arch ARM (rolling, sin versión) es arch"  '[ "$(distro_version)" = arch ]'
 
+# La base de Arch trae /usr/lib/os-release pero no el enlace /etc/os-release (lo crea el paquete filesystem durante la
+# instalación): al elegir paquetes aún no existe, DISTRO salía "-" y no entraban los paquetes del escritorio.
+export OS_RELEASE_ARCHIVO=$d/no-existe OS_RELEASE_RESPALDO=$d/usr-lib-os-release
+printf 'NAME="Arch Linux ARM"\nID=archarm\nID_LIKE=arch\n' > $OS_RELEASE_RESPALDO
+caso "sin /etc/os-release usa el de /usr/lib (Arch)"  '[ "$(distro_version)" = arch ]'
+printf 'VERSION_ID="12"\nID=debian\n' > $OS_RELEASE_RESPALDO
+caso "sin /etc/os-release usa el de /usr/lib (Debian)"  '[ "$(distro_version)" = debian-12 ]'
+
 echo "fallas: $fallas"
 [ $fallas -eq 0 ]
