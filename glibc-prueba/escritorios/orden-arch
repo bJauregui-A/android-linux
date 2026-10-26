@@ -1,5 +1,5 @@
 # Orden del menú de escritorios (primer-arranque.sh). Cada uno es una carpeta con:
-#   escritorio.conf  NOMBRE, DESCRIPCION, ESTADO (probado | sin-probar), TAMANO
+#   escritorio.conf  NOMBRE, DESCRIPCION, PROBADO_EN (distros y versiones donde está probado: "arch debian-12"), TAMANO
 #   paquetes-<distro>.txt  lo que instala el gestor encima del mínimo (apk/paquetes-escritorio.txt)
 #   sesion           lo corre sesion-android (bash; exec del compositor)
 #   home/            config que va al home la primera vez (@ESCALA@ = $ANDROID_ESCALA)

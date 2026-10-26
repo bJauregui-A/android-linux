@@ -233,6 +233,17 @@ menu_escritorios() {
     done < <(grep -v '^#' "$ED/orden-$DISTRO")
 }
 
+# probado | experimental, según si PROBADO_EN (escritorio.conf) incluye esta distro y versión
+estado_escritorio() {
+    (
+        . "$ED/$1/escritorio.conf"
+        case " $PROBADO_EN " in
+            *" $DISTRO "*) echo probado ;;
+            *) echo experimental ;;
+        esac
+    )
+}
+
 resolver_archivo() {
     local base=$1
     if [ -f "$D/${base}-${BACKEND}.txt" ]; then
@@ -400,7 +411,7 @@ if [ ! -s $E/escritorio ]; then
         caja_med '\e[1;38;5;111m'
         for i in "${!IDS[@]}"; do
             (. $ED/${IDS[$i]}/escritorio.conf
-             if [ "$ESTADO" = probado ]; then
+             if [ "$(estado_escritorio "${IDS[$i]}")" = probado ]; then
                  e=$'\e[1;38;5;48m● PROBADO\e[0m'
              else
                  e=$'\e[38;5;214m○ experimental\e[0m'
