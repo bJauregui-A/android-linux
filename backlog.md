@@ -13,16 +13,12 @@ El detalle técnico de los ítems anteriores (B04–B61) está en `git show c268
 
 Cada distro ofrece la lista de su instalador oficial (archinstall, tasksel, sabores de Ubuntu). Lo no probado se muestra como experimental.
 
+- **B67** · Como usuario de Debian 12, quiero que el menú muestre los escritorios que ofrece su instalador (tasksel) con los paquetes de Debian 12, y tener XFCE probado y funcionando, para elegir como en una instalación real. Deja el mecanismo para las demás distros: cada escritorio declara sus paquetes por distro y versión, y sin paquetes para esa versión no aparece.
 - **B64** · Como usuario, quiero ver junto a cada escritorio del menú si usa Wayland o X11, para saber qué compositor voy a tener.
 - **B65** · Como usuario de Arch, quiero que el menú muestre los escritorios que ofrece archinstall, con los no probados marcados como experimentales, para elegir como en una instalación real.
-- **B66** · Como usuario de Debian, quiero que el menú muestre los escritorios que ofrece tasksel, instalados con paquetes de Debian, para elegir como en una instalación real.
-- **B67** · Como usuario de Debian, quiero tener XFCE probado y funcionando, para contar con al menos un escritorio seguro.
-- **B19** · Como usuario de Debian, quiero que `/bin`, `/sbin` y `/lib` estén unificados con `/usr` como en un Debian actual, para que los paquetes que lo asumen funcionen (lo exigen Debian 13 y Ubuntu).
-- **B68** · Como usuario, quiero elegir entre Debian 12 y Debian 13 al crear una instancia, para usar la versión que necesito.
-- **B69** · Como usuario, quiero crear una instancia de Ubuntu 24.04 LTS, para usar sus paquetes.
+- **B68** · Como usuario, quiero elegir entre Debian 12 y Debian 13 al crear una instancia, para usar la versión que necesito (incluye unificar `/bin`, `/sbin` y `/lib` con `/usr`, que Debian 13 exige).
+- **B69** · Como usuario, quiero crear una instancia de Ubuntu 24.04 LTS con el menú de los sabores oficiales (Ubuntu, Kubuntu, Xubuntu, Lubuntu, MATE, Budgie, Unity, Cinnamon) y Lubuntu (LXQt) probado, para usar sus paquetes y elegir como en una instalación real (requiere la unificación con `/usr` de B68).
 - **B70** · Como usuario, quiero elegir entre Ubuntu 24.04 y 26.04 LTS al crear una instancia de Ubuntu, para usar la versión que necesito.
-- **B71** · Como usuario de Ubuntu, quiero que el menú muestre los escritorios de los sabores oficiales (Ubuntu, Kubuntu, Xubuntu, Lubuntu, MATE, Budgie, Unity, Cinnamon), para elegir como en una instalación real.
-- **B72** · Como usuario de Ubuntu, quiero tener LXQt (Lubuntu) probado y funcionando, para contar con al menos un escritorio seguro.
 
 Escritorios del instalador oficial que todavía no tenemos (uno por historia; cada uno deja de ser experimental cuando se prueba):
 - **B73** · Como usuario, quiero usar GNOME.
