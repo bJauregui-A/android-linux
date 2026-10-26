@@ -206,6 +206,11 @@ backend_instalar() {
     esac
 }
 
+# Distro y versión de la instancia (debian-12, arch...): con ella se eligen los paquetes y el estado de cada escritorio
+distro_version() {
+    ( . "${OS_RELEASE_ARCHIVO:-/etc/os-release}"; echo "$ID-$VERSION_ID" )
+}
+
 resolver_archivo() {
     local base=$1
     if [ -f "$D/${base}-${BACKEND}.txt" ]; then
