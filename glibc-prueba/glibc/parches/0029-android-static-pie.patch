@@ -1,0 +1,43 @@
+--- a/elf/rtld.c
++++ b/elf/rtld.c
+@@ -1603,7 +1603,14 @@
+ 		break;
+ 	      }
+ 	  if (!has_pt_interp)
+-	    is_static_binary = true;
++	    {
++	      is_static_binary = true;
++	      /* Android: un static-pie (p. ej. el wine-preloader) se reubica
++		 solo al arrancar, como bajo el kernel: reubicarlo aquí lo
++		 dejaría corrido y protegerle el RELRO lo hace caer con
++		 SEGV_ACCERR cuando se escribe a sí mismo.  */
++	      main_map->l_relocated = 1;
++	    }
+ 	}
+ 
+       if (__glibc_likely (state.mode == rtld_mode_normal))
+--- a/elf/dl-load.c
++++ b/elf/dl-load.c
+@@ -1269,6 +1269,22 @@
+   if (l->l_ld != NULL)
+     l->l_ld = (ElfW(Dyn) *) ((ElfW(Addr)) l->l_ld + l->l_addr);
+ 
++  /* Android: un ejecutable sin PT_INTERP ni DT_NEEDED es un static-pie
++     (rtld.c no lo reubica): su arranque lee .dynamic y le suma la base él
++     mismo, así que no se ajusta aquí en el lugar (D_PTR suma la base).  */
++  if ((mode & __RTLD_OPENEXEC) && l->l_ld != NULL)
++    {
++      bool estatico = true;
++      for (const ElfW(Phdr) *p = phdr; p < &phdr[l->l_phnum]; ++p)
++	if (p->p_type == PT_INTERP)
++	  estatico = false;
++      for (const ElfW(Dyn) *d = l->l_ld; estatico && d->d_tag != DT_NULL; ++d)
++	if (d->d_tag == DT_NEEDED)
++	  estatico = false;
++      if (estatico)
++	l->l_ld_readonly = 1;
++    }
++
+   elf_get_dynamic_info (l, false, false);
+ 
+   /* Make sure we are not dlopen'ing an object that has the

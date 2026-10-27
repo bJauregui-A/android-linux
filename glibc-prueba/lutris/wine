@@ -1,0 +1,16 @@
+#!/bin/bash
+# "wine" para Lutris: el Wine ARM64 del Proton 11 de Valve (trae FEX como DLL → corre .exe x86/x64),
+# sin umu/pressure-vessel (imposibles sin root). Proton vive en ../files (copia propia, sin Steam).
+R="$(dirname "$(dirname "$(readlink -f "$0")")")"
+P="$R/files"
+unset LD_PRELOAD MESA_LOADER_DRIVER_OVERRIDE
+# Wine busca wineserver en el PATH (Proton también lo pone ahí)
+export PATH="$P/bin-arm64:$PATH"
+export LD_LIBRARY_PATH="$P/lib/aarch64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export WINEDLLPATH="$P/lib/vkd3d:$P/lib/wine${WINEDLLPATH:+:$WINEDLLPATH}"
+# GL de WineD3D por Zink sobre Turnip (X11 sin DRI3 → presentación por CPU), como proton-directo
+T=/usr/local/turnip-x11/share/vulkan/icd.d/freedreno_icd.aarch64.json
+if [ -e "$T" ]; then
+  export VK_ICD_FILENAMES="$T" MESA_VK_WSI_DEBUG=${MESA_VK_WSI_DEBUG:-sw} GALLIUM_DRIVER=${GALLIUM_DRIVER:-zink}
+fi
+exec "$P/bin-arm64/wine" "$@"

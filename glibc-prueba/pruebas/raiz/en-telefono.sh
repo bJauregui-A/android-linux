@@ -67,5 +67,13 @@ chk C20 "/proc/self/.. sale a /proc" "$(ls /proc/self/.. | grep -cx -e self -e c
 # el mismo contexto (lo hace pruebas/raiz/rz.sh, que corre ambas).
 echo "SALTA C20b /sdcard/.. (se compara en rz.sh, vieja vs nueva)"
 
+# C22: binario static-pie (como el wine-preloader de Wine 11): se reubica solo, así
+# que el cargador no debe reubicarlo ni protegerle el RELRO. Se compila con
+# ./compilar-estatico-pie.sh y se deja en /tmp/rz-estatico-pie.
+EP=${ESTATICO_PIE:-/tmp/rz-estatico-pie}
+if [ -x "$EP" ]; then
+  chk C22 "static-pie se reubica solo" "$("$EP" 2>&1; echo "rc=$?")" "$(printf 'pie-ok\nrc=0')"
+else echo "SALTA C22 (falta $EP; ver compilar-estatico-pie.sh)"; fi
+
 echo "---"; [ $fallas = 0 ] && echo "TELEFONO: OK" || echo "TELEFONO: $fallas FALLAS"
 exit $((fallas != 0))

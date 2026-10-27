@@ -1,0 +1,3 @@
+# El "Lutris runtime" son bibliotecas x86_64: aquí no sirven.
+system:
+  disable_runtime: true
