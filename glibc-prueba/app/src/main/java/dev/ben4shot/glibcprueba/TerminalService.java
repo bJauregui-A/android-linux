@@ -590,9 +590,24 @@ public class TerminalService extends Service implements TerminalSessionClient {
         List<String> env = entorno(id, instalacion, prefijo);
         agregarBusSesion(env, prefijo);
         String[] args = instalacion.comandoTerminal(this);
+        String home = new File(prefijo, instalacion.home(prefijo)).getAbsolutePath();
+        if (!BuildConfig.DIAGNOSTICO) {
+            CapaSesion.actualizar(this, instalacion, prefijo);
+            if (Capa.atrasada(this, prefijo)) {
+                // B23: primero la capa del APK nuevo (instalar.sh muestra el avance) y después la shell de siempre
+                String[] siguiente = args.clone();
+                siguiente[0] = cargador;
+                try {
+                    String[] cmd = Instalador.comandoActualizar(this, siguiente, env);
+                    Log.i(TAG, "sesión Linux [" + id + "]: capa atrasada, se actualiza antes de abrir");
+                    return new TerminalSession(cmd[0], home, cmd, env.toArray(new String[0]), 5000, this);
+                } catch (java.io.IOException e) {
+                    Log.e(TAG, "no se pudo preparar la actualización de la capa", e);
+                }
+            }
+        }
         Log.i(TAG, "sesión Linux [" + id + "]: " + instalacion.id() + ", cargador " + cargador + ", prefijo " + prefijo);
-        return new TerminalSession(cargador, new File(prefijo, instalacion.home(prefijo)).getAbsolutePath(), args,
-                env.toArray(new String[0]), 5000, this);
+        return new TerminalSession(cargador, home, args, env.toArray(new String[0]), 5000, this);
     }
 
     // Sesión Wayland en segundo plano (bash -l para tomar /etc/profile).
@@ -665,6 +680,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
         }
         entornoLinuxPara(pb, idActual);
         if (supervisor) pb.environment().put("ARCH_ANDROID_SESSION_START", "1");
+        if (!BuildConfig.DIAGNOSTICO && Capa.atrasada(this, prefijo) && !actualizarCapaAntes(pb)) return;
         try {
             Process p = pb.start();
             sesionInst.procesoEscritorio = p;
@@ -694,6 +710,25 @@ public class TerminalService extends Service implements TerminalSessionClient {
         } catch (java.io.IOException e) {
             Log.e(TAG, "sesión Wayland [" + idActual + "]", e);
         }
+    }
+
+    // B23: la instancia tiene la capa de un APK anterior; el escritorio arranca después de que instalar.sh la actualice
+    // (tarda más en aparecer). Si falla, no se abre y el detalle queda en tmp/instalacion-extraccion.log.
+    private boolean actualizarCapaAntes(ProcessBuilder pb) {
+        List<String> env = new ArrayList<>();
+        for (Map.Entry<String, String> v : pb.environment().entrySet()) env.add(v.getKey() + "=" + v.getValue());
+        try {
+            pb.command(Instalador.comandoActualizar(this, pb.command().toArray(new String[0]), env));
+        } catch (java.io.IOException e) {
+            Log.e(TAG, "no se pudo preparar la actualización de la capa", e);
+            return false;
+        }
+        pb.environment().clear();
+        for (String v : env) {
+            int i = v.indexOf('=');
+            if (i > 0) pb.environment().put(v.substring(0, i), v.substring(i + 1));
+        }
+        return true;
     }
 
     synchronized void iniciarEscritorio() {

@@ -54,15 +54,29 @@ final class Instalador {
         }
         ubicar(c, baseAsset, "BASE", env);
         ubicar(c, "capa.tgz", "CAPA", env);
+        env.add("CAPA_SHA256=" + Capa.hashApk(c));
         env.add("ANDROID_DNS=" + String.join(" ", TerminalService.servidoresDns(c)));
-        String script;
+        Log.i(TAG, "instalando en " + p);
+        return new String[]{"sh", "-c", script(c), "instalar.sh"};
+    }
+
+    // Instancia atrasada (B23): instalar.sh con MODO=actualizar y, al terminar, exec de siguiente (ruta completa
+    // primero). Agrega a env lo que necesita.
+    static String[] comandoActualizar(Context c, String[] siguiente, List<String> env) throws IOException {
+        env.add("APK=" + c.getApplicationInfo().sourceDir);
+        ubicar(c, "capa.tgz", "CAPA", env);
+        env.add("CAPA_SHA256=" + Capa.hashApk(c));
+        env.add("MODO=actualizar");
+        Capa.apartarPreload(env);
+        return Capa.comando(true, script(c), siguiente);
+    }
+
+    private static String script(Context c) throws IOException {
         try (InputStream i = c.getAssets().open("instalar.sh")) {
             ByteArrayOutputStream b = new ByteArrayOutputStream();
             i.transferTo(b);
-            script = b.toString("UTF-8");
+            return b.toString("UTF-8");
         }
-        Log.i(TAG, "instalando en " + p);
-        return new String[]{"sh", "-c", script, "instalar.sh"};
     }
 
     static String[] comando(Context c, List<String> env) throws IOException {

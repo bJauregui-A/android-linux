@@ -93,6 +93,13 @@ android {
 
 tasks.named("preBuild").configure { dependsOn(packageSessionLayer) }
 
+// B23: no armar el APK con una capa.tgz más vieja que sus fuentes (apk/armar.sh sdk36 la rehace). Va en la mezcla de
+// assets y no en preBuild para que las pruebas unitarias corran igual.
+val revisarCapa = tasks.register<Exec>("revisarCapa") {
+    commandLine(file("../apk/capa-al-dia.sh").absolutePath, file("../trabajo/assets-sdk36/capa.tgz").absolutePath)
+}
+tasks.matching { it.name.matches(Regex("mergeSdk36\\w*Assets")) }.configureEach { dependsOn(revisarCapa) }
+
 dependencies {
     implementation("com.github.termux.termux-app:terminal-view:v0.118.3")
     testImplementation("junit:junit:4.13.2")

@@ -29,6 +29,8 @@ python3 apk/capa.py --prefix $PREFIJO --compilados trabajo/compilados.tar --out 
 $Z -9 -c trabajo/base-$V.tar > $OUT/base.tgz
 $Z -9 -c trabajo/capa-$V.tar > $OUT/capa.tgz
 rm trabajo/base-$V.tar trabajo/capa-$V.tar
+# B23: la app compara este hash con el de cada instancia para saber si le falta la capa nueva
+sha256sum $OUT/capa.tgz | cut -d' ' -f1 > $OUT/capa.sha256
 cp apk/instalar.sh $OUT/
 cp glibc/salida/usr/lib/ld-linux-aarch64.so.1 app/src/main/jniLibs/arm64-v8a/libldp.so
 du -h $OUT/*

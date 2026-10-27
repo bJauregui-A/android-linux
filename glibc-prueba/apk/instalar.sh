@@ -3,6 +3,8 @@
 # del APK (assets sin comprimir: APK, *_OFF y *_LEN los pasa Instalador.java) y sigue con
 # primer-arranque.sh dentro de Arch. Se puede repetir: si ya extrajo, va directo a pacman.
 set -e
+# MODO=actualizar termina con exec de la sesión de la instancia: recibe PATH, TMPDIR y umask como los dejó la app
+_PATH_APP=$PATH _TMPDIR_APP=${TMPDIR-} _TMPDIR_HAY=${TMPDIR+1} _UMASK_APP=$(umask)
 umask 022
 ARCH_PATH="/usr/local/bin:/usr/bin"
 PATH=/system/bin:$PATH
@@ -63,6 +65,156 @@ caja_lin() {
     fi
 }
 
+extraer() { # extraer <offset> <largo> <qué> [tar options...]
+    OFF="$1"
+    LEN="$2"
+    QUE="$3"
+    shift 3
+    printf '\e[1;38;5;81m==> Extrayendo:\e[0m %s...\n' "$QUE"
+    : > "$LOG"
+    zflag=""
+    case $(tail -c +$(($OFF + 1)) "$APK" | head -c 2 | od -An -tx1 2>/dev/null | tr -d ' \n') in
+        1f8b) zflag="-z" ;;
+    esac
+    if tail -c +$(($OFF + 1)) "$APK" | head -c "$LEN" | tar $zflag -xf - -C "$P" "$@" 2> "$LOG"; then
+        printf '    \e[1;38;5;48m✔ Listo\e[0m\n'
+    else
+        printf '    \e[1;38;5;196m✖ Falló la extracción. Detalles:\e[0m\n'
+        tail -n 20 "$LOG"
+        return 1
+    fi
+}
+
+# Lo gráfico de la capa: no va en las instancias sin entorno. Una opción de tar por línea (sin comillas: quien las
+# use debe expandirlas con set -f).
+exclusiones_graficas() {
+    for x in 'usr/local/turnip*' 'usr/local/mesa-gl*' 'usr/local/wlroots*' 'usr/local/sway*' \
+             'usr/local/lib/libudmabuf-shim.so' 'opt/gtk2*' 'etc/skel/.config/kitty*'; do
+        printf '%s\n' "--exclude=$x"
+    done
+}
+# Al actualizar (B23): las mismas exclusiones con que se instaló; sin usr/local/turnip es una instancia sin entorno.
+exclusiones_capa() {
+    [ -e "$1/usr/local/turnip" ] || exclusiones_graficas
+}
+
+# glibc de la capa (usr/local/share/linux-android/glibc/) → usr/lib y, en Debian, usr/lib/aarch64-linux-gnu. Solo los
+# archivos que la instancia ya tiene. Antes, respaldar_glibc deja la que había en $E/glibc-anterior/ (uno solo); con
+# la marca actualizando (un intento anterior cortado a medias) el respaldo que quedó es el bueno y no se toca.
+respaldar_glibc() {
+    _e=$1/var/lib/linux-android
+    [ -e "$_e/actualizando" ] && return 0
+    rm -rf "$_e/glibc-anterior"
+    mkdir -p "$_e/glibc-anterior"
+    for _f in "$1/usr/local/share/linux-android/glibc/"*; do
+        _n=${_f##*/}
+        [ -e "$1/usr/lib/$_n" ] && cp "$1/usr/lib/$_n" "$_e/glibc-anterior/$_n"
+        if [ -e "$1/usr/lib/aarch64-linux-gnu/$_n" ]; then
+            mkdir -p "$_e/glibc-anterior/aarch64-linux-gnu"
+            cp "$1/usr/lib/aarch64-linux-gnu/$_n" "$_e/glibc-anterior/aarch64-linux-gnu/$_n"
+        fi
+    done
+    return 0
+}
+instalar_glibc() {
+    for _f in "$1/usr/local/share/linux-android/glibc/"*; do
+        _n=${_f##*/}
+        for _d in "$1/usr/lib" "$1/usr/lib/aarch64-linux-gnu"; do
+            [ -e "$_d/$_n" ] || continue
+            cp "$_f" "$_d/$_n.nuevo" && chmod 755 "$_d/$_n.nuevo" && mv -f "$_d/$_n.nuevo" "$_d/$_n" || return 1
+        done
+    done
+}
+
+# Migraciones (B23): apk/migraciones/NNN-<qué>.sh, en la capa en usr/local/share/linux-android/migraciones/. Cada
+# instancia corre una vez, en orden, las de número mayor que la anotada en $E/migracion.
+numero_migracion() { # 010-algo.sh → 10 (vacío → 0)
+    _b=${1##*/}
+    _b=$(printf '%s' "${_b%%-*}" | sed 's/^0*//')
+    echo "${_b:-0}"
+}
+migraciones_pendientes() { # migraciones_pendientes <dir> <última>
+    _u=$(numero_migracion "$2")
+    for _m in "$1"/[0-9]*.sh; do
+        [ -f "$_m" ] || continue
+        [ "$(numero_migracion "$_m")" -gt "$_u" ] && echo "$_m"
+    done
+    return 0
+}
+# PATH, TMPDIR y umask como los dejó la app: este script los cambia para sí (con /system/bin primero, la instancia
+# tomaba sed, stat, seq... de toybox, que es bionic).
+entorno_app() {
+    export PATH="$_PATH_APP"
+    if [ -n "$_TMPDIR_HAY" ]; then export TMPDIR="$_TMPDIR_APP"; else unset TMPDIR; fi
+    umask "$_UMASK_APP"
+}
+# Con el cargador y el bash de la instancia; anota cada una al terminarla. Si una falla se detiene ahí.
+migrar() {
+    _bash=/usr/bin/bash
+    [ -x "$P/usr/bin/bash" ] || _bash=/bin/bash
+    for _m in $(migraciones_pendientes "$P/usr/local/share/linux-android/migraciones" "$(cat "$E/migracion" 2>/dev/null)"); do
+        _n=${_m##*/}
+        printf '\e[1;38;5;81m==> Migración:\e[0m %s\n' "$_n"
+        if ! (entorno_app; exec "$GLIBC_LOADER" "$_bash" "${_m#"$P"}"); then
+            printf '    \e[1;38;5;196m✖ Falló la migración %s\e[0m\n' "$_n"
+            return 1
+        fi
+        echo "${_n%%-*}" > "$E/migracion"
+    done
+}
+# Instalación nueva: ya nace con lo que hacen las migraciones que trae la capa.
+anotar_migraciones() {
+    _ultima=
+    for _m in "$P/usr/local/share/linux-android/migraciones"/[0-9]*.sh; do
+        [ -f "$_m" ] && _ultima=${_m##*/}
+    done
+    [ -n "$_ultima" ] && echo "${_ultima%%-*}" > "$E/migracion"
+    return 0
+}
+
+# Hash de la capa que trae el APK (asset capa.sha256, lo pasa Instalador): la app compara con este para saber si
+# la instancia está atrasada (B23). Sin hash (APK viejo) no se escribe nada.
+guardar_hash_capa() {
+    [ -n "$CAPA_SHA256" ] || return 0
+    printf '%s\n' "$CAPA_SHA256" > "$E/capa.sha256"
+}
+
+# MODO=actualizar (B23): la instancia ya está instalada pero su capa es de un APK anterior. Extrae la capa nueva con las
+# mismas exclusiones, instala su glibc (con respaldo) y sigue con el comando de siempre: ./instalar.sh <comando...>.
+# El lock evita que la terminal y el escritorio lo hagan a la vez; quien espera vuelve a ver el hash y no repite.
+actualizar() {
+    # mksh (el sh de Android) abre con close-on-exec los fd > 2 de exec: flock recibe una copia (8) de la misma
+    # descripción; el lock es de la descripción y lo mantiene el 9 de este shell
+    exec 9> "$E/actualizar.lock"
+    flock 8 8>&9 || return 1
+    if [ "$(cat "$E/capa.sha256" 2>/dev/null)" != "$CAPA_SHA256" ]; then
+        echo; caja_sup '\e[1;38;5;111m' 'Actualizando la instancia con la capa del APK nuevo'
+        set -f
+        extraer "$CAPA_OFF" "$CAPA_LEN" "Capa nueva (scripts, configs y glibc)" $(exclusiones_capa "$P") || return 1
+        set +f
+        # la capa no toca usr/lib: hasta aquí un corte no deja nada a medias y se reintenta igual
+        respaldar_glibc "$P"
+        touch "$E/actualizando"
+        instalar_glibc "$P" || return 1
+        migrar || return 1
+        guardar_hash_capa
+        rm -f "$E/actualizando"
+        caja_inf '\e[1;38;5;111m'
+    fi
+    exec 9>&-
+    # la app aparta el LD_PRELOAD de la instancia (glibc) para que no lo cargue este sh (bionic)
+    if [ -n "$LINUX_LD_PRELOAD" ]; then export LD_PRELOAD="$LINUX_LD_PRELOAD"; fi
+    entorno_app
+    unset LINUX_LD_PRELOAD MODO APK CAPA_OFF CAPA_LEN CAPA_SHA256
+    exec "$@"
+}
+
+if [ "$MODO" = actualizar ]; then
+    actualizar "$@"
+    echo "No se pudo actualizar la instancia; el detalle queda en $LOG. Se reintenta al volver a abrirla."
+    exit 1
+fi
+
 # Limpiar pantalla y mostrar banner
 ESCRITORIO_PREVIO=$(cat "$E/escritorio" "$P/var/lib/arch-android/escritorio" 2>/dev/null | head -n 1 || true)
 printf '\033[2J\033[H'
@@ -94,26 +246,6 @@ if [ "$LIBRES" -lt 3145728 ]; then
     case "$seguir" in s|S|si|SI|Si|sí|SÍ) ;; *) echo "Instalación cancelada; libera espacio y vuelve a abrir la app."; exit 1;; esac
 fi
 
-extraer() { # extraer <offset> <largo> <qué> [tar options...]
-    OFF="$1"
-    LEN="$2"
-    QUE="$3"
-    shift 3
-    printf '\e[1;38;5;81m==> Extrayendo:\e[0m %s...\n' "$QUE"
-    : > "$LOG"
-    zflag=""
-    case $(tail -c +$(($OFF + 1)) "$APK" | head -c 2 | od -An -tx1 2>/dev/null | tr -d ' \n') in
-        1f8b) zflag="-z" ;;
-    esac
-    if tail -c +$(($OFF + 1)) "$APK" | head -c "$LEN" | tar $zflag -xf - -C "$P" "$@" 2> "$LOG"; then
-        printf '    \e[1;38;5;48m✔ Listo\e[0m\n'
-    else
-        printf '    \e[1;38;5;196m✖ Falló la extracción. Detalles:\e[0m\n'
-        tail -n 20 "$LOG"
-        return 1
-    fi
-}
-
 mkdir -p "$E"
 touch "$E/instalando"
 if [ ! -e "$E/extraido" ]; then
@@ -124,17 +256,14 @@ if [ ! -e "$E/extraido" ]; then
         extraer "$BASE_OFF" "$BASE_LEN" "Arch Linux ARM base (pacman + glibc propia)"
     fi
     if [ "$ESCRITORIO_PREVIO" = "sin-entorno" ]; then
-        extraer "$CAPA_OFF" "$CAPA_LEN" "Scripts y utilidades base (sin capa GPU)" \
-            --exclude='usr/local/turnip*' \
-            --exclude='usr/local/mesa-gl*' \
-            --exclude='usr/local/wlroots*' \
-            --exclude='usr/local/sway*' \
-            --exclude='usr/local/lib/libudmabuf-shim.so' \
-            --exclude='opt/gtk2*' \
-            --exclude='etc/skel/.config/kitty*'
+        set -f
+        extraer "$CAPA_OFF" "$CAPA_LEN" "Scripts y utilidades base (sin capa GPU)" $(exclusiones_graficas)
+        set +f
     else
         extraer "$CAPA_OFF" "$CAPA_LEN" "Capa GPU (Turnip, Zink, Mesa, wlroots, configs)"
     fi
+    guardar_hash_capa
+    anotar_migraciones
     touch "$E/extraido"
     # Asegurar enlaces simbólicos de retrocompatibilidad
     [ -e "$P/var/lib/arch-android" ] || ln -sfn linux-android "$P/var/lib/arch-android" 2>/dev/null || true

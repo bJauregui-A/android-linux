@@ -63,7 +63,6 @@ ARCHIVOS = [
     ("supervisor/service-daemon", "usr/local/bin/service-daemon", 0o755),
     ("supervisor/service", "usr/local/bin/service", 0o755),
     ("supervisor/service", "usr/local/bin/sv", 0o755),
-    ("glibc/salida/usr/lib/libc.so.6", "usr/lib/libc.so.6", 0o755),
     ("trabajo/libudmabuf-shim.so", "usr/local/lib/libudmabuf-shim.so", 0o755),
     ("scripts/adb-conectar", "usr/local/bin/adb-conectar", 0o755),
     ("android/proxy-puertos", "usr/local/bin/proxy-puertos", 0o755),
@@ -162,6 +161,13 @@ def main():
 
     listas = [(f"apk/{f}", f"{D}/{f}", 0o644)
               for f in sorted(os.listdir(os.path.join(RAIZ, "apk"))) if f.startswith("paquetes-")]
+    # glibc completa aparte (B23): instalar.sh la respalda y la copia a usr/lib (y aarch64-linux-gnu en Debian)
+    g = "glibc/salida/usr/lib"
+    glibc = [(f"{g}/{f}", f"{D}/glibc/{f}", 0o755) for f in sorted(os.listdir(os.path.join(RAIZ, g)))
+             if re.search(r"\.so(\.\d+)+$", f) or f.startswith("ld-linux")]
+    # migraciones (B23): instalar.sh corre las que la instancia no tiene
+    migraciones = [(f"apk/migraciones/{f}", f"{D}/migraciones/{f}", 0o755)
+                   for f in sorted(os.listdir(os.path.join(RAIZ, "apk/migraciones"))) if f.endswith(".sh")]
     escritorios = []
     for d, _, fs in os.walk(os.path.join(RAIZ, "escritorios")):
         for f in sorted(fs):
@@ -170,7 +176,7 @@ def main():
                 continue  # sesion-android y autostart-android van a /usr/local/bin
             modo = 0o755 if os.access(os.path.join(RAIZ, rel), os.X_OK) else 0o644
             escritorios.append((rel, f"{D}/{rel}", modo))
-    for src, dst, modo in ARCHIVOS + listas + escritorios:
+    for src, dst, modo in ARCHIVOS + listas + glibc + migraciones + escritorios:
         out.archivo(dst, open(os.path.join(RAIZ, src), "rb").read(), modo)
     for src, dst in PLANTILLAS:
         texto = open(os.path.join(RAIZ, src)).read().replace("@P@", f"{paquete}/files/archlinux")

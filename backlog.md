@@ -8,14 +8,6 @@ El detalle técnico de los ítems anteriores (B04–B61) está en `git show c268
 
 Ordenadas por cuánto destraban.
 
-- **B23** · Las instancias existentes reciben la glibc y las herramientas nuevas al actualizar la app, sin reinstalarlas
-  - Guardar en cada instancia qué versión de glibc y herramientas tiene.
-  - Al abrir la app tras actualizarla, copiar lo nuevo a las instancias atrasadas sin tocar los datos del usuario.
-  - Comprobar en una instancia creada con el APK anterior.
-- **B45** · Prueba que comprueba que las instancias nuevas traen la glibc recién compilada
-  - Comparar la libc empaquetada en el APK con la del último build.
-  - Comparar la libc de una instancia nueva con la del APK.
-  - Fallar antes de publicar si no coinciden.
 - **B16** · Batería de pruebas de humo que corre en una instancia y dice en un minuto si algo se rompió
   - Shell y paquetes (instalar y quitar uno chico).
   - App gráfica y GPU.

@@ -234,6 +234,17 @@ chfn_restaurar() {
     $s dpkg-divert --quiet --local --rename --remove "$f"
 }
 
+# Si Android mata la app a mitad de apt (falta de memoria), dpkg queda interrumpido y apt-get no avanza hasta que se
+# corra --configure -a; lo cortado a mitad de desempaquetar queda half-installed (o reinst-required) y solo se arregla
+# reinstalándolo. Sin nada pendiente no hace nada.
+dpkg_reparar() {
+    local s=${SUDO_CMD-sudo} rotos
+    DEBIAN_FRONTEND=noninteractive $s env DEBIAN_FRONTEND=noninteractive dpkg --configure -a
+    rotos=$(dpkg-query -W -f='${db:Status-Abbrev} ${binary:Package}\n' 2>/dev/null |
+            awk 'substr($1, 2, 1) == "H" || substr($1, 3, 1) == "R" { print $2 }')
+    [ -z "$rotos" ] || DEBIAN_FRONTEND=noninteractive $s env DEBIAN_FRONTEND=noninteractive apt-get install -y --reinstall $rotos
+}
+
 backend_instalar() {
     local pkgs=("$@")
     [ ${#pkgs[@]} -eq 0 ] && return 0
@@ -252,6 +263,7 @@ backend_instalar() {
             chfn_tolerante || printf '\e[38;5;214m✖ Aviso: no se pudo desviar chfn; los postinst que crean usuarios pueden fallar\e[0m\n'
             while :; do
                 backend_limpiar_lock
+                dpkg_reparar
                 DEBIAN_FRONTEND=noninteractive sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y "${pkgs[@]}" 2>&1 | tee "$reg"
                 [ "${PIPESTATUS[0]}" -eq 0 ] && { r=0; break; }
                 # Un frenado que es requisito real no se reintenta con lo mismo: se libera y se vuelve a probar
