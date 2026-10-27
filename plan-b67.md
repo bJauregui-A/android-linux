@@ -15,7 +15,7 @@ Avance (27-oct): se retoma tras cerrar B11 (`1f48d38`), que deja X11 directo fun
 - `87acc13` declaró paquetes de `debian-12` para los 8 escritorios de tasksel, no solo para Xfce. Por eso el menú de Debian 12 muestra los 8 como experimentales, y no solo Xfce y la consola. Los nombres se comprobaron contra el índice de bookworm, pero no con `apt-cache` en el teléfono.
 - B11 sumó a la base de Debian pines, hold de libc, usuarios, gconv, un bus de sistema para Cinnamon y GNOME, y la liberación de requisitos frenados (`pruebas/debian/requisitos.sh`).
 - Ningún escritorio tiene `debian-12` en `PROBADO_EN`. `xfce-x11` tiene `PROBADO_EN=""` (tampoco está probado en `arch`).
-- Hecha la prueba 10 (sin commit). Faltan las pruebas 11–12.
+- Hechas las pruebas 10 (`95d9697`) y 11 (sin commit). Falta la 12.
 
 ## Criterios de aceptación
 
@@ -85,6 +85,8 @@ Integración (se comprueba en el teléfono):
 8. Hecha. Paquetes de Arch: los escritorios actuales declaran los suyos para `arch` y su estado probado para `arch`, sin cambiar ningún nombre. La prueba 6 y una instancia Arch nueva lo confirman.
 9. Hecha. `primer-arranque.sh` arma el menú y la lista a instalar con las funciones de las pruebas 1–7.
 10. Hecha (`pruebas/debian/paquetes.sh --repo <instancia>`, 58/58 en `deb12-paquetes-46743`, una Debian 12 `sin-entorno`). Prueba dentro de la app (`scripts/probar-en-telefono.sh`, solo lectura): cada paquete declarado en un `paquetes-debian-12.txt` existe según `apt-cache policy`. Ya está el perfil de Xfce (`xfce-x11`, X11 con `xfwm4`). La prueba cubre los 8 escritorios porque todos salen en el menú.
-11. Paso mínimo de interfaz: la instancia Debian 12 nueva se crea sin pantalla con `scripts/crear-en-telefono.sh` (de B11) eligiendo `xfce-x11`. El menú muestra los 8 de tasksel en su orden, más la consola, todos experimentales, y la instalación termina (con la transcripción en `files/pruebas/`).
+11. Hecha (sin commit). `deb12-xfce-71784` instalada, `salida=0`, transcripción en `files/pruebas/instalacion-deb12-xfce-71784.log`. El menú se comprueba con `pruebas/debian/menu.sh` dentro de la app (la creación sin pantalla no lo dibuja): los 8 de tasksel en orden, más la consola, todos experimentales.
+    - Error encontrado: en Debian, `adduser` de los postinst (pulseaudio, polkitd, rtkit, colord) llama a `chfn`, que falla con "PAM: Authentication failure". dpkg deja los paquetes a medias y solo se arreglan con los reintentos de `backend_instalar` (9 → 3 → 0 en este caso, el último reintento). Pasa también en las instalaciones de GNOME y MATE de B11. Además, el aviso dice "Falló la descarga", y no lo era. Pendiente decidir el arreglo.
+    Paso mínimo de interfaz: la instancia Debian 12 nueva se crea sin pantalla con `scripts/crear-en-telefono.sh` (de B11) eligiendo `xfce-x11`. El menú muestra los 8 de tasksel en su orden, más la consola, todos experimentales, y la instalación termina (con la transcripción en `files/pruebas/`).
 12. XFCE arranca y se ve (captura con `grim`), y vuelve a arrancar tras cerrar y abrir la app. Entonces se marca `PROBADO_EN="debian-12"` en `xfce-x11/escritorio.conf`.
     - Si falla, es por Debian (paquetes, sesión, bus), no por la vía X11, que ya funciona desde B11. Parar y decidir antes de seguir.
