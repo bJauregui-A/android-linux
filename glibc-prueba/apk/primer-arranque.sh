@@ -216,6 +216,24 @@ liberar_pines() {
     rm -f "$tmp"
 }
 
+# adduser (en los postinst de pulseaudio, polkitd, rtkit, colord...) llama a chfn, que dentro de la app falla por PAM
+# ("Authentication failure") y deja el paquete a medias. Mientras corre apt, chfn se desvía a un envoltorio que no
+# falla; chfn_restaurar devuelve el original. SUDO_CMD y CHFN solo los cambian las pruebas.
+chfn_tolerante() {
+    local s=${SUDO_CMD-sudo} f=${CHFN:-/usr/bin/chfn}
+    [ -e "$f.android" ] && return 0
+    [ -e "$f" ] || return 0
+    $s dpkg-divert --quiet --local --rename --divert "$f.android" --add "$f" || return 1
+    printf '#!/bin/sh\n"%s.android" "$@" || true\n' "$f" | $s tee "$f" > /dev/null && $s chmod 755 "$f"
+}
+
+chfn_restaurar() {
+    local s=${SUDO_CMD-sudo} f=${CHFN:-/usr/bin/chfn}
+    [ -e "$f.android" ] || return 0
+    $s rm -f "$f"
+    $s dpkg-divert --quiet --local --rename --remove "$f"
+}
+
 backend_instalar() {
     local pkgs=("$@")
     [ ${#pkgs[@]} -eq 0 ] && return 0
@@ -230,11 +248,12 @@ backend_instalar() {
             done
             ;;
         apt)
-            local i=1 liberaciones=0 reg=${TMPDIR:-/tmp}/apt-instalar.log pref=/etc/apt/preferences.d/android libres
+            local i=1 liberaciones=0 reg=${TMPDIR:-/tmp}/apt-instalar.log pref=/etc/apt/preferences.d/android libres r
+            chfn_tolerante || printf '\e[38;5;214m✖ Aviso: no se pudo desviar chfn; los postinst que crean usuarios pueden fallar\e[0m\n'
             while :; do
                 backend_limpiar_lock
                 DEBIAN_FRONTEND=noninteractive sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y "${pkgs[@]}" 2>&1 | tee "$reg"
-                [ "${PIPESTATUS[0]}" -eq 0 ] && return 0
+                [ "${PIPESTATUS[0]}" -eq 0 ] && { r=0; break; }
                 # Un frenado que es requisito real no se reintenta con lo mismo: se libera y se vuelve a probar
                 libres=$(requisitos_frenados "$reg" "$pref" | tr '\n' ' ')
                 if [ -n "$libres" ] && [ $liberaciones -lt 5 ]; then
@@ -243,11 +262,13 @@ backend_instalar() {
                     liberar_pines "$pref" $libres
                     continue
                 fi
-                [ $i -ge 3 ] && return 1
-                printf '\n\e[38;5;214m✖ Falló la descarga en apt, reintento %d de 2...\e[0m\n' $i
+                [ $i -ge 3 ] && { r=1; break; }
+                printf '\n\e[38;5;214m✖ Falló apt, reintento %d de 2...\e[0m\n' $i
                 i=$((i + 1))
                 sleep 3
             done
+            chfn_restaurar
+            return $r
             ;;
         *)
             echo "backend no soportado para instalación: $BACKEND" >&2

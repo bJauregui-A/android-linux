@@ -64,10 +64,6 @@ Ordenadas por cuánto destraban.
 
 Cada distro ofrece la lista de su instalador oficial (archinstall, tasksel, sabores de Ubuntu). Lo no probado se muestra como experimental.
 
-- **B67** · Menú de Debian 12 con los escritorios de tasksel y sus paquetes de Debian 12, con Xfce funcionando (en pausa, `plan-b67.md`)
-  - Cada escritorio declara sus paquetes por distro y versión; sin paquetes para esa versión no aparece.
-  - Orden del menú como tasksel.
-  - Xfce probado en Debian 12.
 - **B65** · Menú de Arch con los escritorios de archinstall
   - Orden y lista como archinstall.
   - Marcar como experimentales los no probados.

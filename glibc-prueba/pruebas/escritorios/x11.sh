@@ -1,6 +1,7 @@
 #!/usr/bin/bash
 # B11: los siete escritorios X11 (proveedor x11-directo) salen en el menú de su distro, sin probar: Arch con
-# Openbox y XFCE X11; Debian 12 con Xfce, GNOME, GNOME Flashback, Cinnamon, MATE y LXDE; PROBADO_EN vacío.
+# Openbox y XFCE X11; Debian 12 con Xfce, GNOME, GNOME Flashback, Cinnamon, MATE y LXDE. Ninguno probado en Arch;
+# Xfce probado en debian-12 (B67, prueba 12), los demás experimentales.
 # Corre en el PC, sobre las carpetas reales del repo:  pruebas/escritorios/x11.sh
 cd "$(dirname "$0")/../.." || exit 1
 eval "$(sed -n '/^menu_escritorios() {/,/^}/p;/^estado_escritorio() {/,/^}/p' apk/primer-arranque.sh)"
@@ -11,8 +12,8 @@ ED=escritorios
 
 X11="openbox xfce-x11 gnome gnome-flashback cinnamon mate lxde"
 for e in $X11; do
-  caso "$e: proveedor x11-directo y PROBADO_EN vacío"  \
-    "( . $ED/$e/escritorio.conf; [ \"\$PROVEEDOR_PANTALLA\" = x11-directo ] && [ -z \"\$PROBADO_EN\" ] )"
+  caso "$e: proveedor x11-directo y sin probar en arch"  \
+    "( . $ED/$e/escritorio.conf; [ \"\$PROVEEDOR_PANTALLA\" = x11-directo ] && [[ \" \$PROBADO_EN \" != *' arch '* ]] )"
 done
 
 DISTRO=arch
@@ -24,7 +25,8 @@ done
 
 DISTRO=debian-12
 menu=" $(menu_escritorios | tr '\n' ' ')"
-for e in xfce-x11 gnome gnome-flashback cinnamon mate lxde; do
+caso "debian-12: el menú trae xfce-x11, probado"  '[[ "$menu" == *" xfce-x11 "* ]] && [ "$(estado_escritorio xfce-x11)" = probado ]'
+for e in gnome gnome-flashback cinnamon mate lxde; do
   caso "debian-12: el menú trae $e, experimental"  '[[ "$menu" == *" $e "* ]] && [ "$(estado_escritorio $e)" = experimental ]'
 done
 

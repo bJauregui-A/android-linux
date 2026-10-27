@@ -16,5 +16,12 @@ caso "probado en arch: probado en arch"            '[ "$(estado_escritorio xfce-
 DISTRO=debian-12
 caso "probado solo en arch: experimental en debian-12"  '[ "$(estado_escritorio xfce-x11)" = experimental ]'
 
+# Las recetas reales: Xfce se probó en Debian 12 (prueba 12 de B67), no en Arch.
+ED=escritorios
+DISTRO=debian-12
+caso "xfce-x11 del repo: probado en debian-12"     '[ "$(estado_escritorio xfce-x11)" = probado ]'
+DISTRO=arch
+caso "xfce-x11 del repo: sigue experimental en arch"  '[ "$(estado_escritorio xfce-x11)" = experimental ]'
+
 echo "fallas: $fallas"
 [ $fallas -eq 0 ]

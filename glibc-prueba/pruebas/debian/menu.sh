@@ -1,6 +1,6 @@
 #!/usr/bin/bash
-# B67: en una instancia Debian 12 el menú de escritorios es el de tasksel, en su orden, más la consola, y todos
-# salen experimentales (ninguno probado todavía en debian-12). Usa las funciones del primer-arranque.sh instalado.
+# B67: en una instancia Debian 12 el menú de escritorios es el de tasksel, en su orden, más la consola. Xfce sale
+# probado (prueba 12 de B67) y los demás experimentales. Usa las funciones del primer-arranque.sh instalado.
 # Solo lectura. Corre DENTRO de la instancia:  scripts/probar-en-telefono.sh <instancia-debian-12> pruebas/debian/menu.sh
 PA=/usr/local/share/linux-android/primer-arranque.sh
 [ -n "$PRIMER_ARRANQUE" ] && PA=$PRIMER_ARRANQUE
@@ -20,8 +20,9 @@ caso "el menú es el de tasksel, en su orden, más la consola" \
   '[ "$menu" = "gnome xfce-x11 gnome-flashback kde cinnamon mate lxde lxqt sin-entorno " ]'
 for id in $menu; do
   [ $id = sin-entorno ] && continue
-  e=$(estado_escritorio $id)
-  caso "$id: experimental ($e)" '[ "$e" = experimental ]'
+  e=$(estado_escritorio $id); esperado=experimental
+  [ $id = xfce-x11 ] && esperado=probado
+  caso "$id: $esperado ($e)" '[ "$e" = $esperado ]'
 done
 echo "fallas: $fallas"
 [ $fallas -eq 0 ]
