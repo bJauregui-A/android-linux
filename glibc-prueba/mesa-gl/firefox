@@ -2,5 +2,9 @@
 # /usr/local/bin/firefox: Firefox con WebRender por GPU (con-gpu). Firefox ve el dispositivo de Mesa
 # como "software" y elige WebRender Software; MOZ_WEBRENDER=1 le pide el de GPU.
 # Sin mesa-gl (/usr/local o ~) no se fuerza (sería WebRender sobre llvmpipe, más lento que el Software).
+# En X11 directo (servidor X de la app) el servidor aún no tiene DRI3: Zink por drisw deja la ventana vacía (B36).
+case " $ARCH_ANDROID_PROVIDER_CAPABILITIES " in
+  *" x11-directo "*) exec /usr/lib/firefox/firefox "$@" ;;
+esac
 [ -d /usr/local/mesa-gl/lib ] || [ -d "$HOME/mesa-gl/lib" ] && export MOZ_WEBRENDER=1
 exec /usr/local/bin/con-gpu /usr/lib/firefox/firefox "$@"

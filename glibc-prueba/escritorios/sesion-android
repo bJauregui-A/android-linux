@@ -234,6 +234,8 @@ if [ -d "$D/$id/home" ]; then
         [ -x "$archivo" ] && chmod +x "$destino" 2>/dev/null || true
     done < <(find "$D/$id/home" -type f -print0)
 fi
+# android.js para el sandbox de Firefox: Firefox pudo instalarse después del primer arranque
+"$D/comun/firefox-ajustes" 2>/dev/null || true
 
 # Quitar el socket del padre: el nuevo compositor debe conectarse al anfitrión por wayland-0,
 # pero publicará su propio socket en XDG_RUNTIME_DIR. Limpiar restos de compositores anteriores.

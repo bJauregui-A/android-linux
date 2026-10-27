@@ -991,11 +991,8 @@ if [ -n "$GLIBC_PREFIX" ]; then
     [ -f $f ] && { reescribir_prefijo "$P_REL" < $f > $f.nuevo && cat $f.nuevo > $f; rm -f $f.nuevo; } 2>/dev/null || true
     ldconfig 2>/dev/null || true
 fi
-FF=/usr/lib/firefox/browser/defaults/preferences
-if [ -d "$FF" ]; then
-    P_REL=$(echo "${GLIBC_PREFIX:-dev.ben4shot.glibcprueba.sdk36/files/archlinux}" | sed -E 's@^/data/(user/0|data)/@@')
-    sed "s|/home/user/|/home/$N/|g" "$D/firefox-android.js" | reescribir_prefijo "$P_REL" > "$FF/android.js"
-fi
+# android.js del sandbox de Firefox (también al abrir cada sesión, por si Firefox llega después)
+HOME=/home/$N "$D/escritorios/comun/firefox-ajustes" 2>/dev/null || true
 [ -f /usr/share/applications/firefox.desktop ] &&
     sed 's|/usr/lib/firefox/firefox|/usr/local/bin/firefox|' /usr/share/applications/firefox.desktop \
         > ~/.local/share/applications/firefox.desktop

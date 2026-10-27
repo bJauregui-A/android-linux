@@ -1,0 +1,32 @@
+#!/usr/bin/bash
+# Ajustes de Firefox que dependen de la instancia; los corre sesion-android al abrir cada sesión (y primer-arranque.sh).
+# - android.js en las preferencias de Firefox (Arch) y de firefox-esr (Debian): las rutas reales del prefijo para el
+#   broker del sandbox de contenido. Sin él no lee las fuentes y los procesos de contenido mueren (ninguna web carga).
+# - /etc/ld.so.conf.d/android-prefijo.conf con el prefijo de la instancia: el broker de los procesos RDD/Utility arma su
+#   lista de bibliotecas desde ld.so.conf; con otro prefijo niega abrir libavcodec y ningún video se reproduce.
+# No hace nada si Firefox no está; android.js solo se reescribe si cambió. FIREFOX_RAIZ, FIREFOX_PLANTILLA y FIREFOX_LDCONFIG son para las
+# pruebas (pruebas/escritorios/firefox.sh).
+R=${FIREFOX_RAIZ:-}
+PLANTILLA=${FIREFOX_PLANTILLA:-$R/usr/local/share/linux-android/firefox-android.js}
+[ -f "$PLANTILLA" ] || PLANTILLA=$R/usr/local/share/arch-android/firefox-android.js
+# El prefijo de la plantilla (el de armado, o el de la instancia de la que se clonó) pasa a ser el de esta.
+P_REL=$(echo "${GLIBC_PREFIX:-dev.ben4shot.glibcprueba.sdk36/files/archlinux}" | sed -E 's@^/data/(user/0|data)/@@')
+reescribir_prefijo() {
+    sed "s|@P@|$1|g; s|dev.ben4shot.glibcprueba.[^/]*/files/\(instancias/\)\{0,1\}[^/\"',]*|$1|g"
+}
+
+for FF in "$R/usr/lib/firefox/browser/defaults/preferences" "$R/usr/lib/firefox-esr/browser/defaults/preferences"; do
+    [ -d "$FF" ] && [ -f "$PLANTILLA" ] || continue
+    nuevo=$(sed "s|/home/user/|${HOME#"$R"}/|g" "$PLANTILLA" | reescribir_prefijo "$P_REL")
+    [ "$nuevo" = "$(cat "$FF/android.js" 2>/dev/null)" ] || printf '%s\n' "$nuevo" > "$FF/android.js"
+done
+
+LD=$R/etc/ld.so.conf.d/android-prefijo.conf
+if [ -f "$LD" ]; then
+    nuevo=$(reescribir_prefijo "$P_REL" < "$LD")
+    if [ "$nuevo" != "$(cat "$LD")" ]; then
+        printf '%s\n' "$nuevo" > "$LD"
+        ${FIREFOX_LDCONFIG:-ldconfig} 2>/dev/null
+    fi
+fi
+exit 0
