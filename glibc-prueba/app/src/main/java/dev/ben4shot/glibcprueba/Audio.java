@@ -20,12 +20,34 @@ import java.io.FileDescriptor;
 //  - Pipe chico (F_SETPIPE_SZ): si los relojes se separan, lo que sobra lo descarta PipeWire
 //    (EAGAIN) en vez de acumular latencia.
 //  - Tras 2 s de silencio se pausa el AudioTrack (batería); vuelve con la primera muestra.
+//  - Solo suena una instancia (Opciones.instanciaQueSuena): la del escritorio al frente. Las demás no se leen y su
+//    PipeWire descarta lo que sobra (EAGAIN), así que nada se traba.
 class Audio {
     private static final String TAG = "AUDIO";
     private static final String FIFO = "tmp/audio-android";
     private static final int TASA = 48000, F_SETPIPE_SZ = 1031, PIPE = 16384;
     private static TerminalService servicio;
     private static Thread hilo;
+    private static volatile String alFrente, ultimaVista;
+
+    // La vista de escritorio de esa instancia quedó al frente (onResume).
+    static void alFrente(String instanciaId) {
+        alFrente = instanciaId;
+        ultimaVista = instanciaId;
+    }
+
+    // La vista se fue (onPause): si no llega otra, ya no hay escritorio al frente.
+    static void sinFrente(String instanciaId) {
+        if (instanciaId != null && instanciaId.equals(alFrente)) alFrente = null;
+    }
+
+    static String vistaAlFrente() {
+        return alFrente;
+    }
+
+    private static String queSuena() {
+        return Opciones.instanciaQueSuena(Opciones.audioFondo(servicio), alFrente, ultimaVista, Pausa.pausadas());
+    }
 
     static synchronized void iniciar(TerminalService s) {
         servicio = s;
@@ -36,7 +58,6 @@ class Audio {
     }
 
     private static void tocar() {
-        File fifo = new File(SistemaLinux.raizSeleccionada(servicio), FIFO);
         int min = AudioTrack.getMinBufferSize(TASA, AudioFormat.CHANNEL_OUT_STEREO,
                 AudioFormat.ENCODING_PCM_16BIT);
         AudioTrack pista = new AudioTrack.Builder()
@@ -50,9 +71,16 @@ class Audio {
                 .setBufferSizeInBytes(min * 2)
                 .build();
         byte[] buf = new byte[4096];
-        while (servicio.escritorioVivo()) {
+        while (TerminalService.hayEscritorioVivo()) {
             FileDescriptor fd = null;
             try {
+                String suena = queSuena();
+                if (suena == null) {
+                    if (pista.getPlayState() == AudioTrack.PLAYSTATE_PLAYING) { pista.pause(); pista.flush(); }
+                    Thread.sleep(250);
+                    continue;
+                }
+                File fifo = new File(SistemaLinux.raiz(servicio, suena), FIFO);
                 // PipeWire lo crea al cargar el módulo; esperar a que exista
                 if (!fifo.exists()) { Thread.sleep(1000); continue; }
                 fd = Os.open(fifo.getPath(), OsConstants.O_RDWR | OsConstants.O_CLOEXEC, 0);
@@ -63,8 +91,13 @@ class Audio {
                 StructPollfd p = new StructPollfd();
                 p.fd = fd;
                 p.events = (short) OsConstants.POLLIN;
-                while (servicio.escritorioVivo()) {
-                    if (Os.poll(new StructPollfd[]{p}, 1000) == 0) {
+                while (TerminalService.hayEscritorioVivo()) {
+                    // cambió la instancia al frente (o ya no hay): se corta en seco y se abre el FIFO que toque
+                    if (!suena.equals(queSuena())) {
+                        if (pista.getPlayState() == AudioTrack.PLAYSTATE_PLAYING) { pista.pause(); pista.flush(); }
+                        break;
+                    }
+                    if (Os.poll(new StructPollfd[]{p}, 250) == 0) {
                         if (pista.getPlayState() == AudioTrack.PLAYSTATE_PLAYING
                                 && System.currentTimeMillis() - ultimoSonido > 2000) {
                             pista.pause(); pista.flush();

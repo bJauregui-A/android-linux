@@ -25,9 +25,11 @@ import java.io.FileInputStream;
 import java.io.FileWriter;
 import java.net.InetAddress;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 // Servicio en primer plano dueño de los procesos Linux (escritorios y sesiones de terminal):
@@ -110,6 +112,14 @@ public class TerminalService extends Service implements TerminalSessionClient {
         if (id == null) return false;
         SesionInstancia s = sesiones.get(id);
         return s != null && s.tieneEscritorio();
+    }
+
+    // El shell de la terminal de la instancia (TerminalActivity): Pausa no lo toca a él ni a sus hijos.
+    static Set<Integer> pidsTerminal(String id) {
+        Set<Integer> r = new HashSet<>();
+        SesionInstancia s = id == null ? null : sesiones.get(id);
+        if (s != null && s.tieneTerminal() && s.sesionTerminal.getPid() > 0) r.add(s.sesionTerminal.getPid());
+        return r;
     }
 
     public static int contarSesionesActivas() {
@@ -344,6 +354,8 @@ public class TerminalService extends Service implements TerminalSessionClient {
         if (id == null) return;
         Log.i(TAG, "Cerrando instancia: " + id);
         RedManager.desregistrarIpActiva(this, id);
+        // un proceso parado no atiende SIGTERM ni cierra sus archivos: se reanuda antes de cerrarlo
+        Pausa.reanudar(this, id);
         SesionInstancia s = sesiones.remove(id);
         if (s != null) {
             s.instalando = false;
@@ -409,10 +421,14 @@ public class TerminalService extends Service implements TerminalSessionClient {
 
     synchronized void cerrarSoloCompositor(SesionInstancia s) {
         if (s == null) return;
-        try {
-            Wayland.limpiarPantalla();
-        } catch (Throwable ignorada) { }
-        ClienteX11.cerrar(this);
+        Pausa.reanudar(this, s.id);
+        // La pantalla Wayland es una sola: cerrar un escritorio X11 no debe borrar la de otro Wayland que esté a la vista.
+        if (!Pantalla.esX11(this, s.id)) {
+            try {
+                Wayland.limpiarPantalla();
+            } catch (Throwable ignorada) { }
+        }
+        ClienteX11.cerrar(this, s.id);
         if (s.procesoEscritorio != null) {
             try {
                 s.procesoEscritorio.destroyForcibly();
@@ -423,13 +439,15 @@ public class TerminalService extends Service implements TerminalSessionClient {
             }
             s.procesoEscritorio = null;
         }
+        // En el mismo hilo: si se reabre enseguida, la limpieza no debe alcanzar a la sesión nueva.
+        Pausa.terminarSesion(this, s.id, pidsTerminal(s.id));
         File raiz = SistemaLinux.raiz(this, s.id);
         if (raiz != null) {
             String path = raiz.getAbsolutePath();
             try {
                 String[] cmd = new String[]{
                     "/system/bin/sh", "-c",
-                    "rm -f " + path + "/tmp/linux-session-display " + path + "/tmp/arch-android-display " + path + "/run/user/*/wayland-[1-9]* " + path + "/run/user/*/sway-ipc.*.sock " + path + "/tmp/.X11-unix/X0 2>/dev/null"
+                    "rm -f " + path + "/tmp/linux-session-display " + path + "/tmp/arch-android-display " + path + "/run/user/*/wayland-[1-9]* " + path + "/run/user/*/sway-ipc.*.sock " + path + "/tmp/.X11-unix/X0 " + path + "/tmp/.X11-unix/X10 2>/dev/null"
                 };
                 Runtime.getRuntime().exec(cmd).waitFor();
             } catch (Exception ignorada) { }
@@ -596,10 +614,13 @@ public class TerminalService extends Service implements TerminalSessionClient {
             return;
         }
 
-        // Si otra instancia tiene un escritorio gráfico corriendo, cerrar solo su compositor
-        // para dar paso al nuevo en la pantalla física, preservando su terminal y archivos intactos.
+        // El anfitrión Wayland es uno solo: si otra instancia Wayland tiene escritorio, se cierra solo su compositor para
+        // dar paso al nuevo, preservando su terminal y archivos. Los escritorios X11 no entran en esto: cada uno tiene su
+        // servidor (ClienteX11), así que conviven entre sí y con un Wayland, y la pantalla muestra uno.
+        boolean nuevaEsX11 = Pantalla.esX11(this, idActual);
         for (SesionInstancia otra : sesiones.values()) {
-            if (!otra.id.equals(idActual) && otra.tieneEscritorio()) {
+            if (!otra.id.equals(idActual) && otra.tieneEscritorio()
+                    && !nuevaEsX11 && !Pantalla.esX11(this, otra.id)) {
                 Log.i(TAG, "Cerrando compositor gráfico previo de " + otra.id + " para iniciar " + idActual);
                 cerrarSoloCompositor(otra);
             }
@@ -660,6 +681,8 @@ public class TerminalService extends Service implements TerminalSessionClient {
                 new android.os.Handler(getMainLooper()).post(() -> {
                     if (sesionInst.procesoEscritorio == p) {
                         sesionInst.procesoEscritorio = null;
+                        // terminó sola (cerrar sesión, fallo): lo que quedó colgando de init se va con ella
+                        Pausa.terminarSesion(this, idActual, pidsTerminal(idActual));
                         if (!sesionInst.estaViva()) {
                             sesiones.remove(idActual);
                         }
@@ -681,6 +704,22 @@ public class TerminalService extends Service implements TerminalSessionClient {
         if (id == null) return false;
         SesionInstancia s = sesiones.get(id);
         return s != null && s.tieneEscritorio();
+    }
+
+    // Audio: sigue a la vista al frente, que puede ser cualquier instancia (no solo la enfocada).
+    static boolean hayEscritorioVivo() {
+        for (SesionInstancia s : sesiones.values()) {
+            if (s.tieneEscritorio()) return true;
+        }
+        return false;
+    }
+
+    static List<String> idsConEscritorio() {
+        List<String> r = new ArrayList<>();
+        for (SesionInstancia s : sesiones.values()) {
+            if (s.tieneEscritorio()) r.add(s.id);
+        }
+        return r;
     }
 
     boolean escritorioVivo() {
@@ -931,7 +970,9 @@ public class TerminalService extends Service implements TerminalSessionClient {
                 dueña.instalando = false;
                 dueña.sesionTerminal = null;
                 AdaptadorInstalacion adp = SistemaLinux.adaptador(this, dueña.id);
-                if (adp != null && adp.instalada(this) && dueña.sinPantalla) {
+                boolean aVista = vista != null && s == sesionVisible;
+                if (adp != null && adp.instalada(this)
+                        && FinInstalacion.destino(dueña.sinPantalla, aVista) == FinInstalacion.Destino.NADA) {
                     dueña.sinPantalla = false;
                     if (!dueña.estaViva()) sesiones.remove(dueña.id);
                     terminarSiNoQuedaNada();

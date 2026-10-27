@@ -16,8 +16,10 @@ OUT=trabajo/assets-$V
 mkdir -p $OUT
 Z=gzip; command -v pigz > /dev/null && Z=pigz
 python3 scripts/bootstrap.py --prefix $PREFIJO --glibc glibc/salida/usr/lib --out trabajo/base-$V.tar pacman
-# se rehace también si la glibc propia es más nueva que la base (si no, Debian se queda con la libc vieja)
-if [ ! -f "$OUT/base-debian.tgz" ] || [ "${REHACER_DEBIAN:-0}" = "1" ] || [ glibc/salida/usr/lib/libc.so.6 -nt "$OUT/base-debian.tgz" ]; then
+# se rehace también si la glibc propia o el script que la arma son más nuevos que la base (si no, Debian se queda con
+# la libc vieja, o sin lo que se le agregó al script)
+if [ ! -f "$OUT/base-debian.tgz" ] || [ "${REHACER_DEBIAN:-0}" = "1" ] || [ glibc/salida/usr/lib/libc.so.6 -nt "$OUT/base-debian.tgz" ] \
+   || [ scripts/bootstrap-debian.py -nt "$OUT/base-debian.tgz" ]; then
     echo "==> Generando base de Debian ARM64..."
     python3 scripts/bootstrap-debian.py --prefix $PREFIJO --glibc glibc/salida/usr/lib --out trabajo/base-debian-$V.tar
     $Z -9 -c trabajo/base-debian-$V.tar > $OUT/base-debian.tgz

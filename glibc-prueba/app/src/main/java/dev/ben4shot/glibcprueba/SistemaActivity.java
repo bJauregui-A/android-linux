@@ -81,16 +81,18 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         raizPrincipal.setOrientation(LinearLayout.VERTICAL);
         raizPrincipal.setBackgroundColor(FONDO_OSCURO);
 
-        // Cabecera de la sección de entornos (con botón compacto para crear nueva instancia)
+        // Cabecera de la sección de entornos: los botones arriba y el título debajo (en una sola fila no caben)
         LinearLayout cabeceraInstancias = new LinearLayout(this);
         cabeceraInstancias.setOrientation(LinearLayout.HORIZONTAL);
-        cabeceraInstancias.setGravity(Gravity.CENTER_VERTICAL);
-
-        TextView tituloSeccion = texto("❯ ENTORNOS DISPONIBLES (INSTANCIAS)", 13, true, ACCENTO_CIAN);
-        cabeceraInstancias.addView(tituloSeccion, new LinearLayout.LayoutParams(0, -2, 1.0f));
+        cabeceraInstancias.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
 
         TextView btnRed = crearBotonChip("⇄ RED", ACCENTO_AMBAR, this::mostrarDialogoPortForward);
         cabeceraInstancias.addView(btnRed);
+
+        cabeceraInstancias.addView(espacioHorizontal(dp(8)));
+
+        TextView btnOpciones = crearBotonChip("⚙ OPCIONES", ACCENTO_CIAN, this::mostrarDialogoOpciones);
+        cabeceraInstancias.addView(btnOpciones);
 
         cabeceraInstancias.addView(espacioHorizontal(dp(8)));
 
@@ -100,6 +102,11 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
         LinearLayout.LayoutParams lpCab = new LinearLayout.LayoutParams(-1, -2);
         lpCab.bottomMargin = dp(10);
         raizPrincipal.addView(cabeceraInstancias, lpCab);
+
+        TextView tituloSeccion = texto("❯ ENTORNOS DISPONIBLES", 13, true, ACCENTO_CIAN);
+        LinearLayout.LayoutParams lpTitulo = new LinearLayout.LayoutParams(-1, -2);
+        lpTitulo.bottomMargin = dp(10);
+        raizPrincipal.addView(tituloSeccion, lpTitulo);
 
         // Contenedor scrollable para las tarjetas de instancias
         ScrollView scrollInstancias = new ScrollView(this);
@@ -601,6 +608,78 @@ public class SistemaActivity extends Activity implements TerminalViewClient, Ter
                     Toast.makeText(this, "Entorno eliminado", Toast.LENGTH_SHORT).show();
                 })
                 .setNegativeButton("Cancelar", null)
+                .show();
+    }
+
+    private void mostrarDialogoOpciones() {
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(dp(22), dp(18), dp(22), dp(18));
+        layout.setBackgroundColor(FONDO_OSCURO);
+
+        layout.addView(texto("╭─ ⚙ OPCIONES ────────────────────────────────╮", 11, true, ACCENTO_CIAN));
+
+        TextView lblAudio = texto("❯ Audio sin escritorio al frente:", 13, true, ACCENTO_CIAN);
+        LinearLayout.LayoutParams lpAudio = new LinearLayout.LayoutParams(-1, -2);
+        lpAudio.topMargin = dp(12);
+        layout.addView(lblAudio, lpAudio);
+        TextView ayuda = texto("Siempre suena solo el escritorio que estás viendo. Esto decide qué pasa al salir de la app.",
+                11, false, TEXTO_MUTED);
+        layout.addView(ayuda);
+
+        RadioGroup rg = new RadioGroup(this);
+        RadioButton rbSilencio = new RadioButton(this);
+        rbSilencio.setId(View.generateViewId());
+        rbSilencio.setText("Silencio total");
+        rbSilencio.setTextColor(TEXTO_CLARO);
+        rbSilencio.setTypeface(Typeface.MONOSPACE);
+        rg.addView(rbSilencio);
+
+        RadioButton rbUltima = new RadioButton(this);
+        rbUltima.setId(View.generateViewId());
+        rbUltima.setText("Sigue sonando el último escritorio visto");
+        rbUltima.setTextColor(TEXTO_CLARO);
+        rbUltima.setTypeface(Typeface.MONOSPACE);
+        rg.addView(rbUltima);
+
+        boolean ultima = Opciones.AUDIO_ULTIMA_VISTA.equals(Opciones.audioFondo(this));
+        (ultima ? rbUltima : rbSilencio).setChecked(true);
+        rg.setOnCheckedChangeListener((g, id) -> Opciones.audioFondo(this,
+                id == rbUltima.getId() ? Opciones.AUDIO_ULTIMA_VISTA : Opciones.AUDIO_SILENCIO));
+        layout.addView(rg);
+
+        TextView lblSalir = texto("❯ Al salir de un escritorio:", 13, true, ACCENTO_CIAN);
+        LinearLayout.LayoutParams lpSalir = new LinearLayout.LayoutParams(-1, -2);
+        lpSalir.topMargin = dp(16);
+        layout.addView(lblSalir, lpSalir);
+        layout.addView(texto("Pausado no avanza nada (ni descargas ni compilaciones) hasta que lo vuelvas a abrir. "
+                + "La terminal de la instancia sigue funcionando.", 11, false, TEXTO_MUTED));
+
+        RadioGroup rgSalir = new RadioGroup(this);
+        RadioButton rbSinDibujar = new RadioButton(this);
+        rbSinDibujar.setId(View.generateViewId());
+        rbSinDibujar.setText("Sigue corriendo, sin dibujar");
+        rbSinDibujar.setTextColor(TEXTO_CLARO);
+        rbSinDibujar.setTypeface(Typeface.MONOSPACE);
+        rgSalir.addView(rbSinDibujar);
+
+        RadioButton rbPausar = new RadioButton(this);
+        rbPausar.setId(View.generateViewId());
+        rbPausar.setText("Se pausa por completo hasta volver");
+        rbPausar.setTextColor(TEXTO_CLARO);
+        rbPausar.setTypeface(Typeface.MONOSPACE);
+        rgSalir.addView(rbPausar);
+
+        (Opciones.pausaAlSalir(Opciones.alSalir(this)) ? rbPausar : rbSinDibujar).setChecked(true);
+        rgSalir.setOnCheckedChangeListener((g, id) -> {
+            Opciones.alSalir(this, id == rbPausar.getId() ? Opciones.SALIR_PAUSAR : Opciones.SALIR_SIN_DIBUJAR);
+            Pausa.aplicarOpcion(this, Audio.vistaAlFrente());
+        });
+        layout.addView(rgSalir);
+
+        new AlertDialog.Builder(this)
+                .setView(layout)
+                .setPositiveButton("LISTO", null)
                 .show();
     }
 

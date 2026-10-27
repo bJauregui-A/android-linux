@@ -110,5 +110,4 @@ ssh -p 8022 <usuario>@127.0.0.1
 
 ## Más información
 
-- [`TECNICO.md`](TECNICO.md): arquitectura, estructura del repo, cómo compilar e instalar, pruebas y trampas conocidas.
 - [`backlog.md`](backlog.md): lo que falta, en historias priorizadas.

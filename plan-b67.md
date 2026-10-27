@@ -78,5 +78,3 @@ Integración (se comprueba en el teléfono):
 11. Paso mínimo de interfaz: el menú de una Debian 12 nueva muestra Xfce (experimental) y consola, y la instalación termina.
 12. XFCE arranca y se ve (captura con `grim`), y vuelve a arrancar tras cerrar y abrir la app. Entonces se marca probado en `debian-12`.
     - Riesgo: la vía X11 directa (B11) no está validada. Si falla aquí, parar y decidir antes de seguir.
-
-Al cerrar: actualizar `TECNICO.md` (cómo se declaran los paquetes y el estado por distro y versión, y el menú por instalador).

@@ -68,6 +68,7 @@ from The Open Group.
 #include "glx_extinit.h"
 #include "randrstr.h"
 #include "damage.h"
+#include "windowstr.h"
 #include <android/native_window.h>
 #include "android.h"
 #include <signal.h>
@@ -723,14 +724,53 @@ static miPointerScreenFuncRec vfbPointerCursorFuncs = {
 static ANativeWindow *ventana;
 static DamagePtr danio;
 static Bool ventana_nueva;
+static WindowPtr tapa;
 
 #define HAL_BGRA_8888 5
+
+/* present/present_fake.c (parche): retiene los avisos de vblank mientras no hay ventana */
+void present_fake_pausar(Bool pausar);
+
+/* Sin ventana, una ventana del servidor encima de todo: las demás quedan tapadas, su dibujo se recorta a nada y
+ * reciben VisibilityNotify (para lo que no espera a Present, como Openbox sin compositor). Fondo None: no pinta nada
+ * al mapearse. Al quitarla cada una recibe Expose y se redibuja. */
+static void
+androidTapar(Bool tapar)
+{
+    ScreenPtr pScreen = screenInfo.screens[0];
+    XID si = xTrue, arriba = Above;
+    int error;
+
+    if (!pScreen || !pScreen->root)
+        return;
+    if (!tapar) {
+        if (tapa && tapa->mapped)
+            UnmapWindow(tapa, FALSE);
+        return;
+    }
+    if (!tapa) {
+        XID id = FakeClientID(0);
+
+        tapa = CreateWindow(id, pScreen->root, 0, 0, pScreen->width, pScreen->height, 0, InputOutput,
+                            CWOverrideRedirect, &si, pScreen->rootDepth, serverClient,
+                            wVisual(pScreen->root), &error);
+        if (!tapa || !AddResource(id, RT_WINDOW, tapa)) {
+            tapa = NULL;
+            return;
+        }
+    }
+    ConfigureWindow(tapa, CWStackMode, &arriba, serverClient);
+    if (!tapa->mapped)
+        MapWindow(tapa, serverClient);
+}
 
 void
 androidVentana(ANativeWindow *nueva)
 {
     vfbScreenInfoPtr pvfb = &vfbScreens[0];
 
+    present_fake_pausar(nueva == NULL);
+    androidTapar(nueva == NULL);
     if (ventana)
         ANativeWindow_release(ventana);
     ventana = nueva;
@@ -757,7 +797,7 @@ androidFila(vfbScreenInfoPtr pvfb, ANativeWindow_Buffer *out, int y, int x1, int
         dst[x] = (src[x] & 0xff00ff00) | ((src[x] & 0xff) << 16) | ((src[x] >> 16) & 0xff);
 }
 
-static void
+static Bool
 androidCopiar(vfbScreenInfoPtr pvfb, RegionPtr region)
 {
     ANativeWindow_Buffer out;
@@ -768,7 +808,7 @@ androidCopiar(vfbScreenInfoPtr pvfb, RegionPtr region)
 
     sucio.left = ext->x1; sucio.top = ext->y1; sucio.right = ext->x2; sucio.bottom = ext->y2;
     if (ANativeWindow_lock(ventana, &out, &sucio) != 0)
-        return;
+        return FALSE;
     for (i = 0; i < n; i++) {
         int y;
 
@@ -786,6 +826,7 @@ androidCopiar(vfbScreenInfoPtr pvfb, RegionPtr region)
             androidFila(pvfb, &out, y, x1, x2);
     }
     ANativeWindow_unlockAndPost(ventana);
+    return TRUE;
 }
 
 /* Damage destruye lo que cuelga de un pixmap cuando este se libera (p. ej. RandR cambia la pantalla): el
@@ -818,7 +859,6 @@ androidBlockHandler(void *blockData, void *timeout)
     if (ventana_nueva) {
         BoxRec todaLaPantalla = { 0, 0, pvfb->width, pvfb->height };
 
-        ventana_nueva = FALSE;
         RegionInit(&todo, &todaLaPantalla, 1);
     }
     else if (RegionNotEmpty(DamageRegion(danio))) {
@@ -828,7 +868,11 @@ androidBlockHandler(void *blockData, void *timeout)
     else
         return;
     DamageEmpty(danio);
-    androidCopiar(pvfb, &todo);
+    /* si el lock falla (la surface anterior aún conectada) lo perdido se recupera copiando todo la próxima vez */
+    if (androidCopiar(pvfb, &todo))
+        ventana_nueva = FALSE;
+    else
+        ventana_nueva = TRUE;
     RegionUninit(&todo);
 }
 
@@ -843,6 +887,8 @@ vfbCloseScreen(ScreenPtr pScreen)
     vfbScreenInfoPtr pvfb = &vfbScreens[pScreen->myNum];
 
     pScreen->CloseScreen = pvfb->closeScreen;
+    /* el reinicio del servidor (se fue el último cliente) ya liberó la tapa con los demás recursos */
+    tapa = NULL;
 
     /*
      * fb overwrites miCloseScreen, so do this here
@@ -1057,6 +1103,12 @@ vfbScreenInit(ScreenPtr pScreen, int argc, char **argv)
 
     pScreen->InstallColormap = vfbInstallColormap;
     pScreen->StoreColors = vfbStoreColors;
+
+    /* Damage envuelve CreateGC: solo ve lo que dibujan los GC creados después. El cursor por software
+     * (miDCDeviceInitialize, al iniciar el puntero) crea los suyos antes del primer block handler: sin esto lo
+     * que pinta y lo que restaura bajo el cursor no se copia a la surface y quedan punteros viejos. */
+    if (!DamageSetup(pScreen))
+        return FALSE;
 
     miDCInitialize(pScreen, &vfbPointerCursorFuncs);
 

@@ -34,6 +34,12 @@ public class ServicioX11 extends Service {
     private static native void ventana(Surface surface);
 
     private boolean iniciado;
+    private Surface superficie;
+
+    // "" para la ranura principal; las otras (ServicioX11B, C) dan su letra y usan files/x11/<letra>/ para sus sockets
+    String ranura() {
+        return "";
+    }
 
     private final Binder binder = new Binder() {
         @Override
@@ -46,9 +52,17 @@ public class ServicioX11 extends Service {
                     if (reply != null) reply.writeInt(ok ? 1 : 0);
                     return true;
                 }
-                case ClienteX11.VENTANA:
-                    ventana(data.readInt() != 0 ? Surface.CREATOR.createFromParcel(data) : null);
+                case ClienteX11.VENTANA: {
+                    // Cada envío es un Surface nuevo sobre la misma BufferQueue: el anterior se suelta ya (el servidor
+                    // tiene su propia referencia), si no sigue conectado hasta el GC y el lock del nuevo falla.
+                    Surface s = data.readInt() != 0 ? Surface.CREATOR.createFromParcel(data) : null;
+                    ventana(s);
+                    synchronized (ServicioX11.this) {
+                        if (superficie != null) superficie.release();
+                        superficie = s;
+                    }
                     return true;
+                }
             }
             return false;
         }
@@ -59,26 +73,40 @@ public class ServicioX11 extends Service {
         return binder;
     }
 
+    // El servidor no se reinicia dentro de su proceso: al irse el último enlace el proceso muere ya, no cuando Android
+    // quiera. Si quedara vivo, la sesión siguiente se enlazaría a él y su aviso de muerte llegaría en plena sesión nueva.
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        android.os.Process.killProcess(android.os.Process.myPid());
+    }
+
     private synchronized boolean arrancar(String[] args, ParcelFileDescriptor entrada) {
         if (iniciado) return false;
         try {
             File base = new File(getFilesDir(), "x11");
+            // lo que no cambia entre servidores se comparte; el socket, el lock, el log y el caché de teclado son de la ranura
+            File propio = ranura().isEmpty() ? base : new File(base, ranura());
             File bin = new File(base, "bin");
-            File sockets = new File(base, ".X11-unix");
+            File sockets = new File(propio, ".X11-unix");
             bin.mkdirs();
             sockets.mkdirs();
-            File xkm = new File(base, "xkm");
+            File xkm = new File(propio, "xkm");
             xkm.mkdirs();
             extraerXkb(base);
             // el servidor ejecuta <X11_XKB_BIN>/xkbcomp; nativeLibraryDir es lo único ejecutable y ahí se llama libxkbcomp.so
+            // (el enlace es de todos: no se rehace si ya apunta ahí, otro servidor puede estar usándolo)
             File enlace = new File(bin, "xkbcomp");
-            enlace.delete();
-            Os.symlink(getApplicationInfo().nativeLibraryDir + "/libxkbcomp.so", enlace.getAbsolutePath());
+            String destino = getApplicationInfo().nativeLibraryDir + "/libxkbcomp.so";
+            if (!destino.equals(apuntaA(enlace))) {
+                enlace.delete();
+                Os.symlink(destino, enlace.getAbsolutePath());
+            }
             Os.setenv("X11_UNIX_DIR", sockets.getAbsolutePath(), true);
-            Os.setenv("X11_LOCK_DIR", base.getAbsolutePath(), true);
+            Os.setenv("X11_LOCK_DIR", propio.getAbsolutePath(), true);
             Os.setenv("X11_XKM_DIR", xkm.getAbsolutePath(), true);
             Os.setenv("X11_XKB_BIN", bin.getAbsolutePath(), true);
-            Os.setenv("X11_LOG", new File(base, "Xandroid.log").getAbsolutePath(), true);
+            Os.setenv("X11_LOG", new File(propio, "Xandroid.log").getAbsolutePath(), true);
             if (BuildConfig.DEBUG) Os.setenv("X11_CRASH_PASSTHRU", "1", true);
             Os.setenv("LD_LIBRARY_PATH", getApplicationInfo().nativeLibraryDir, true);
             String[] completos = new String[args.length + 2];
@@ -94,8 +122,24 @@ public class ServicioX11 extends Service {
         }
     }
 
+    private static String apuntaA(File enlace) {
+        try {
+            return Os.readlink(enlace.getAbsolutePath());
+        } catch (android.system.ErrnoException e) {
+            return null;    // no existe o no es un enlace
+        }
+    }
+
     // Datos de teclado del APK (assets/x11-xkb.zip) a files/x11/xkb/, una vez por versión de la app.
     private void extraerXkb(File base) throws Exception {
+        // varios servidores pueden arrancar a la vez (uno por instancia): el primero extrae, los demás esperan
+        try (java.io.RandomAccessFile cerrojo = new java.io.RandomAccessFile(new File(base, "xkb.lock"), "rw");
+             java.nio.channels.FileLock l = cerrojo.getChannel().lock()) {
+            extraerXkbConCerrojo(base);
+        }
+    }
+
+    private void extraerXkbConCerrojo(File base) throws Exception {
         File destino = new File(base, "xkb");
         File marca = new File(base, "xkb.version");
         long version = getPackageManager().getPackageInfo(getPackageName(), 0).lastUpdateTime;

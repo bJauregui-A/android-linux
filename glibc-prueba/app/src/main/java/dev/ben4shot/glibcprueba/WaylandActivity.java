@@ -121,6 +121,14 @@ public class WaylandActivity extends Activity {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        String id = intent.getStringExtra(TerminalService.EXTRA_INSTANCIA_ID);
+        if (id != null && !id.equals(instanciaId)) {
+            // singleTask: la vista seguía viva con otra instancia (se salió con el botón o el gesto de Android, no con
+            // "volver al inicio"). Sin rehacerla se seguiría mostrando la anterior y nunca se pediría iniciar esta.
+            setIntent(intent);
+            recreate();
+            return;
+        }
         Notificar.clic(intent);
     }
 
@@ -190,7 +198,7 @@ public class WaylandActivity extends Activity {
             @Override
             public void surfaceChanged(SurfaceHolder h, int formato, int ancho, int alto) {
                 DisplayMetrics dm = getResources().getDisplayMetrics();
-                Pantalla.ventana(h.getSurface(), ancho, alto,
+                Pantalla.ventana(instanciaId, h.getSurface(), ancho, alto,
                         Math.round(ancho / dm.xdpi * 25.4f), Math.round(alto / dm.ydpi * 25.4f));
                 startService(new Intent(WaylandActivity.this, TerminalService.class)
                         .setAction(TerminalService.REAJUSTAR_PANTALLA));
@@ -198,7 +206,7 @@ public class WaylandActivity extends Activity {
 
             @Override
             public void surfaceDestroyed(SurfaceHolder h) {
-                Pantalla.ventana(null, 0, 0, 0, 0);
+                Pantalla.ventana(instanciaId, null, 0, 0, 0, 0);
             }
         });
         vista.setOnTouchListener((v, e) -> {
@@ -259,8 +267,28 @@ public class WaylandActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        Audio.alFrente(instanciaId);
         inmersivo();
         reconectarVentana();
+    }
+
+    @Override
+    protected void onPause() {
+        Audio.sinFrente(instanciaId);
+        super.onPause();
+    }
+
+    // Opción "Al salir de un escritorio → se pausa por completo" (Pausa): al dejar de verse y al volver.
+    @Override
+    protected void onStart() {
+        super.onStart();
+        Pausa.alVolver(this, instanciaId);
+    }
+
+    @Override
+    protected void onStop() {
+        if (!isChangingConfigurations()) Pausa.alIrse(this, instanciaId);
+        super.onStop();
     }
 
     private void reconectarVentana() {
@@ -270,7 +298,7 @@ public class WaylandActivity extends Activity {
             int alto = vista.getHeight();
             if (ancho > 0 && alto > 0) {
                 DisplayMetrics dm = getResources().getDisplayMetrics();
-                Pantalla.ventana(vista.getHolder().getSurface(), ancho, alto,
+                Pantalla.ventana(instanciaId, vista.getHolder().getSurface(), ancho, alto,
                         Math.round(ancho / dm.xdpi * 25.4f), Math.round(alto / dm.ydpi * 25.4f));
                 startService(new Intent(this, TerminalService.class)
                         .setAction(TerminalService.REAJUSTAR_PANTALLA));
@@ -920,7 +948,7 @@ public class WaylandActivity extends Activity {
                     volverAlInicio();
                 })
                 .setNegativeButton("✕ Cerrar sesión", (d, w) -> {
-                    Pantalla.ventana(null, 0, 0, 0, 0);
+                    Pantalla.ventana(instanciaId, null, 0, 0, 0, 0);
                     Intent i = new Intent(this, TerminalService.class)
                             .setAction(TerminalService.CERRAR_INSTANCIA)
                             .putExtra(TerminalService.EXTRA_INSTANCIA_ID, instanciaId);
@@ -960,7 +988,7 @@ public class WaylandActivity extends Activity {
             }
             if (ancho > 0 && alto > 0) {
                 DisplayMetrics dm = getResources().getDisplayMetrics();
-                Pantalla.ventana(vista.getHolder().getSurface(), ancho, alto,
+                Pantalla.ventana(instanciaId, vista.getHolder().getSurface(), ancho, alto,
                         Math.round(ancho / dm.xdpi * 25.4f), Math.round(alto / dm.ydpi * 25.4f));
             }
         }

@@ -3,13 +3,13 @@
 Proyecto: Linux real (Arch ARM y Debian con glibc propia, sin root ni proot) dentro de una app de Android, con escritorios por GPU. Teléfono: Redmi 15 5G (HyperOS 3, Android 16, bootloader bloqueado). El registro del debloat está en `debloat/`.
 
 ## Leer primero
-1. `TECNICO.md`: cómo funciona, estructura del repo, cómo compilar e instalar, pruebas y trampas conocidas. (`README.md` es la portada de GitHub: qué es el proyecto, red y reenvío de puertos.)
+1. `README.md`: qué es el proyecto, red y reenvío de puertos.
 2. `backlog.md`: lo pendiente, en historias priorizadas. Si existe `plan.md`, es la historia en curso.
 
 ## Cómo se trabaja (TDD)
-- `/backlog`: definir o ajustar historias en `backlog.md` (cortas, una sola cosa cada una, sin detalle técnico).
-- `/story <ID>`: refinar una historia → `plan.md` (criterios Dado/Cuando/Entonces, fuera de alcance, lista de pruebas en orden).
-- `/pair`: implementar `plan.md` en rojo → verde → refactor, un ciclo completo por prueba sin pedir permiso entre pasos. No hace commit: el usuario revisa los cambios y dice cuándo commitear. Se detiene solo ante decisiones que el plan no resuelve, pruebas que no fallan como se esperaba, el fin de un grupo de pruebas o antes de tocar el teléfono. No modificar ni borrar una prueba para que pase.
+- `/backlog`: definir o ajustar funciones en `backlog.md`: una línea con la función a agregar y, indentados debajo, sus pasos (qué hacer, no cómo). Puede agrupar cosas relacionadas.
+- `/story <ID>`: refinar una función → `plan.md`, que desglosa cada paso: cómo implementarlo, sus pruebas en orden y cuándo queda listo.
+- `/pair`: implementar `plan.md` en rojo → verde → refactor, todas las pruebas de un paso sin pedir permiso. Al terminar cada paso se detiene con una revisión corta (resumen, `diff --stat` y solo los trozos de código que importan). No hace commit: el usuario revisa y dice cuándo commitear. También se detiene ante decisiones que el plan no resuelve, pruebas que no fallan como se esperaba o antes de tocar el teléfono. Los errores que encuentra en el camino los arregla en el momento con su prueba, aunque estén fuera del plan, y los suma a `plan.md`; pregunta solo si el arreglo es grande o riesgoso. No modificar ni borrar una prueba para que pase.
 - Al cerrar una historia: commit, borrar la historia de `backlog.md` y `plan.md`. La historia queda en `git log`; no hay bitácora aparte.
 - Las pruebas viven en `glibc-prueba/pruebas/<tema>/`. Las de syscalls se corren dentro de la app con `scripts/probar-en-telefono.sh`; `adb shell` y `run-as` no tienen el seccomp de la app.
 
@@ -27,7 +27,7 @@ Proyecto: Linux real (Arch ARM y Debian con glibc propia, sin root ni proot) den
 - Probar una libc nueva aislada antes de instalarla, y dejar respaldo. No forzar cambios de render sin probarlos en una instancia aparte.
 - **Binarios y bibliotecas compiladas**: cada cambio en los binarios o bibliotecas nativas (`libldp.so`, `libc.so.6`, shims...) se vuelve a empaquetar en el APK (`jniLibs`, `apk/armar.sh`) y se sincroniza a las instancias del teléfono. Nunca dejar el binario solo en `build/` o a medias en `jniLibs`.
 - No mandar teclas ni toques mientras el usuario usa el teléfono. Las capturas se hacen con `grim` dentro del escritorio, nunca con `screencap` con la app en segundo plano (captura chats privados).
-- Si cambia algo de lo que describe `TECNICO.md` (arquitectura, comandos, trampas) o lo que explica `README.md` (uso, red, puertos), actualizarlo en el mismo commit.
+- Si cambia algo de lo que explica `README.md` (uso, red, puertos), actualizarlo en el mismo commit.
 
 <!-- CODEGRAPH_START -->
 ## CodeGraph

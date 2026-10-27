@@ -28,5 +28,21 @@ for e in xfce-x11 gnome gnome-flashback cinnamon mate lxde; do
   caso "debian-12: el menú trae $e, experimental"  '[[ "$menu" == *" $e "* ]] && [ "$(estado_escritorio $e)" = experimental ]'
 done
 
+# openbox-session corre openbox-xdg-autostart, que sin PyXDG termina con "requires PyXDG to be installed" y
+# deja sin arrancar lo que haya en ~/.config/autostart y /etc/xdg/autostart.
+caso "openbox (arch) trae python-pyxdg"  'grep -qx python-pyxdg $ED/openbox/paquetes-arch.txt'
+
+# Sin DISPLAY heredado, las recetas usan el display propio (:10), no el :0 del Xwayland.
+for e in $X11; do
+  caso "$e: DISPLAY por defecto :10"  'grep -q "DISPLAY:-:10}" $ED/$e/sesion && ! grep -q "DISPLAY:-:0}" $ED/$e/sesion'
+done
+
+# xfce4-session lanza ssh-agent y gpg-agent, que se marcan no volcables: con /proc en hidepid=invisible la app no
+# los ve, así que ni la pausa ni el cierre del escritorio los alcanzan y quedan huérfanos. La receta los apaga antes.
+for a in ssh-agent gpg-agent; do
+  caso "xfce-x11: apaga $a de xfce4-session antes de startxfce4"  \
+    "sed -n '1,/startxfce4/p' $ED/xfce-x11/sesion | grep -q 'xfconf-query -c xfce4-session -p /startup/$a/enabled -n -t bool -s false'"
+done
+
 echo "fallas: $fallas"
 [ $fallas -eq 0 ]

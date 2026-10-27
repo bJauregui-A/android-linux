@@ -20,8 +20,10 @@ import io
 import os
 import re
 import struct
+import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 import urllib.request
 import lzma
@@ -74,6 +76,18 @@ DPkg::Options {
 Acquire::Languages "none";
 Acquire::Check-Valid-Until "false";
 """
+
+# apt instala los recomendados (sin --no-install-recommends): estos nunca, son del sistema y no tienen cabida aquí
+# (servicios, kernel, firmware, arranque).
+PAQUETES_VETADOS = ["network-manager", "modemmanager", "wpasupplicant", "systemd-sysv", "plymouth", "grub*",
+                    "linux-image-*", "firmware-*", "bluez", "cups", "avahi-daemon", "packagekit",
+                    "unattended-upgrades", "apparmor"]
+# Sin comentarios // ni #: apt los toma por un registro sin "Package". La explicación va en su campo.
+APT_PREFERENCES = ("Explanation: paquetes de sistema que apt no debe instalar nunca, ni como recomendados\n"
+                   f"Package: {' '.join(PAQUETES_VETADOS)}\nPin: release *\nPin-Priority: -1\n").encode()
+
+# Nuestra glibc va encima de libc6/libc-bin: retenidos para que un apt upgrade no la pise.
+PAQUETES_RETENIDOS = ["libc6", "libc-bin"]
 
 SOURCES_LIST = b"""deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware
 deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] http://deb.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
@@ -187,6 +201,40 @@ def enlace(destino, prefijo):
     return prefijo + destino
 
 
+# update-alternatives falso: solo anota "<enlace> <destino>" de cada --install y --slave.
+ALTERNATIVAS_FALSO = """#!/bin/sh
+while [ $# -gt 0 ]; do
+  case $1 in --install|--slave) echo "$2 $4"; shift;; esac
+  shift
+done
+"""
+
+
+def alternativas(postinsts):
+    """Los postinst de la base no corren, así que sus alternativas (which, awk, lzma...) no se registran y los
+    postinst de después que hacen "if which X" se saltan en silencio. Corre cada postinst en seco, con un PATH
+    que solo tiene el update-alternatives falso (no toca nada), y devuelve {enlace: destino}."""
+    enlaces = {}
+    with tempfile.TemporaryDirectory() as d:
+        falso = os.path.join(d, "update-alternatives")
+        with open(falso, "w") as f:
+            f.write(ALTERNATIVAS_FALSO)
+        os.chmod(falso, 0o755)
+        raiz = os.path.join(d, "raiz")
+        os.mkdir(raiz)
+        for nom, datos in sorted(postinsts.items()):
+            ruta = os.path.join(d, nom + ".postinst")
+            with open(ruta, "wb") as f:
+                f.write(datos)
+            r = subprocess.run(["/bin/sh", ruta, "configure"], env={"PATH": d, "DPKG_ROOT": raiz},
+                               capture_output=True, text=True)
+            for l in r.stdout.splitlines():
+                m = re.fullmatch(r"(/\S+) (/\S+)", l)
+                if m:
+                    enlaces[m[1]] = m[2]
+    return enlaces
+
+
 class ExtractorDeb:
     """Extrae el archivo de datos y de control de un paquete Debian .deb (formato ar)."""
     def __init__(self, deb_path):
@@ -298,6 +346,7 @@ def main():
 
     # Base de datos de dpkg
     status_entries = []
+    postinsts = {}
 
     # 3. Descargar y desempaquetar paquetes
     orden = sorted(seleccionados, key=lambda n: (n not in ["base-files", "dpkg", "dash", "bash", "coreutils"], n))
@@ -348,18 +397,22 @@ def main():
                             lineas = cdata.strip().splitlines()
                             nueva_entrada = []
                             status_puesto = False
+                            estado = "hold" if nom in PAQUETES_RETENIDOS else "install"
                             for l in lineas:
                                 nueva_entrada.append(l)
                                 if l.startswith("Package:") and not status_puesto:
-                                    nueva_entrada.append("Status: install ok installed")
+                                    nueva_entrada.append(f"Status: {estado} ok installed")
                                     status_puesto = True
                             if not status_puesto:
-                                nueva_entrada.append("Status: install ok installed")
+                                nueva_entrada.append(f"Status: {estado} ok installed")
                             status_entries.append("\n".join(nueva_entrada) + "\n")
                     elif cname in ["postinst", "preinst", "prerm", "postrm"]:
                         cf = tc.extractfile(cm)
                         if cf:
-                            out.archivo(f"var/lib/dpkg/info/{nom}.{cname}", cf.read(), 0o755)
+                            datos = cf.read()
+                            out.archivo(f"var/lib/dpkg/info/{nom}.{cname}", datos, 0o755)
+                            if cname == "postinst":
+                                postinsts[nom] = datos
 
         print(f"  ✔ {nom} ({p.get('Version', '')})", file=sys.stderr)
 
@@ -380,6 +433,7 @@ def main():
     out.archivo("usr/sbin/policy-rc.d", POLICY_RCD, 0o755)
     out.archivo("usr/local/bin/sudo", SUDO_WRAPPER, 0o755)
     out.archivo("etc/apt/apt.conf.d/99android", APT_CONF_ANDROID, 0o644)
+    out.archivo("etc/apt/preferences.d/android", APT_PREFERENCES, 0o644)
     out.archivo("etc/apt/sources.list", SOURCES_LIST, 0o644)
     out.archivo("etc/resolv.conf", b"nameserver 1.1.1.1\nnameserver 8.8.8.8\n", 0o644)
     out.archivo("etc/ld.so.conf", b"/usr/lib/aarch64-linux-gnu\n/lib/aarch64-linux-gnu\n/usr/lib\n/lib\n", 0o644)
@@ -404,13 +458,24 @@ def main():
         ti.mtime = int(time.time())
         out.t.addfile(ti)
 
-    # Enlace awk hacia mawk
-    ti_awk = tarfile.TarInfo("usr/bin/awk")
-    ti_awk.type = tarfile.SYMTYPE
-    ti_awk.linkname = "mawk"
-    ti_awk.mode = 0o777
-    ti_awk.mtime = int(time.time())
-    out.t.addfile(ti_awk)
+    # Alternativas que registrarían los postinst de la base (which, awk, lzma...), como enlaces directos al destino.
+    for link, destino in sorted(alternativas(postinsts).items()):
+        ti = tarfile.TarInfo(link.lstrip("/"))
+        ti.type = tarfile.SYMTYPE
+        ti.linkname = os.path.relpath(destino, os.path.dirname(link))
+        ti.mode = 0o777
+        ti.mtime = int(time.time())
+        out.directorio(os.path.dirname(ti.name))
+        out.t.addfile(ti)
+
+    # Nuestra glibc usa --libdir=/usr/lib y busca los módulos de iconv en /usr/lib/gconv; Debian los guarda en el
+    # directorio multiarch. Sin este enlace iconv() falla y el postinst de dictionaries-common rompe la instalación.
+    ti_gconv = tarfile.TarInfo("usr/lib/gconv")
+    ti_gconv.type = tarfile.SYMTYPE
+    ti_gconv.linkname = "aarch64-linux-gnu/gconv"
+    ti_gconv.mode = 0o777
+    ti_gconv.mtime = int(time.time())
+    out.t.addfile(ti_gconv)
 
     # Stub de update-rc.d para evitar fallos de demonios init/systemd en Android
     out.archivo("usr/sbin/update-rc.d", b"#!/bin/sh\nexit 0\n", 0o755)
@@ -426,8 +491,27 @@ def main():
     out.directorio("run/sshd")
 
     # Usuarios y grupos estándar de Debian. El del usuario lo agrega primer-arranque.sh con el UID real.
+    # Los de base-passwd (su postinst no corre aquí): sin ellos fallan los postinst de otros paquetes (exim4-config
+    # pide uucp). Cada GID existe en etc/group.
     out.archivo("etc/passwd",
                 b"root:x:0:0:root:/root:/bin/bash\n"
+                b"daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\n"
+                b"bin:x:2:2:bin:/bin:/usr/sbin/nologin\n"
+                b"sys:x:3:3:sys:/dev:/usr/sbin/nologin\n"
+                b"sync:x:4:65534:sync:/bin:/bin/sync\n"
+                b"games:x:5:60:games:/usr/games:/usr/sbin/nologin\n"
+                b"man:x:6:12:man:/var/cache/man:/usr/sbin/nologin\n"
+                b"lp:x:7:7:lp:/var/spool/lpd:/usr/sbin/nologin\n"
+                b"mail:x:8:8:mail:/var/mail:/usr/sbin/nologin\n"
+                b"news:x:9:9:news:/var/spool/news:/usr/sbin/nologin\n"
+                b"uucp:x:10:10:uucp:/var/spool/uucp:/usr/sbin/nologin\n"
+                b"proxy:x:13:13:proxy:/bin:/usr/sbin/nologin\n"
+                b"www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin\n"
+                b"backup:x:34:34:backup:/var/backups:/usr/sbin/nologin\n"
+                b"list:x:38:38:Mailing List Manager:/var/list:/usr/sbin/nologin\n"
+                b"irc:x:39:39:ircd:/run/ircd:/usr/sbin/nologin\n"
+                b"_apt:x:42:65534::/nonexistent:/usr/sbin/nologin\n"
+                b"nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin\n"
                 b"sshd:x:100:65534::/run/sshd:/usr/sbin/nologin\n", 0o644)
     out.archivo("etc/group",
                 b"root:x:0:\n"

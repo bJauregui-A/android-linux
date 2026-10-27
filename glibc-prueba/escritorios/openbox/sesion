@@ -1,16 +1,13 @@
 #!/bin/bash
-# Sesión X11 nativa: compositor picom + panel tint2 + gestor de ventanas Openbox
-export DISPLAY=${DISPLAY:-:0}
+# Sesión X11 nativa: panel tint2 + gestor de ventanas Openbox
+export DISPLAY=${DISPLAY:-:10}
 export XDG_CURRENT_DESKTOP=OPENBOX
 
-# Iniciar compositor X11 real en segundo plano
-if command -v picom >/dev/null 2>&1; then
-    picom -b --backend glx --vsync 2>/dev/null || picom -b 2>/dev/null || true
-fi
+# Sin compositor: picom exige MIT-SHM y nuestro servidor X no lo tiene ("This X server is missing the MIT-SHM extension").
 
 # Iniciar panel ligero tint2 si está disponible
 if command -v tint2 >/dev/null 2>&1; then
-    tint2 >/dev/null 2>&1 &
+    tint2 > /tmp/tint2.log 2>&1 &
 fi
 
 # Lanzar gestor de ventanas Openbox en primer plano

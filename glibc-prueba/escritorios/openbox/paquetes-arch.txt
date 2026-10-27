@@ -1,5 +1,5 @@
 openbox
-picom
 tint2
 xterm
 xclip
+python-pyxdg

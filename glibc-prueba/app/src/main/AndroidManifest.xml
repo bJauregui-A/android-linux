@@ -65,10 +65,19 @@
                 android:value="Mantiene vivos los procesos Linux del usuario (sway, terminal)" />
         </service>
 
-        <!-- Servidor X11 propio (B11): proceso aparte, no se puede reiniciar dentro del mismo -->
+        <!-- Servidor X11 propio (B11): proceso aparte, no se puede reiniciar dentro del mismo. Uno por instancia que
+             corra a la vez: cada ranura es una subclase en su propio proceso (RanurasX11) -->
         <service
             android:name=".ServicioX11"
             android:process=":x11"
+            android:exported="false" />
+        <service
+            android:name=".ServicioX11B"
+            android:process=":x11b"
+            android:exported="false" />
+        <service
+            android:name=".ServicioX11C"
+            android:process=":x11c"
             android:exported="false" />
     </application>
 

@@ -18,17 +18,28 @@
      int len;
      char port[20];
  
-@@ -326,7 +327,8 @@
+@@ -326,7 +327,19 @@
      i = 0;
      haslock = 0;
      while ((!haslock) && (i++ < 3)) {
 -        haslock = (link(tmp, LockFile) == 0);
-+        /* Android: SELinux niega link() en los datos de la app; rename() deja el mismo lock */
-+        haslock = (rename(tmp, LockFile) == 0);
++        /* Android: SELinux niega link() en los datos de la app. open(O_CREAT | O_EXCL) crea el lock de forma
++         * atómica y, si ya existe, falla con EEXIST y se sigue por la comprobación del pid de abajo. */
++        lfd = open(LockFile, O_CREAT | O_EXCL | O_WRONLY, 0444);
++        haslock = (lfd >= 0);
++        if (haslock) {
++            if (write(lfd, pid_str, 11) != 11) {
++                close(lfd);
++                unlink(LockFile);
++                unlink(tmp);
++                FatalError("Could not write pid to lock file in %s\n", LockFile);
++            }
++            close(lfd);
++        }
          if (haslock) {
              /*
               * We're done.
-@@ -1394,10 +1396,7 @@
+@@ -1394,10 +1407,7 @@
          p = -1;
          break;
      case 0:                    /* child */
@@ -40,7 +51,7 @@
          execl("/bin/sh", "sh", "-c", command, (char *) NULL);
          _exit(127);
      default:                   /* parent */
-@@ -1464,10 +1463,7 @@
+@@ -1464,10 +1474,7 @@
  #endif
          return NULL;
      case 0:                    /* child */
@@ -52,7 +63,7 @@
          if (*type == 'r') {
              if (pdes[1] != 1) {
                  /* stdout */
-@@ -1542,10 +1538,7 @@
+@@ -1542,10 +1549,7 @@
          free(cur);
          return NULL;
      case 0:                    /* child */
@@ -80,3 +91,109 @@
          directory = XKM_OUTPUT_DIR;
          if (XKM_OUTPUT_DIR[strlen(XKM_OUTPUT_DIR) - 1] != '/')
              pathsep = "/";
+diff -u a/present/present_fake.c b/present/present_fake.c
+--- a/present/present_fake.c
++++ b/present/present_fake.c
+@@ -32,6 +32,11 @@
+     ScreenPtr                   screen;
+ } present_fake_vblank_rec, *present_fake_vblank_ptr;
+ 
++/* Android: sin ventana a la vista los avisos de vblank se retienen (sin temporizador) y salen al reanudar. Quien
++ * espera su cuadro (un compositor, GL, video) deja de dibujar, como con los frame callbacks de Wayland. */
++static Bool fake_pausado;
++static struct xorg_list fake_retenidos;
++
+ int
+ present_fake_get_ust_msc(ScreenPtr screen, uint64_t *ust, uint64_t *msc)
+ {
+@@ -58,14 +63,34 @@
+ {
+     present_fake_vblank_ptr     fake_vblank = arg;
+ 
+-    present_fake_notify(fake_vblank->screen, fake_vblank->event_id);
+     xorg_list_del(&fake_vblank->list);
+     TimerFree(fake_vblank->timer);
++    fake_vblank->timer = NULL;
++    if (fake_pausado) {
++        xorg_list_add(&fake_vblank->list, &fake_retenidos);
++        return 0;
++    }
++    present_fake_notify(fake_vblank->screen, fake_vblank->event_id);
+     free(fake_vblank);
+     return 0;
+ }
+ 
+ void
++present_fake_pausar(Bool pausar)
++{
++    present_fake_vblank_ptr     fake_vblank, tmp;
++
++    fake_pausado = pausar;
++    if (pausar || !fake_retenidos.next)     /* sin present_fake_queue_init todavía */
++        return;
++    xorg_list_for_each_entry_safe(fake_vblank, tmp, &fake_retenidos, list) {
++        xorg_list_del(&fake_vblank->list);
++        present_fake_notify(fake_vblank->screen, fake_vblank->event_id);
++        free(fake_vblank);
++    }
++}
++
++void
+ present_fake_abort_vblank(ScreenPtr screen, uint64_t event_id, uint64_t msc)
+ {
+     present_fake_vblank_ptr     fake_vblank, tmp;
+@@ -75,7 +100,14 @@
+             TimerFree(fake_vblank->timer); /* TimerFree will call TimerCancel() */
+             xorg_list_del(&fake_vblank->list);
+             free (fake_vblank);
+-            break;
++            return;
++        }
++    }
++    xorg_list_for_each_entry_safe(fake_vblank, tmp, &fake_retenidos, list) {
++        if (fake_vblank->event_id == event_id) {
++            xorg_list_del(&fake_vblank->list);
++            free (fake_vblank);
++            return;
+         }
+     }
+ }
+@@ -91,7 +123,7 @@
+     INT32                       delay = ((int64_t) (ust - now)) / 1000;
+     present_fake_vblank_ptr     fake_vblank;
+ 
+-    if (delay <= 0) {
++    if (delay <= 0 && !fake_pausado) {
+         present_fake_notify(screen, event_id);
+         return Success;
+     }
+@@ -102,6 +134,10 @@
+ 
+     fake_vblank->screen = screen;
+     fake_vblank->event_id = event_id;
++    if (fake_pausado) {
++        xorg_list_add(&fake_vblank->list, &fake_retenidos);
++        return Success;
++    }
+     fake_vblank->timer = TimerSet(NULL, 0, delay, present_fake_do_timer, fake_vblank);
+     if (!fake_vblank->timer) {
+         free(fake_vblank);
+@@ -142,4 +178,5 @@
+ present_fake_queue_init(void)
+ {
+     xorg_list_init(&fake_vblank_queue);
++    xorg_list_init(&fake_retenidos);
+ }
+diff -u a/present/present_priv.h b/present/present_priv.h
+--- a/present/present_priv.h
++++ b/present/present_priv.h
+@@ -359,6 +359,9 @@
+ void
+ present_fake_queue_init(void);
+ 
++void
++present_fake_pausar(Bool pausar);
++
+ /*
+  * present_fence.c
+  */

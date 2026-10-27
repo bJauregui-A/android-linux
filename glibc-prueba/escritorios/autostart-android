@@ -163,7 +163,13 @@ if [ -n "$sshd_bin" ] && ! pgrep -x sshd >/dev/null 2>&1 \
 fi
 
 # PipeWire → FIFO → AudioTrack de Android y compatibilidad PulseAudio.
-if [ -x /usr/bin/pipewire ] && ! pgrep -x pipewire >/dev/null 2>&1; then
+# PipeWire de esta instancia (su socket está en su XDG_RUNTIME_DIR). Buscar el proceso por nombre no sirve: los
+# procesos de todas las instancias se ven entre sí, y con sway abierto un escritorio X11 se quedaba sin el suyo.
+pipewire_propio() {
+    command -v pw-cli >/dev/null 2>&1 && timeout 3 pw-cli info 0 >/dev/null 2>&1
+}
+
+if [ -x /usr/bin/pipewire ] && ! pipewire_propio; then
     if iniciar pipewire pipewire /usr/bin/pipewire; then
         [ -x /usr/bin/wireplumber ] && iniciar wireplumber proceso /usr/bin/wireplumber
         if [ -x /usr/bin/pipewire-pulse ] && command -v pactl >/dev/null 2>&1; then

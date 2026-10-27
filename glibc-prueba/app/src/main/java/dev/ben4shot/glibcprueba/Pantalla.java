@@ -16,6 +16,8 @@ final class Pantalla {
     private static volatile Activity vista;
     private static volatile String instancia;
     private static volatile boolean x11;
+    // Qué instancias son X11: la superficie de una vista que se va llega después de que la nueva ya se abrió.
+    private static final java.util.Map<String, Boolean> esX11Por = new java.util.concurrent.ConcurrentHashMap<>();
 
     private Pantalla() { }
 
@@ -24,6 +26,7 @@ final class Pantalla {
         vista = activity;
         instancia = instanciaId;
         x11 = esX11(activity, instanciaId);
+        esX11Por.put(instanciaId, x11);
         if (x11) iniciarX11(activity, instanciaId);
     }
 
@@ -46,7 +49,9 @@ final class Pantalla {
     private static void iniciarX11(Activity a, String id) {
         ClienteX11.limpiarRestos(a);
         DisplayMetrics dm = a.getResources().getDisplayMetrics();
-        ClienteX11.arrancar(a, id, dm.widthPixels, dm.heightPixels, Math.round(dm.xdpi), null, () -> {
+        File raiz = SistemaLinux.raiz(a, id);
+        int dpi = EscalaX11.dpi(raiz, SistemaLinux.adaptador(a, id).home(raiz));
+        ClienteX11.arrancar(a, id, dm.widthPixels, dm.heightPixels, dpi, null, () -> {
             // murió :x11: se cierra la vista y el escritorio de esa instancia (la próxima vez arranca otro servidor)
             a.startService(new Intent(a, TerminalService.class)
                     .setAction(TerminalService.CERRAR_ESCRITORIO)
@@ -55,12 +60,14 @@ final class Pantalla {
         });
     }
 
-    static void ventana(Surface surface, int ancho, int alto, int mmAncho, int mmAlto) {
-        if (!x11) {
+    // La vista de `instanciaId` da o quita su superficie. Cada vista habla de su instancia: al cambiar de escritorio la
+    // vista que se va avisa después de que la nueva ya se abrió.
+    static void ventana(String instanciaId, Surface surface, int ancho, int alto, int mmAncho, int mmAlto) {
+        if (!Boolean.TRUE.equals(esX11Por.get(instanciaId))) {
             Wayland.ventana(surface, ancho, alto, mmAncho, mmAlto);
             return;
         }
-        ClienteX11 c = ClienteX11.actual();
+        ClienteX11 c = ClienteX11.de(instanciaId);
         if (c != null) c.ventana(surface);
     }
 
@@ -69,17 +76,17 @@ final class Pantalla {
     }
 
     static void mover(float x, float y) {
-        ClienteX11 c = x11 ? ClienteX11.actual() : null;
+        ClienteX11 c = x11 ? ClienteX11.de(instancia) : null;
         if (c != null) c.mover(x, y); else if (!x11) Wayland.mover(x, y);
     }
 
     static void boton(int boton, boolean pulsado) {
-        ClienteX11 c = x11 ? ClienteX11.actual() : null;
+        ClienteX11 c = x11 ? ClienteX11.de(instancia) : null;
         if (c != null) c.boton(boton, pulsado); else if (!x11) Wayland.boton(boton, pulsado);
     }
 
     static void eje(float dx, float dy) {
-        ClienteX11 c = x11 ? ClienteX11.actual() : null;
+        ClienteX11 c = x11 ? ClienteX11.de(instancia) : null;
         if (c != null) c.eje(dx, dy); else if (!x11) Wayland.eje(dx, dy);
     }
 
@@ -89,7 +96,7 @@ final class Pantalla {
     }
 
     static void tecla(int codigo, boolean pulsada) {
-        ClienteX11 c = x11 ? ClienteX11.actual() : null;
+        ClienteX11 c = x11 ? ClienteX11.de(instancia) : null;
         if (c != null) c.tecla(codigo, pulsada); else if (!x11) Wayland.tecla(codigo, pulsada);
     }
 }

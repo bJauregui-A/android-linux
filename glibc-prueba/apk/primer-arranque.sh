@@ -177,6 +177,45 @@ backend_iniciar_base() {
     esac
 }
 
+# Dependencias directas de un paquete, una por línea (Depends y PreDepends, sin los <virtuales>). Las pruebas lo reemplazan.
+dependencias_de() {
+    apt-cache depends "$1" 2>/dev/null | sed -n 's/^[ |]*\(Pre\)\{0,1\}Depends: //p' | tr -d '<>'
+}
+
+# preferences.d/android frena (Pin-Priority -1) paquetes de sistema para que apt no los instale como recomendados.
+# Si uno es requisito duro, apt falla con "X : Depends: Y but it is not installable": Y puede ser el frenado o algo que
+# depende de él (cinnamon -> network-manager-gnome -> network-manager). $1 = salida de apt, $2 = preferences.
+# Imprime los frenados que son requisito real (Y o sus dependencias directas); un Recommends nunca entra.
+requisitos_frenados() {
+    local n d
+    for n in $(sed -n 's/.*Depends: \([^ ]*\) but it is not installable.*/\1/p' "$1" | sort -u); do
+        for d in "$n" $(dependencias_de "$n"); do
+            sed -n 's/^Package: //p' "$2" | tr ' ' '\n' | grep -qxF -- "$d" && echo "$d"
+        done
+    done | sort -u
+}
+
+# El preferences $1 sin los paquetes que siguen ($2...), por la salida estándar. Sin nombres que frenar no imprime nada.
+pref_sin() {
+    local pref=$1 d nombres
+    shift
+    nombres=$(sed -n 's/^Package: //p' "$pref" | tr ' ' '\n')
+    for d in "$@"; do nombres=$(printf '%s\n' "$nombres" | grep -vxF -- "$d"); done
+    nombres=$(printf '%s\n' "$nombres" | tr '\n' ' ' | sed 's/ *$//')
+    [ -n "$nombres" ] && sed "s|^Package: .*|Package: $nombres|" "$pref"
+    return 0
+}
+
+# Quita de $1 (preferences) los paquetes $2... Pasa por un temporal: "pref_sin $1 | tee $1" lo trunca antes de que
+# sed lo lea y deja fuera todos los pines. SUDO_CMD solo lo cambian las pruebas.
+liberar_pines() {
+    local pref=$1 tmp
+    tmp=$(mktemp "${TMPDIR:-/tmp}/pines.XXXXXX") || return 1
+    pref_sin "$@" > "$tmp"
+    ${SUDO_CMD:-sudo} tee "$pref" < "$tmp" > /dev/null
+    rm -f "$tmp"
+}
+
 backend_instalar() {
     local pkgs=("$@")
     [ ${#pkgs[@]} -eq 0 ] && return 0
@@ -191,11 +230,22 @@ backend_instalar() {
             done
             ;;
         apt)
-            for i in 1 2 3; do
+            local i=1 liberaciones=0 reg=${TMPDIR:-/tmp}/apt-instalar.log pref=/etc/apt/preferences.d/android libres
+            while :; do
                 backend_limpiar_lock
-                DEBIAN_FRONTEND=noninteractive sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${pkgs[@]}" && return 0
-                [ $i -eq 3 ] && return 1
+                DEBIAN_FRONTEND=noninteractive sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y "${pkgs[@]}" 2>&1 | tee "$reg"
+                [ "${PIPESTATUS[0]}" -eq 0 ] && return 0
+                # Un frenado que es requisito real no se reintenta con lo mismo: se libera y se vuelve a probar
+                libres=$(requisitos_frenados "$reg" "$pref" | tr '\n' ' ')
+                if [ -n "$libres" ] && [ $liberaciones -lt 5 ]; then
+                    liberaciones=$((liberaciones + 1))
+                    printf '\n\e[38;5;214m✖ Requisito real de apt, se libera del veto: %s\e[0m\n' "$libres"
+                    liberar_pines "$pref" $libres
+                    continue
+                fi
+                [ $i -ge 3 ] && return 1
                 printf '\n\e[38;5;214m✖ Falló la descarga en apt, reintento %d de 2...\e[0m\n' $i
+                i=$((i + 1))
                 sleep 3
             done
             ;;
@@ -898,15 +948,20 @@ elegido zsh && {
     fi
 }
 # Ajustar rutas reales del prefijo en ld.so.conf.d y preferencias de Firefox
+# stdin → stdout, con el prefijo $1 (<app>/files/instancias/<id>). Cubre files/<id> y files/instancias/<id>.
+reescribir_prefijo() {
+    sed "s|@P@|$1|g; s|dev.ben4shot.glibcprueba.[^/]*/files/\(instancias/\)\{0,1\}[^/\"',]*|$1|g"
+}
 if [ -n "$GLIBC_PREFIX" ]; then
     P_REL=$(echo "$GLIBC_PREFIX" | sed -E 's@^/data/(user/0|data)/@@')
-    sed -i "s|@P@|$P_REL|g; s|dev.ben4shot.glibcprueba.[^/]*/files/[^/\"']*|$P_REL|g" /etc/ld.so.conf.d/android-prefijo.conf 2>/dev/null || true
+    f=/etc/ld.so.conf.d/android-prefijo.conf
+    [ -f $f ] && { reescribir_prefijo "$P_REL" < $f > $f.nuevo && cat $f.nuevo > $f; rm -f $f.nuevo; } 2>/dev/null || true
     ldconfig 2>/dev/null || true
 fi
 FF=/usr/lib/firefox/browser/defaults/preferences
 if [ -d "$FF" ]; then
     P_REL=$(echo "${GLIBC_PREFIX:-dev.ben4shot.glibcprueba.sdk36/files/archlinux}" | sed -E 's@^/data/(user/0|data)/@@')
-    sed "s|/home/user/|/home/$N/|g; s|@P@|$P_REL|g; s|dev.ben4shot.glibcprueba.[^/]*/files/[^/\"',]*|$P_REL|g" "$D/firefox-android.js" > "$FF/android.js"
+    sed "s|/home/user/|/home/$N/|g" "$D/firefox-android.js" | reescribir_prefijo "$P_REL" > "$FF/android.js"
 fi
 [ -f /usr/share/applications/firefox.desktop ] &&
     sed 's|/usr/lib/firefox/firefox|/usr/local/bin/firefox|' /usr/share/applications/firefox.desktop \

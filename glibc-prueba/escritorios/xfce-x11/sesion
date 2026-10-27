@@ -1,4 +1,8 @@
 #!/bin/bash
-export DISPLAY=${DISPLAY:-:0}
+export DISPLAY=${DISPLAY:-:10}
 export XDG_CURRENT_DESKTOP=XFCE XDG_MENU_PREFIX=xfce-
+# ssh-agent y gpg-agent se marcan no volcables y /proc está en hidepid=invisible: la app no los ve, así que ni la
+# pausa ni el cierre del escritorio los alcanzan y quedaban huérfanos. Que xfce4-session no los lance.
+xfconf-query -c xfce4-session -p /startup/ssh-agent/enabled -n -t bool -s false 2>/dev/null
+xfconf-query -c xfce4-session -p /startup/gpg-agent/enabled -n -t bool -s false 2>/dev/null
 exec startxfce4

@@ -1,86 +1,166 @@
 # Backlog
 
-Historias priorizadas, de arriba hacia abajo. Cada una entrega algo que se puede comprobar en el teléfono y hace una sola cosa.
-Flujo: elegir la primera historia → `/story <ID>` (genera `plan.md` con los criterios y las pruebas) → `/pair` (TDD) → commit → borrar la historia de aquí.
+Funciones a agregar, de arriba hacia abajo por prioridad, cada una con sus pasos.
+Flujo: elegir la primera → `/story <ID>` (desglosa los pasos en `plan.md`: cómo, pruebas, listo cuando) → `/pair` (TDD, revisión por paso) → commit → borrarla de aquí.
 El detalle técnico de los ítems anteriores (B04–B61) está en `git show c2686c1:BACKLOG.md`.
 
 ## P0 — Bases: lo que hace funcionar lo demás
 
-Ordenadas por cuánto destraban. Entre paréntesis, lo que habilitan.
+Ordenadas por cuánto destraban.
 
-- **B11** · Como usuario, quiero usar los escritorios X11 directos (Openbox, XFCE X11), para tener una alternativa sin Wayland. (Habilita: Xfce en Debian de B67, los escritorios X11 de tasksel y archinstall —MATE, Cinnamon, LXDE, i3, bspwm, awesome, Openbox— y B36. Camino elegido el 26-oct: servidor X11 propio sobre `xorg-server` que dibuja directo en la surface, sin Xwayland. La GPU queda en B36.)
-- **B23** · Como usuario, quiero que al actualizar la app mis instancias reciban la glibc y las herramientas nuevas sin reinstalarlas, para no perder lo que tengo. (Habilita: llevar cualquier arreglo de glibc, instalador o herramientas a las instancias que ya existen.)
-- **B45** · Como desarrollador, quiero que una prueba compruebe que las instancias nuevas traen la glibc recién compilada, para no publicar un APK con la libc vieja.
-- **B16** · Como desarrollador, quiero una batería de pruebas de humo que corra en una instancia (shell, paquetes, app gráfica, GPU, audio, red), para saber en un minuto si algo se rompió. (Habilita: comprobar cada historia sin pruebas a mano.)
-- **B19** · Como usuario de Debian, quiero que `/bin`, `/sbin` y `/lib` estén unificados con `/usr` como en un Debian actual, para que los paquetes que lo asumen funcionen. (Habilita: B68 Debian 13 y B69 Ubuntu.)
-- **B53** · Como usuario de Debian, quiero que la instancia traiga los usuarios de sistema estándar (`www-data`, `nobody`...) y `hostname`, para que los paquetes se instalen sin errores. (Habilita: B27b Apache y los paquetes que crean usuarios al instalarse.)
-- **B47** · Como usuario, quiero que la raíz de una instancia nueva tenga los permisos correctos desde el inicio, para que `sudo mkdir /x` funcione sin arreglos al abrirla.
-- **B31** · Como usuario, quiero que KDE, COSMIC y los bloqueadores encuentren un gestor de sesión mínimo, para que no fallen las funciones que lo piden. (Habilita: KDE, COSMIC y B15.)
-- **B48** · Como desarrollador, quiero pruebas automáticas del supervisor que corran en el PC, para cambiarlo sin miedo. (Habilita: cambiar el supervisor para B50, B52, B27a y B51.)
-- **B50** · Como usuario, quiero que un servicio que falla al arrancar quede marcado como fallido sin trabar a los demás, para que el resto de la instancia siga funcionando.
-- **B52** · Como usuario, quiero que `sshd` lo arranque un solo responsable, para que no haya dos copias peleando por el puerto.
-- **B25** · Como desarrollador, quiero pasar los parches a la próxima glibc de Arch ARM, para seguir instalando paquetes nuevos. (Habilita: seguir instalando paquetes nuevos en Arch, que es rolling.)
-- **B17** · Como usuario, quiero que los programas en Go, Rust y los estáticos más comunes (`rg`, `fd`, `lazygit`) funcionen, para usar herramientas modernas sin recompilarlas.
-- **B86** · Como usuario, quiero que las instancias lean una tabla de red común por subred, para que los nombres e IP de las demás estén siempre al día sin reescribir archivos en cada una.
-  - Idea (25-oct): `files/red/<subred>/hosts` lo escribe solo `RedManager` cuando cambia la tabla; el `/etc/hosts` de cada instancia es un enlace a la de su subred (`/data` ya pasa sin traducir, sin tocar la glibc). Gateway calculado del CIDR, no `10.0.0.1` fijo. El nombre de equipo propio no cabe en la tabla común: `hosts: files myhostname dns` con `nss-myhostname` (comprobar que esté en las bases de Arch y Debian), o parche de glibc si no. No mover las instancias de carpeta (`files/` ya es la raíz común: `instancias/`, `ips/`).
+- **B23** · Las instancias existentes reciben la glibc y las herramientas nuevas al actualizar la app, sin reinstalarlas
+  - Guardar en cada instancia qué versión de glibc y herramientas tiene.
+  - Al abrir la app tras actualizarla, copiar lo nuevo a las instancias atrasadas sin tocar los datos del usuario.
+  - Comprobar en una instancia creada con el APK anterior.
+- **B45** · Prueba que comprueba que las instancias nuevas traen la glibc recién compilada
+  - Comparar la libc empaquetada en el APK con la del último build.
+  - Comparar la libc de una instancia nueva con la del APK.
+  - Fallar antes de publicar si no coinciden.
+- **B16** · Batería de pruebas de humo que corre en una instancia y dice en un minuto si algo se rompió
+  - Shell y paquetes (instalar y quitar uno chico).
+  - App gráfica y GPU.
+  - Audio y red.
+  - Un solo comando que corre todo y resume qué falló.
+- **B19** · `/bin`, `/sbin` y `/lib` unificados con `/usr` en Debian, como en un Debian actual
+  - Convertir las carpetas en enlaces a `/usr` en instancias nuevas.
+  - Migrar las instancias existentes.
+  - Comprobar que un paquete que asume el usr unificado se instala.
+- **B53** · Usuarios de sistema estándar (`www-data`, `nobody`...) y `hostname` en Debian
+  - Agregar los usuarios y grupos de sistema que trae un Debian base.
+  - Comprobar que existe el comando `hostname`.
+  - Instalar un paquete que crea su propio usuario sin errores.
+- **B47** · La raíz de una instancia nueva queda con los permisos correctos desde el inicio
+  - Fijar dueño y permisos de `/` y sus carpetas al crear la instancia.
+  - Comprobar que `sudo mkdir /x` funciona al abrirla.
+- **B31** · Gestor de sesión mínimo para KDE, COSMIC y los bloqueadores
+  - Ver qué interfaz piden (logind por D-Bus u otra).
+  - Dar la mínima que necesitan.
+  - Comprobar KDE y COSMIC.
+- **B48** · Pruebas automáticas del supervisor que corren en el PC
+  - Arrancar, detener y reiniciar un servicio de prueba.
+  - Servicio que falla y servicio con dependencias.
+- **B50** · Un servicio que falla al arrancar queda marcado como fallido sin trabar a los demás (depende de B48)
+  - Marcar el servicio como fallido con su motivo.
+  - Seguir con los demás.
+  - Mostrar el estado fallido.
+- **B52** · `sshd` lo arranca un solo responsable (depende de B48)
+  - Encontrar quién más lo arranca.
+  - Dejar uno solo y comprobar que no hay dos copias en el puerto.
+- **B25** · Pasar los parches de glibc a la próxima versión de Arch ARM
+  - Bajar la nueva glibc y aplicar los parches, arreglando los que no apliquen.
+  - Compilar y probar aislada en una instancia.
+  - Empaquetar en el APK.
+- **B17** · Programas en Go, Rust y los estáticos comunes (`rg`, `fd`, `lazygit`) funcionan
+  - Ver por qué fallan hoy (llamadas al sistema directas, sin pasar por la glibc).
+  - Arreglar en la capa lo que bloquea.
+  - Probar `rg`, `fd` y `lazygit`.
+- **B86** · Tabla de red común por subred que leen todas las instancias
+  - `RedManager` escribe `files/red/<subred>/hosts` cuando cambia la tabla.
+  - El `/etc/hosts` de cada instancia es un enlace a la tabla de su subred (`/data` pasa sin traducir).
+  - Gateway calculado del CIDR, no `10.0.0.1` fijo.
+  - Nombre de equipo propio con `nss-myhostname` (comprobar que está en Arch y Debian) o un parche de glibc si no.
 
 ## P1 — Escritorios por distribución
 
 Cada distro ofrece la lista de su instalador oficial (archinstall, tasksel, sabores de Ubuntu). Lo no probado se muestra como experimental.
 
-- **B67** · Como usuario de Debian 12, quiero que el menú muestre los escritorios que ofrece su instalador (tasksel) con los paquetes de Debian 12, y tener XFCE probado y funcionando, para elegir como en una instalación real. Deja el mecanismo para las demás distros: cada escritorio declara sus paquetes por distro y versión, y sin paquetes para esa versión no aparece. (En curso; Xfce depende de B11.)
-- **B65** · Como usuario de Arch, quiero que el menú muestre los escritorios que ofrece archinstall, con los no probados marcados como experimentales, para elegir como en una instalación real.
-- **B64** · Como usuario, quiero ver junto a cada escritorio del menú si usa Wayland o X11, para saber qué compositor voy a tener.
-- **B68** · Como usuario, quiero elegir entre Debian 12 y Debian 13 al crear una instancia, para usar la versión que necesito. (Depende de B19.)
-- **B69** · Como usuario, quiero crear una instancia de Ubuntu 24.04 LTS con el menú de los sabores oficiales (Ubuntu, Kubuntu, Xubuntu, Lubuntu, MATE, Budgie, Unity, Cinnamon) y Lubuntu (LXQt) probado, para usar sus paquetes y elegir como en una instalación real. (Depende de B19.)
-- **B70** · Como usuario, quiero elegir entre Ubuntu 24.04 y 26.04 LTS al crear una instancia de Ubuntu, para usar la versión que necesito.
+- **B67** · Menú de Debian 12 con los escritorios de tasksel y sus paquetes de Debian 12, con Xfce funcionando (en pausa, `plan-b67.md`)
+  - Cada escritorio declara sus paquetes por distro y versión; sin paquetes para esa versión no aparece.
+  - Orden del menú como tasksel.
+  - Xfce probado en Debian 12.
+- **B65** · Menú de Arch con los escritorios de archinstall
+  - Orden y lista como archinstall.
+  - Marcar como experimentales los no probados.
+- **B64** · Mostrar junto a cada escritorio del menú si usa Wayland o X11
+  - Leer el protocolo de cada escritorio.
+  - Mostrarlo en el menú.
+- **B68** · Elegir entre Debian 12 y Debian 13 al crear una instancia (depende de B19)
+  - Base de Debian 13.
+  - Opción en el asistente.
+  - Paquetes de escritorios para debian-13.
+- **B69** · Instancia de Ubuntu 24.04 LTS con el menú de sabores oficiales y Lubuntu (LXQt) probado (depende de B19)
+  - Base de Ubuntu 24.04.
+  - Menú de sabores (Ubuntu, Kubuntu, Xubuntu, Lubuntu, MATE, Budgie, Unity, Cinnamon).
+  - Lubuntu probado.
+- **B70** · Elegir entre Ubuntu 24.04 y 26.04 LTS al crear una instancia de Ubuntu (depende de B69)
+  - Base de Ubuntu 26.04.
+  - Opción en el asistente y paquetes por versión.
 
-Escritorios del instalador oficial que todavía no tenemos (uno por historia; cada uno deja de ser experimental cuando se prueba; los X11 dependen de B11):
-- **B73** · Como usuario, quiero usar GNOME.
-- **B74** · Como usuario de Debian, quiero usar GNOME Flashback.
-- **B75** · Como usuario, quiero usar Cinnamon.
-- **B76** · Como usuario, quiero usar MATE.
-- **B77** · Como usuario, quiero usar Budgie.
-- **B78** · Como usuario de Debian, quiero usar LXDE.
-- **B79** · Como usuario de Ubuntu, quiero usar Unity.
-- **B80** · Como usuario de Arch, quiero usar i3.
-- **B81** · Como usuario de Arch, quiero usar bspwm.
-- **B82** · Como usuario de Arch, quiero usar awesome.
-- **B83** · Como usuario de Arch, quiero usar Enlightenment.
-- **B84** · Como usuario de Arch, quiero usar Deepin.
+Escritorios del instalador oficial que todavía no tenemos. Cada uno deja de ser experimental cuando se prueba. Pasos de cada uno: declarar sus paquetes por distro y versión, crear su sesión, probarlo y anotarlo en `PROBADO_EN`.
+- **B73** · GNOME
+- **B74** · GNOME Flashback (Debian)
+- **B75** · Cinnamon
+- **B76** · MATE
+- **B77** · Budgie
+- **B78** · LXDE (Debian)
+- **B79** · Unity (Ubuntu)
+- **B80** · i3 (Arch)
+- **B81** · bspwm (Arch)
+- **B82** · awesome (Arch)
+- **B83** · Enlightenment (Arch)
+- **B84** · Deepin (Arch)
 
 ## P2 — Validar lo que ya existe
 
-- **B10** · Como usuario, quiero que los dos escritorios que hoy quedan en negro o en gris muestren imagen, para poder elegir cualquiera de los 14.
-- **B14** · Como usuario, quiero que al cerrar la sesión los programas terminen en orden, para no perder datos ni sesiones guardadas.
-- **B15** · Como usuario, quiero desbloquear Phosh y COSMIC con mi contraseña, para usar esos escritorios sin quedar fuera.
-- **B13** · Como usuario de Debian, quiero instalar herramientas de compilación y compilar un programa dentro de la instancia, para desarrollar en el teléfono.
-- **B40** · Como usuario, quiero que `ss` liste las conexiones de mi instancia, para diagnosticar la red como en Linux.
-- **B42** · Como usuario, quiero llegar a un servicio de mi instancia por `127.0.0.1`, para que los programas que asumen loopback funcionen sin configurarlos.
-- **B41** · Como usuario, quiero que el menú de escritorios del instalador responda al instante, para elegir sin esperas.
+- **B10** · Los dos escritorios que quedan en negro o en gris muestran imagen
+  - Identificar cuáles son y por qué no dibujan.
+  - Arreglarlos.
+- **B14** · Al cerrar la sesión los programas terminan en orden, sin huérfanos
+  - Mandar la señal de cierre y esperar antes de matar.
+  - Cerrar `dbus-daemon`, `xfconfd`, `ssh-agent` y los demás que hoy quedan huérfanos.
+- **B15** · Desbloquear Phosh y COSMIC con la contraseña
+  - Ver cómo verifican la contraseña (PAM).
+  - Hacer que funcione en la instancia.
+- **B13** · Instalar herramientas de compilación en Debian y compilar un programa dentro de la instancia
+  - Instalar `build-essential`.
+  - Compilar y correr un programa de prueba.
+- **B40** · `ss` lista las conexiones de la instancia
+  - Dar los datos que `ss` lee (`/proc/net` está bloqueado en la app).
+- **B42** · Llegar a un servicio de la instancia por `127.0.0.1`
+  - Que el loopback de la instancia alcance sus propios servicios.
+  - Comprobar con un servidor que escucha en la IP de la instancia.
+- **B41** · El menú de escritorios del instalador responde al instante
+  - Medir dónde se demora.
+  - Quitar la espera.
 
 ## P3 — Servicios y manejo de instancias
 
-- **B27a** · Como usuario, quiero que `sshd` corra como root con separación de privilegios, como en Linux, para usar la configuración oficial de OpenSSH.
-- **B27b** · Como usuario, quiero que Apache atienda con sus procesos como `www-data`, para correr servidores web tal como vienen empaquetados.
-- **B51** · Como usuario, quiero ver el log de `sshd` con `service logs ssh`, para entender por qué no me deja entrar.
-- **B44** · Como usuario, quiero que la app rechace nombres de instancia inválidos (vacíos, solo puntos), para no crear instancias que rompen herramientas.
-- **B28** · Como usuario, quiero copiar o renombrar una instancia sin que se rompan sus enlaces, para duplicar un entorno que ya funciona (hoy los enlaces y algunas configs de la base apuntan a `files/archlinux`).
-- **B22** · Como usuario, quiero exportar una instancia a un archivo y restaurarla, para tener respaldos.
-- **B26b** · Como usuario, quiero que desde una instancia no se vean los archivos de las otras instancias, para mantenerlas aisladas.
-- **B63** · Como desarrollador, quiero regenerar desde una instancia actual lo compilado en el teléfono (Mesa, wlroots, sway, mesa-gl), para poder rearmar el APK si se pierde `trabajo/compilados.tar`.
-- **B24a** · Como usuario, quiero que los programas que usan colas de mensajes SysV funcionen, para no quedar fuera por esa falta.
-- **B24b** · Como usuario, quiero que la memoria compartida no ocupe disco ni deje basura al cerrarse los programas, para no llenar el almacenamiento.
-- **B20** · Como usuario, quiero crear una instancia a partir de un Dockerfile, para reproducir entornos declarados.
+- **B27a** · `sshd` corre como root con separación de privilegios, con la configuración oficial de OpenSSH
+- **B27b** · Apache atiende con sus procesos como `www-data` (depende de B53)
+- **B51** · Ver el log de `sshd` con `service logs ssh`
+- **B44** · La app rechaza nombres de instancia inválidos (vacíos, solo puntos)
+- **B28** · Copiar o renombrar una instancia sin que se rompan sus enlaces
+  - Encontrar los enlaces y configs que apuntan a `files/archlinux`.
+  - Hacerlos relativos o reescribirlos al copiar.
+  - Copiar y renombrar desde la app.
+- **B22** · Exportar una instancia a un archivo y restaurarla
+  - Exportar a un archivo comprimido.
+  - Restaurar como instancia nueva.
+- **B26b** · Una instancia no ve los archivos de las otras
+- **B26c** · Una instancia solo ve y señala sus propios procesos (`ps`, `pgrep`, `htop`, `kill`)
+  - Todas corren con el mismo usuario de Android y ven el `/proc` real; el kernel no tiene namespaces de usuario (`unshare -U` → `EINVAL`), así que el filtro va en nuestra glibc: es contra errores (como `pgrep -x pipewire` de otra instancia), no una barrera de seguridad.
+  - Al listar `/proc`, mostrar solo los procesos de la instancia (por su ruta en cmdline o cwd, el criterio de `Pausa`), más `self` y lo que no es un pid.
+  - Rechazar `kill` a procesos de otra instancia.
+  - La pausa y el cierre alcanzan a los procesos no volcables. Con `/proc` en `hidepid=invisible`, un proceso que hace `PR_SET_DUMPABLE 0` (`ssh-agent`, `gpg-agent`) desaparece para la app. La marca se respeta: en ese momento, nuestra glibc le manda a la app un `pidfd` del proceso por un socket, y la app lo guarda en memoria por instancia. No va en un archivo, porque todo corre con el mismo usuario y cualquier proceso podría leerlo. Al pausar o cerrar, la app señala por `pidfd`, que no se confunde aunque el pid se reutilice. Lo primero es comprobar que el seccomp de la app permite `pidfd_open` y `pidfd_send_signal`.
+  - Resolver el `sshd` compartido del puerto 8022 (hoy lo arranca la primera instancia y las demás no lo ven).
+- **B63** · Regenerar desde una instancia lo compilado en el teléfono (Mesa, wlroots, sway, mesa-gl) para rearmar el APK sin `trabajo/compilados.tar`
+- **B24a** · Colas de mensajes SysV
+- **B24b** · La memoria compartida no ocupa disco ni deja basura al cerrarse los programas
+- **B20** · Crear una instancia a partir de un Dockerfile
+  - Leer `FROM`, `RUN`, `COPY` y `ENV`.
+  - Aplicarlos sobre una instancia nueva.
 
 ## P4 — Escritorio completo e integración con Android
 
-- **B30** · Como usuario, quiero ver la batería real del teléfono en la barra del escritorio, para saber cuánta carga me queda.
-- **B32** · Como usuario, quiero que el selector de archivos y la apertura de enlaces de las apps funcionen por el portal estándar, para usar apps empaquetadas modernas.
-- **B33** · Como usuario, quiero capturar el mouse en juegos y apps 3D, para controlarlos con movimiento relativo.
-- **B34** · Como usuario, quiero escribir con el teclado de Android con autocorrector y predicción, para escribir rápido en apps Linux.
-- **B35** · Como usuario, quiero usar el lápiz con presión e inclinación, para dibujar en Krita o Xournal++.
-- **B36** · Como usuario, quiero OpenGL por GPU en X11 sin copias a la CPU, para que las apps X11 rindan como las Wayland.
-- **B37** · Como usuario, quiero que cada ventana Linux sea una ventana de Android, para usar recientes, pantalla dividida y ventanas flotantes.
-- **B38** · Como usuario, quiero un cursor de tamaño legible en el teléfono, para ver dónde apunto.
-- **B39** · Como usuario, quiero que las notificaciones, abrir enlaces y `/sdcard` funcionen en todos los escritorios, no solo en sway.
+- **B30** · Batería real del teléfono en la barra del escritorio
+- **B32** · Selector de archivos y apertura de enlaces por el portal estándar (xdg-desktop-portal)
+- **B33** · Capturar el mouse en juegos y apps 3D (movimiento relativo)
+- **B34** · Teclado de Android con autocorrector y predicción en apps Linux
+- **B35** · Lápiz con presión e inclinación (Krita, Xournal++)
+- **B36** · OpenGL por GPU en X11 sin copias a la CPU
+  - Firefox en XFCE X11 hoy dibuja el contenido de la ventana vacío con rayas (los menús salen bien) y avisa `MESA-EGL: DRI3 error`: el servidor no tiene DRI3.
+  - Pasar a `AHardwareBuffer` + `ASurfaceTransaction` en el DDX.
+  - GLX o DRI3 sobre la GPU.
+- **B37** · Cada ventana Linux es una ventana de Android (recientes, pantalla dividida, flotantes)
+- **B38** · Cursor de tamaño legible en el teléfono
+- **B39** · Notificaciones, abrir enlaces y `/sdcard` en todos los escritorios, no solo en sway

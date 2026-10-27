@@ -24,8 +24,11 @@ caso "dix-config.h sin LISTEN_TCP, LISTEN_LOCAL, HAS_SHM, GLXEXT ni XDMCP"  \
 caso "dix-config.h con LISTEN_UNIX"  "grep -qE '^#define LISTEN_UNIX' $CFG"
 caso "el servidor lee X11_UNIX_DIR (socket)"  "grep -q X11_UNIX_DIR x11/salida/libxserver.so"
 caso "el servidor lee X11_LOCK_DIR (lock)"    "grep -q X11_LOCK_DIR x11/salida/libxserver.so"
-# SELinux niega link() en los datos de la app (avc denied { link } .tX0-lock) y el servidor abortaba al arrancar
-caso "el lock del servidor no usa link()"  "! grep -q 'link(tmp, LockFile)' x11/fuentes/xorg-server-21.1.13/os/utils.c && grep -q 'rename(tmp, LockFile)' x11/fuentes/xorg-server-21.1.13/os/utils.c"
+# SELinux niega link() en los datos de la app (avc denied { link } .tX0-lock) y el servidor abortaba al arrancar.
+# El lock se crea con open(O_CREAT | O_EXCL), atómico: si ya existe, el servidor lee su pid y no pisa el de otro.
+U=x11/fuentes/xorg-server-21.1.13/os/utils.c
+caso "el lock del servidor no usa link() ni rename()"  "! grep -qE 'link\\(tmp, LockFile\\)|rename\\(tmp, LockFile\\)' $U"
+caso "el lock se crea con open(O_CREAT | O_EXCL)"  "grep -q 'open(LockFile, O_CREAT | O_EXCL' $U"
 # el seccomp de la app mata setuid/setgid (SIGSYS) en el hijo de Popen, que lanza xkbcomp
 caso "el servidor no llama a setuid/setgid al lanzar procesos"  "! grep -qE 'set(uid|gid)\\(get(uid|gid)\\(\\)\\)' x11/fuentes/xorg-server-21.1.13/os/utils.c"
 # xkbcomp deja su .xkm en una carpeta que el servidor fija (/tmp no existe en Android)

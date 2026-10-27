@@ -62,6 +62,41 @@ rechazar_perfil() {
     fi
     exit 78
 }
+# Bus de sistema para los escritorios que lo piden (REQUISITOS_SESION "dbus-sistema"): cinnamon-session aborta con
+# "Failed to connect to system bus" sin él. dbus-daemon --system corre como usuario normal; --address pisa el <listen> de
+# /usr/share/dbus-1/system.conf. Idempotente: cambiar_escritorio rehace la sesión con exec y el daemon sigue vivo.
+# BUS_SISTEMA_* solo los cambian las pruebas (pruebas/escritorios/bus-sistema.sh).
+iniciar_bus_sistema() {
+    local sock=${BUS_SISTEMA_SOCKET:-/run/dbus/system_bus_socket}
+    local pidf=${BUS_SISTEMA_PID_ARCHIVO:-$XDG_RUNTIME_DIR/linux-session.dbus-sistema.pid}
+    local log=${BUS_SISTEMA_LOG:-/tmp/linux-session-dbus-sistema.log} pid i
+    export DBUS_SYSTEM_BUS_ADDRESS=unix:path=$sock
+    pid=$(cat "$pidf" 2>/dev/null)
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && [ -S "$sock" ]; then return 0; fi
+    command -v dbus-daemon >/dev/null 2>&1 || return 1
+    rm -f "$sock" "$pidf"
+    mkdir -p "$(dirname "$sock")" 2>/dev/null
+    setsid dbus-daemon --system --nofork --nopidfile --address="unix:path=$sock" > "$log" 2>&1 &
+    printf '%s\n' "$!" > "$pidf"
+    for i in $(seq 40); do
+        [ -S "$sock" ] && return 0
+        sleep 0.25
+    done
+    return 1
+}
+
+detener_bus_sistema() {
+    local pidf=${BUS_SISTEMA_PID_ARCHIVO:-$XDG_RUNTIME_DIR/linux-session.dbus-sistema.pid} pid i
+    pid=$(cat "$pidf" 2>/dev/null)
+    if [ -n "$pid" ]; then
+        kill -TERM "$pid" 2>/dev/null
+        wait "$pid" 2>/dev/null
+        for i in 1 2 3 4 5; do kill -0 "$pid" 2>/dev/null || break; sleep 0.2; done
+    fi
+    rm -f "$pidf"
+    return 0
+}
+
 [ -n "$proveedor" ] && [ -f "$P/$proveedor/proveedor.conf" ] \
     || rechazar_perfil "no declara un proveedor de pantalla válido"
 . "$P/$proveedor/proveedor.conf"
@@ -133,6 +168,8 @@ for requisito in $REQUISITOS_SESION; do
     case "$requisito" in
         dbus-session) [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ] ||
             rechazar_perfil "falta el requisito de sesión: dbus-session" ;;
+        dbus-sistema) iniciar_bus_sistema ||
+            rechazar_perfil "no arrancó el bus de sistema (log: ${BUS_SISTEMA_LOG:-/tmp/linux-session-dbus-sistema.log})" ;;
         wayland|x11)
             [ "$PROTOCOLO_PANTALLA" = "$requisito" ] ||
                 rechazar_perfil "requiere $requisito, pero $proveedor ofrece $PROTOCOLO_PANTALLA" ;;
@@ -226,7 +263,7 @@ x11_previos=/tmp/.X11-unix/X*
 if [ "$COMPROBACION_READY" = socket-x11 ]; then
     x11_previos=
     for _ in $(seq $((TIEMPO_READY * 4))); do
-        [ -S /tmp/.X11-unix/X0 ] && break
+        [ -S /tmp/.X11-unix/X10 ] && break
         sleep 0.25
     done
 fi
@@ -300,6 +337,7 @@ cambiar_escritorio() {
 cerrar_sesion() {
     cerrando=1
     detener_servicios
+    detener_bus_sistema
     if [ -n "${hijo:-}" ]; then
         kill -TERM -- "-$hijo" 2>/dev/null || true
         for _ in $(seq 8); do
@@ -331,7 +369,8 @@ for i in $(seq $((TIEMPO_READY * 4))); do
             ;;
         socket-x11)
             encontrado=
-            for s in /tmp/.X11-unix/X*; do
+            # Solo el socket de nuestro display: un X0 viejo es (o lleva) al Xwayland de otra instancia.
+            for s in "/tmp/.X11-unix/X${VALOR_CONEXION_HOST#:}"; do
                 [ -S "$s" ] || continue
                 socket="${s##*/}:$(stat -c %i "$s" 2>/dev/null)"
                 case "$anteriores" in *" $socket "*) continue;; esac
