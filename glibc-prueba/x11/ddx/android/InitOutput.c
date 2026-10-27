@@ -30,6 +30,9 @@ from The Open Group.
 #include <dix-config.h>
 #endif
 
+/* API 31 (ASurfaceTransaction_setPosition/setScale) como símbolos débiles, igual que anfitrion.c: en Android 11 no existen */
+#define __ANDROID_UNAVAILABLE_SYMBOLS_ARE_WEAK__
+
 #if defined(WIN32)
 #include <X11/Xwinsock.h>
 #endif
@@ -70,6 +73,12 @@ from The Open Group.
 #include "damage.h"
 #include "windowstr.h"
 #include <android/native_window.h>
+#include <android/hardware_buffer.h>
+#include <android/surface_control.h>
+#include <pthread.h>
+#include <time.h>
+#include <sys/eventfd.h>
+#include <android/log.h>
 #include "android.h"
 #include <signal.h>
 
@@ -80,6 +89,7 @@ from The Open Group.
 #define VFB_DEFAULT_BLACKPIXEL    0
 #define VFB_DEFAULT_LINEBIAS      0
 #define XWD_WINDOW_NAME_LEN      60
+#define HAL_BGRA_8888 5
 
 typedef struct {
     int width;
@@ -97,6 +107,14 @@ typedef struct {
     Pixel whitePixel;
     unsigned int lineBias;
     CloseScreenProcPtr closeScreen;
+
+    /* B36: NORMAL_MEMORY_FB son tres AHardwareBuffer: uno bloqueado para dibujar (mapa[dibujo]), uno en pantalla y
+     * uno libre o por liberar. debe[i] es lo que a ese buffer le falta respecto al que se dibuja. */
+    AHardwareBuffer *ahb[3];
+    void *mapa[3];
+    RegionRec debe[3];
+    int dibujo;
+    int presente;               /* el último entregado a SurfaceFlinger; -1 si ninguno */
 
 #ifdef HAVE_MMAP
     int mmap_fd;
@@ -164,6 +182,8 @@ vfbBitsPerPixel(int depth)
 static void
 freeScreenInfo(vfbScreenInfoPtr pvfb)
 {
+    int i;
+
     switch (fbmemtype) {
 #ifdef HAVE_MMAP
     case MMAPPED_FILE_FB:
@@ -192,6 +212,14 @@ freeScreenInfo(vfbScreenInfoPtr pvfb)
 
     case NORMAL_MEMORY_FB:
         free(pvfb->pXWDHeader);
+        for (i = 0; i < 3; i++) {
+            if (pvfb->mapa[i])
+                AHardwareBuffer_unlock(pvfb->ahb[i], NULL);
+            if (pvfb->ahb[i])
+                AHardwareBuffer_release(pvfb->ahb[i]);
+            pvfb->ahb[i] = NULL;
+            pvfb->mapa[i] = NULL;
+        }
         break;
     }
 }
@@ -570,12 +598,53 @@ vfbAllocateSharedMemoryFramebuffer(vfbScreenInfoPtr pvfb)
 }
 #endif                          /* HAS_SHM */
 
+/* B36: los tres AHardwareBuffer de la pantalla, del tamaño del servidor. El stride que dice gralloc manda: de él
+ * salen paddedBytesWidth y paddedWidth. El primero queda bloqueado para que fb dibuje en él. */
+static Bool
+androidReservarPantalla(vfbScreenInfoPtr pvfb)
+{
+    AHardwareBuffer_Desc desc = {
+        .width = pvfb->width,
+        .height = pvfb->height,
+        .layers = 1,
+        .format = HAL_BGRA_8888,
+        .usage = AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN | AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN |
+                 AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE | AHARDWAREBUFFER_USAGE_COMPOSER_OVERLAY,
+    };
+    BoxRec todaLaPantalla = { 0, 0, pvfb->width, pvfb->height };
+    int i;
+
+    for (i = 0; i < 3; i++) {
+        if (AHardwareBuffer_allocate(&desc, &pvfb->ahb[i]) != 0) {
+            ErrorF("AHardwareBuffer_allocate %dx%d falló\n", pvfb->width, pvfb->height);
+            return FALSE;
+        }
+    }
+    AHardwareBuffer_describe(pvfb->ahb[0], &desc);
+    pvfb->paddedWidth = desc.stride;
+    pvfb->paddedBytesWidth = desc.stride * 4;
+    if (AHardwareBuffer_lock(pvfb->ahb[0], AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN |
+                             AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN, -1, NULL, &pvfb->mapa[0]) != 0) {
+        ErrorF("AHardwareBuffer_lock falló\n");
+        return FALSE;
+    }
+    pvfb->dibujo = 0;
+    pvfb->presente = -1;
+    /* los otros dos nacen sin contenido: les falta la pantalla entera */
+    RegionInit(&pvfb->debe[0], NULL, 0);
+    RegionInit(&pvfb->debe[1], &todaLaPantalla, 1);
+    RegionInit(&pvfb->debe[2], &todaLaPantalla, 1);
+    return TRUE;
+}
+
 static char *
 vfbAllocateFramebufferMemory(vfbScreenInfoPtr pvfb)
 {
     if (pvfb->pfbMemory)
         return pvfb->pfbMemory; /* already done */
 
+    if (fbmemtype == NORMAL_MEMORY_FB && !androidReservarPantalla(pvfb))
+        return NULL;
     pvfb->sizeInBytes = pvfb->paddedBytesWidth * pvfb->height;
 
     /* Calculate how many entries in colormap.  This is rather bogus, because
@@ -621,7 +690,9 @@ vfbAllocateFramebufferMemory(vfbScreenInfoPtr pvfb)
 #endif
 
     case NORMAL_MEMORY_FB:
-        pvfb->pXWDHeader = (XWDFileHeader *) malloc(pvfb->sizeInBytes);
+        /* solo la cabecera XWD y el mapa de colores; los píxeles están en los AHardwareBuffer */
+        pvfb->pXWDHeader = (XWDFileHeader *)
+            malloc(pvfb->sizeInBytes - (size_t) pvfb->paddedBytesWidth * pvfb->height);
         break;
     }
 
@@ -629,7 +700,8 @@ vfbAllocateFramebufferMemory(vfbScreenInfoPtr pvfb)
         pvfb->pXWDCmap = (XWDColor *) ((char *) pvfb->pXWDHeader
                                        + SIZEOF(XWDheader) +
                                        XWD_WINDOW_NAME_LEN);
-        pvfb->pfbMemory = (char *) (pvfb->pXWDCmap + pvfb->ncolors);
+        pvfb->pfbMemory = fbmemtype == NORMAL_MEMORY_FB ? pvfb->mapa[0] :
+            (char *) (pvfb->pXWDCmap + pvfb->ncolors);
 
         return pvfb->pfbMemory;
     }
@@ -719,14 +791,14 @@ static miPointerScreenFuncRec vfbPointerCursorFuncs = {
 };
 
 
-/* B11: la copia a la surface. Damage anota lo que dibujan los clientes y el block handler
- * (lo que corre antes de que el servidor duerma) copia solo esos rectángulos. */
+/* B11: la entrega a la surface. Damage anota lo que dibujan los clientes y el block handler
+ * (lo que corre antes de que el servidor duerma) entrega el AHardwareBuffer a SurfaceFlinger y pasa a dibujar en el
+ * otro, al que copia lo dibujado. */
 static ANativeWindow *ventana;
+static ASurfaceControl *capa;
 static DamagePtr danio;
 static Bool ventana_nueva;
 static WindowPtr tapa;
-
-#define HAL_BGRA_8888 5
 
 /* present/present_fake.c (parche): retiene los avisos de vblank mientras no hay ventana */
 void present_fake_pausar(Bool pausar);
@@ -764,68 +836,194 @@ androidTapar(Bool tapar)
         MapWindow(tapa, serverClient);
 }
 
+static pthread_mutex_t liberacion_mtx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t liberacion_cond = PTHREAD_COND_INITIALIZER;
+/* por buffer: SurfaceFlinger ya lo soltó (liberado) y con qué fence (-1: ya está libre) */
+static Bool liberado[3] = { TRUE, TRUE, TRUE };
+static int liberacion_fence[3] = { -1, -1, -1 };
+/* A lo más una transacción en vuelo: hasta su OnComplete el daño se acumula y no se entrega. Así el buffer libre
+ * siempre llegó ya y no se espera su fence. El OnComplete despierta al servidor por el eventfd `despertar`. */
+static Bool en_vuelo;
+static CARD32 en_vuelo_desde;
+static int despertar = -1;
+
 void
 androidVentana(ANativeWindow *nueva)
 {
-    vfbScreenInfoPtr pvfb = &vfbScreens[0];
-
     present_fake_pausar(nueva == NULL);
     androidTapar(nueva == NULL);
+    if (capa) {
+        ASurfaceTransaction *tr = ASurfaceTransaction_create();
+
+        ASurfaceTransaction_reparent(tr, capa, NULL);
+        ASurfaceTransaction_apply(tr);
+        ASurfaceTransaction_delete(tr);
+        ASurfaceControl_release(capa);
+        capa = NULL;
+        pthread_mutex_lock(&liberacion_mtx);
+        en_vuelo = FALSE;
+        pthread_mutex_unlock(&liberacion_mtx);
+    }
     if (ventana)
         ANativeWindow_release(ventana);
     ventana = nueva;
     ventana_nueva = TRUE;
-    if (ventana &&
-        ANativeWindow_setBuffersGeometry(ventana, pvfb->width, pvfb->height, HAL_BGRA_8888) != 0)
-        ANativeWindow_setBuffersGeometry(ventana, pvfb->width, pvfb->height,
-                                         WINDOW_FORMAT_RGBX_8888);
+    if (ventana)
+        capa = ASurfaceControl_createFromWindow(ventana, "x11");
 }
 
-/* Una fila [x1, x2) del framebuffer a la surface; BGRA va tal cual, RGBX necesita cambiar R y B. */
-static void
-androidFila(vfbScreenInfoPtr pvfb, ANativeWindow_Buffer *out, int y, int x1, int x2)
-{
-    const CARD32 *src = (CARD32 *) (pvfb->pfbMemory + (size_t) y * pvfb->paddedBytesWidth) + x1;
-    CARD32 *dst = (CARD32 *) out->bits + (size_t) y * out->stride + x1;
-    int x, w = x2 - x1;
+/* OnComplete corre en un hilo de binder: deja la release fence del buffer que esta transacción reemplazó
+ * (`anterior`) para que el block handler la recoja cuando vuelva a necesitarlo. */
+typedef struct {
+    ASurfaceControl *capa;
+    int anterior;
+} androidTransaccion;
 
-    if (out->format == HAL_BGRA_8888) {
-        memcpy(dst, src, w * 4);
+
+static void
+androidTransaccionCompleta(void *ctx, ASurfaceTransactionStats *stats)
+{
+    androidTransaccion *t = ctx;
+    int fence = ASurfaceTransactionStats_getPreviousReleaseFenceFd(stats, t->capa);
+
+    ASurfaceControl_release(t->capa);
+    pthread_mutex_lock(&liberacion_mtx);
+    if (t->anterior >= 0) {
+        if (liberacion_fence[t->anterior] >= 0)
+            close(liberacion_fence[t->anterior]);
+        liberacion_fence[t->anterior] = fence;
+        liberado[t->anterior] = TRUE;
+        pthread_cond_broadcast(&liberacion_cond);
+    }
+    else if (fence >= 0)
+        close(fence);
+    en_vuelo = FALSE;
+    pthread_mutex_unlock(&liberacion_mtx);
+    free(t);
+    if (despertar >= 0) {
+        uint64_t uno = 1;
+
+        (void) write(despertar, &uno, sizeof(uno));
+    }
+}
+
+/* Solo vacía el eventfd: despertar basta para que el block handler vuelva a correr y entregue lo pendiente. */
+static void
+androidDespertado(int fd, int ready, void *data)
+{
+    uint64_t n;
+
+    (void) read(fd, &n, sizeof(n));
+}
+
+/* La fence con la que SurfaceFlinger soltó el buffer i; -1 si ya está libre o no contestó a tiempo. Con tres buffers
+ * el aviso ya llegó en la transacción anterior y no se espera. */
+static int
+androidEsperarLiberacion(int i)
+{
+    struct timespec limite;
+    int fence;
+
+    clock_gettime(CLOCK_REALTIME, &limite);
+    limite.tv_nsec += 100 * 1000 * 1000;
+    if (limite.tv_nsec >= 1000000000) {
+        limite.tv_sec++;
+        limite.tv_nsec -= 1000000000;
+    }
+    pthread_mutex_lock(&liberacion_mtx);
+    if (!liberado[i]) {
+        CARD32 desde = GetTimeInMillis();
+
+        while (!liberado[i] && pthread_cond_timedwait(&liberacion_cond, &liberacion_mtx, &limite) == 0)
+            ;
+        /* con una sola transacción en vuelo no debería pasar: lo cuenta pruebas/x11/arrastre.sh */
+        __android_log_print(ANDROID_LOG_WARN, "x11", "esperó %u ms la liberación del buffer %d",
+                            (unsigned) (GetTimeInMillis() - desde), i);
+    }
+    fence = liberado[i] ? liberacion_fence[i] : -1;
+    liberacion_fence[i] = -1;
+    pthread_mutex_unlock(&liberacion_mtx);
+    return fence;
+}
+
+/* Copia las cajas de region del AHardwareBuffer `de` al `a` (ya bloqueado para escribir). */
+static void
+androidCopiarDanio(vfbScreenInfoPtr pvfb, int de, int a, RegionPtr region)
+{
+    BoxPtr cajas = RegionRects(region);
+    int i, n = RegionNumRects(region), y;
+    void *origen;
+
+    if (AHardwareBuffer_lock(pvfb->ahb[de], AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN, -1, NULL, &origen) != 0) {
+        ErrorF("AHardwareBuffer_lock (lectura) falló\n");
         return;
     }
-    for (x = 0; x < w; x++)
-        dst[x] = (src[x] & 0xff00ff00) | ((src[x] & 0xff) << 16) | ((src[x] >> 16) & 0xff);
+    for (i = 0; i < n; i++)
+        for (y = cajas[i].y1; y < cajas[i].y2; y++) {
+            size_t desde = (size_t) y * pvfb->paddedBytesWidth + (size_t) cajas[i].x1 * 4;
+
+            memcpy((char *) pvfb->mapa[a] + desde, (char *) origen + desde, (size_t) (cajas[i].x2 - cajas[i].x1) * 4);
+        }
+    AHardwareBuffer_unlock(pvfb->ahb[de], NULL);
 }
 
+/* Entrega el buffer en que se dibujó a SurfaceFlinger (estirado al tamaño de la ventana) y pasa a dibujar en el
+ * libre: el que no es el entregado ni el que esta transacción reemplaza. Ese ya llegó en el OnComplete anterior; solo
+ * se espera si no. Se le copia lo que le falta (debe[]). FALSE: no hay capa, no se tocó nada. */
 static Bool
-androidCopiar(vfbScreenInfoPtr pvfb, RegionPtr region)
+androidPresentar(vfbScreenInfoPtr pvfb, RegionPtr region)
 {
-    ANativeWindow_Buffer out;
-    ARect sucio;
-    BoxPtr cajas = RegionRects(region);
-    int i, n = RegionNumRects(region);
-    BoxPtr ext = RegionExtents(region);
+    ScreenPtr pScreen = screenInfo.screens[0];
+    int actual = pvfb->dibujo, anterior = pvfb->presente, libre = -1, i, w, h, fence;
+    ASurfaceTransaction *tr;
+    androidTransaccion *t;
 
-    sucio.left = ext->x1; sucio.top = ext->y1; sucio.right = ext->x2; sucio.bottom = ext->y2;
-    if (ANativeWindow_lock(ventana, &out, &sucio) != 0)
+    if (!capa || !ventana)
         return FALSE;
-    for (i = 0; i < n; i++) {
-        int y;
+    w = ANativeWindow_getWidth(ventana);
+    h = ANativeWindow_getHeight(ventana);
+    AHardwareBuffer_unlock(pvfb->ahb[actual], NULL);
+    pvfb->mapa[actual] = NULL;
+    for (i = 0; i < 3; i++)
+        if (i != actual)
+            RegionUnion(&pvfb->debe[i], &pvfb->debe[i], region);
 
-        if (cajas[i].x2 > out.width || cajas[i].y2 > out.height)
-            continue;
-        for (y = cajas[i].y1; y < cajas[i].y2; y++)
-            androidFila(pvfb, &out, y, cajas[i].x1, cajas[i].x2);
+    t = malloc(sizeof(*t));
+    ASurfaceControl_acquire(capa);
+    t->capa = capa;
+    t->anterior = anterior;
+    pthread_mutex_lock(&liberacion_mtx);
+    liberado[actual] = FALSE;
+    en_vuelo = TRUE;
+    en_vuelo_desde = GetTimeInMillis();
+    pthread_mutex_unlock(&liberacion_mtx);
+    tr = ASurfaceTransaction_create();
+    ASurfaceTransaction_setBuffer(tr, capa, pvfb->ahb[actual], -1);
+    ASurfaceTransaction_setCrop(tr, capa, &(ARect) { 0, 0, pvfb->width, pvfb->height });
+    if (ASurfaceTransaction_setScale) {
+        ASurfaceTransaction_setPosition(tr, capa, 0, 0);
+        ASurfaceTransaction_setScale(tr, capa, (float) w / pvfb->width, (float) h / pvfb->height);
     }
-    /* lock puede agrandar el rectángulo sucio: lo de fuera de lo que pedimos no lo conserva, hay que copiarlo */
-    if (sucio.left < ext->x1 || sucio.top < ext->y1 || sucio.right > ext->x2 || sucio.bottom > ext->y2) {
-        int y, x1 = max(sucio.left, 0), x2 = min(min(sucio.right, out.width), pvfb->width);
-        int y2 = min(min(sucio.bottom, out.height), pvfb->height);
+    ASurfaceTransaction_setBufferTransparency(tr, capa, ASURFACE_TRANSACTION_TRANSPARENCY_OPAQUE);
+    ASurfaceTransaction_setVisibility(tr, capa, ASURFACE_TRANSACTION_VISIBILITY_SHOW);
+    ASurfaceTransaction_setOnComplete(tr, t, androidTransaccionCompleta);
+    ASurfaceTransaction_apply(tr);
+    ASurfaceTransaction_delete(tr);
+    pvfb->presente = actual;
 
-        for (y = max(sucio.top, 0); y < y2 && x1 < x2; y++)
-            androidFila(pvfb, &out, y, x1, x2);
-    }
-    ANativeWindow_unlockAndPost(ventana);
+    for (i = 0; i < 3; i++)
+        if (i != actual && i != anterior && libre < 0)
+            libre = i;
+    fence = androidEsperarLiberacion(libre);
+    if (AHardwareBuffer_lock(pvfb->ahb[libre], AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN |
+                             AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN, fence, NULL, &pvfb->mapa[libre]) != 0)
+        FatalError("AHardwareBuffer_lock del buffer de dibujo falló\n");
+    androidCopiarDanio(pvfb, actual, libre, &pvfb->debe[libre]);
+    RegionEmpty(&pvfb->debe[libre]);
+    pvfb->dibujo = libre;
+    pvfb->pfbMemory = pvfb->mapa[libre];
+    pScreen->ModifyPixmapHeader(pScreen->GetScreenPixmap(pScreen), pvfb->width, pvfb->height, pvfb->depth,
+                                pvfb->bitsPerPixel, pvfb->paddedBytesWidth, pvfb->mapa[libre]);
     return TRUE;
 }
 
@@ -839,12 +1037,22 @@ androidDanioDestruido(DamagePtr d, void *closure)
     ventana_nueva = TRUE;
 }
 
+/* pScreen->BlockHandler que envuelve androidBlockHandler */
+static ScreenBlockHandlerProcPtr bloqueo_envuelto;
+
+/* Envuelve pScreen->BlockHandler y no es un block handler registrado: esos corren antes, y el cursor por software
+ * (misprite, que se engancha encima cuando lo necesita) se repinta aquí; entregando antes el cuadro salía sin cursor. */
 static void
-androidBlockHandler(void *blockData, void *timeout)
+androidBlockHandler(ScreenPtr pScreen, void *timeout)
 {
     vfbScreenInfoPtr pvfb = &vfbScreens[0];
-    ScreenPtr pScreen = screenInfo.screens[0];
     RegionRec todo;
+    Bool ocupado;
+
+    pScreen->BlockHandler = bloqueo_envuelto;
+    (*pScreen->BlockHandler) (pScreen, timeout);
+    bloqueo_envuelto = pScreen->BlockHandler;
+    pScreen->BlockHandler = androidBlockHandler;
 
     if (!danio) {
         if (!DamageSetup(pScreen))
@@ -854,7 +1062,13 @@ androidBlockHandler(void *blockData, void *timeout)
             return;
         DamageRegister(&pScreen->GetScreenPixmap(pScreen)->drawable, danio);
     }
-    if (!ventana)
+    if (!ventana || !capa)
+        return;
+    /* con una transacción en vuelo el daño sigue acumulándose; si su OnComplete no llega en 100 ms se da por perdida */
+    pthread_mutex_lock(&liberacion_mtx);
+    ocupado = en_vuelo && (CARD32) (GetTimeInMillis() - en_vuelo_desde) < 100;
+    pthread_mutex_unlock(&liberacion_mtx);
+    if (ocupado)
         return;
     if (ventana_nueva) {
         BoxRec todaLaPantalla = { 0, 0, pvfb->width, pvfb->height };
@@ -868,17 +1082,12 @@ androidBlockHandler(void *blockData, void *timeout)
     else
         return;
     DamageEmpty(danio);
-    /* si el lock falla (la surface anterior aún conectada) lo perdido se recupera copiando todo la próxima vez */
-    if (androidCopiar(pvfb, &todo))
+    /* sin capa nada salió: el cuadro completo queda pendiente */
+    if (androidPresentar(pvfb, &todo))
         ventana_nueva = FALSE;
     else
         ventana_nueva = TRUE;
     RegionUninit(&todo);
-}
-
-static void
-androidWakeupHandler(void *blockData, int result)
-{
 }
 
 static Bool
@@ -1039,12 +1248,15 @@ vfbScreenInit(ScreenPtr pScreen, int argc, char **argv)
     if (dpiy == 0)
         dpiy = 100;
 
-    pvfb->paddedBytesWidth = PixmapBytePad(pvfb->width, pvfb->depth);
     pvfb->bitsPerPixel = vfbBitsPerPixel(pvfb->depth);
-    if (pvfb->bitsPerPixel >= 8)
-        pvfb->paddedWidth = pvfb->paddedBytesWidth / (pvfb->bitsPerPixel / 8);
-    else
-        pvfb->paddedWidth = pvfb->paddedBytesWidth * 8;
+    /* tras un reinicio del servidor el framebuffer ya existe y su stride es el de gralloc: no se recalcula */
+    if (!pvfb->pfbMemory) {
+        pvfb->paddedBytesWidth = PixmapBytePad(pvfb->width, pvfb->depth);
+        if (pvfb->bitsPerPixel >= 8)
+            pvfb->paddedWidth = pvfb->paddedBytesWidth / (pvfb->bitsPerPixel / 8);
+        else
+            pvfb->paddedWidth = pvfb->paddedBytesWidth * 8;
+    }
     pbits = vfbAllocateFramebufferMemory(pvfb);
     if (!pbits)
         return FALSE;
@@ -1112,7 +1324,11 @@ vfbScreenInit(ScreenPtr pScreen, int argc, char **argv)
 
     miDCInitialize(pScreen, &vfbPointerCursorFuncs);
 
-    if (!RegisterBlockAndWakeupHandlers(androidBlockHandler, androidWakeupHandler, NULL))
+    bloqueo_envuelto = pScreen->BlockHandler;
+    pScreen->BlockHandler = androidBlockHandler;
+    if (despertar < 0)
+        despertar = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+    if (despertar < 0 || !SetNotifyFd(despertar, androidDespertado, X_NOTIFY_READ, NULL))
         return FALSE;
 
     vfbWriteXWDFileHeader(pScreen);
