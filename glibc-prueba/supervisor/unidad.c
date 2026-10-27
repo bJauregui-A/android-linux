@@ -81,6 +81,19 @@ static void agregar_pre(Unidad *u, const char *cmd, int ignorar_error) {
              len ? " && " : "", cmd);
 }
 
+// Sin systemd no corre sshdgenkeys.service: las claves de host que falten se crean antes que nada (también antes
+// del "sshd -t" de Debian, que falla sin ellas).
+static void anteponer_claves_ssh(Unidad *u) {
+    char resto[CMD_MAX];
+    snprintf(resto, sizeof(resto), "%s", u->exec_pre);
+    u->exec_pre[0] = '\0';
+    agregar_pre(u, "ssh-keygen -A", 1);
+    if (resto[0]) {
+        size_t len = strlen(u->exec_pre);
+        snprintf(u->exec_pre + len, sizeof(u->exec_pre) - len, " && %s", resto);
+    }
+}
+
 // Demonios que por defecto se bifurcan: se fuerzan a primer plano bajo el supervisor.
 static void adaptar_primer_plano(Unidad *u) {
     const char *extra = NULL;
@@ -89,9 +102,9 @@ static void adaptar_primer_plano(Unidad *u) {
     } else if ((strcmp(u->nombre, "httpd") == 0 || strcmp(u->nombre, "apache2") == 0)
                && !strstr(u->exec_start, "-DFOREGROUND")) {
         extra = " -DFOREGROUND";
-    } else if ((strcmp(u->nombre, "sshd") == 0 || strcmp(u->nombre, "ssh") == 0)
-               && !strstr(u->exec_start, " -D")) {
-        extra = " -D";
+    } else if (strcmp(u->nombre, "sshd") == 0 || strcmp(u->nombre, "ssh") == 0) {
+        anteponer_claves_ssh(u);
+        if (!strstr(u->exec_start, " -D")) extra = " -D";
     }
     if (extra) strncat(u->exec_start, extra, sizeof(u->exec_start) - strlen(u->exec_start) - 1);
 }
