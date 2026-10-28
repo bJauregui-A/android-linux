@@ -12,6 +12,7 @@ set -e
 cd "$(dirname "$0")/.."
 PKG=dev.ben4shot.glibcprueba.${1:-sdk36}
 mkdir -p trabajo
+adb get-state >/dev/null 2>&1 || { echo "adb: no hay teléfono conectado" >&2; exit 3; }
 if [ "$2" = --de ]; then
   inst=$3; shift 3
   [ -n "$inst" ] && [ $# -gt 0 ] && [ -f trabajo/compilados.tar ] || { echo "uso: $0 sdk36 --de <instancia> <nombre>... (necesita trabajo/compilados.tar)" >&2; exit 2; }

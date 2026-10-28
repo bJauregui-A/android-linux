@@ -21,6 +21,9 @@ mkdir -p "$T/tel/files/instancias/inst-1/home/user/turnip-x11/include"; echo h >
 # corre el resto en la carpeta de la app
 cat > "$T/bin/adb" <<'A'
 #!/usr/bin/bash
+# get-state: "device", o falla si se pide sin teléfono (SIN_TELEFONO=1)
+[ "$1" = get-state ] && { [ -z "$SIN_TELEFONO" ] && echo device; [ -z "$SIN_TELEFONO" ]; exit; }
+[ -z "$SIN_TELEFONO" ] || exit 1
 [ "$1" = exec-out ] || exit 1
 shift; linea="$*"
 [[ $linea == "run-as "* ]] || exit 1
@@ -41,5 +44,10 @@ cp "$T/repo/trabajo/compilados.tar" "$T/antes.tar"
 caso "sin --de ni files/archlinux sale con error"  '[ $rc -ne 0 ]'
 caso "sin --de ni files/archlinux sugiere --de"  'grep -q -- "--de" "$T/salida" || { cat "$T/salida"; false; }'
 caso "sin --de ni files/archlinux compilados.tar sigue igual"  'cmp -s "$T/antes.tar" "$T/repo/trabajo/compilados.tar"'
+# Sin teléfono conectado: lo dice (no culpa a files/archlinux) y no toca compilados.tar
+(cd "$T/repo" && SIN_TELEFONO=1 TEL=$T/tel PATH="$T/bin:$PATH" apk/traer-compilados.sh sdk36 > "$T/salida" 2>&1); rc=$?
+caso "sin teléfono sale con error"  '[ $rc -ne 0 ]'
+caso "sin teléfono dice que no hay teléfono conectado"  'grep -q "no hay teléfono conectado" "$T/salida" || { cat "$T/salida"; false; }'
+caso "sin teléfono compilados.tar sigue igual"  'cmp -s "$T/antes.tar" "$T/repo/trabajo/compilados.tar"'
 echo "fallas: $fallas"
 [ $fallas -eq 0 ]
