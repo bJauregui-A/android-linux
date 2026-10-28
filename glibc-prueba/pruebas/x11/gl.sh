@@ -50,13 +50,73 @@ px = [xcb.xcb_get_image_data(r)[i] & 0xffffff for i in range(n * n)]
 print("%06x %08x" % (max(px), zlib.crc32(bytes(str(px), "ascii"))))
 PY
 }
+# Pide a xfwm4 pantalla completa (_NET_WM_STATE) y escucha los PresentCompleteNotify de la ventana (cualquier cliente
+# puede): imprime el modo de cada cuadro entregado después, "copia", "flip", "salto" o "copia-subóptima".
+modos_pantalla_completa() { python3 - "$ventana" <<'PY'
+import ctypes, sys, time
+xcb = ctypes.CDLL("libxcb.so.1"); pres = ctypes.CDLL("libxcb-present.so.0")
+class Cookie(ctypes.Structure): _fields_ = [("sequence", ctypes.c_uint)]
+class Atom(ctypes.Structure): _fields_ = [("rt", ctypes.c_uint8), ("pad", ctypes.c_uint8), ("seq", ctypes.c_uint16),
+                                           ("len", ctypes.c_uint32), ("atom", ctypes.c_uint32)]
+xcb.xcb_connect.restype = ctypes.c_void_p
+xcb.xcb_connect.argtypes = [ctypes.c_char_p, ctypes.c_void_p]
+xcb.xcb_get_setup.restype = ctypes.c_void_p
+xcb.xcb_get_setup.argtypes = [ctypes.c_void_p]
+class Iter(ctypes.Structure): _fields_ = [("data", ctypes.POINTER(ctypes.c_uint32)), ("rem", ctypes.c_int),
+                                           ("index", ctypes.c_int)]  # data: xcb_screen_t*, root es su primer campo
+xcb.xcb_setup_roots_iterator.restype = Iter
+xcb.xcb_setup_roots_iterator.argtypes = [ctypes.c_void_p]
+xcb.xcb_intern_atom.restype = Cookie
+xcb.xcb_intern_atom.argtypes = [ctypes.c_void_p, ctypes.c_uint8, ctypes.c_uint16, ctypes.c_char_p]
+xcb.xcb_intern_atom_reply.restype = ctypes.POINTER(Atom)
+xcb.xcb_intern_atom_reply.argtypes = [ctypes.c_void_p, Cookie, ctypes.c_void_p]
+xcb.xcb_send_event.argtypes = [ctypes.c_void_p, ctypes.c_uint8, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_char_p]
+xcb.xcb_generate_id.argtypes = [ctypes.c_void_p]
+xcb.xcb_flush.argtypes = [ctypes.c_void_p]
+xcb.xcb_poll_for_event.restype = ctypes.POINTER(ctypes.c_uint8 * 32)
+xcb.xcb_poll_for_event.argtypes = [ctypes.c_void_p]
+pres.xcb_present_select_input.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32]
+c = xcb.xcb_connect(None, None)
+w = int(sys.argv[1], 16) if len(sys.argv) > 1 and sys.argv[1] else 0
+if not w: sys.exit()
+root = xcb.xcb_setup_roots_iterator(xcb.xcb_get_setup(c)).data[0]
+atomo = lambda n: xcb.xcb_intern_atom_reply(c, xcb.xcb_intern_atom(c, 0, len(n), n), None).contents.atom
+estado, completa = atomo(b"_NET_WM_STATE"), atomo(b"_NET_WM_STATE_FULLSCREEN")
+ev = (bytes([33, 32, 0, 0]) + w.to_bytes(4, "little") + estado.to_bytes(4, "little") +
+      b"".join(v.to_bytes(4, "little") for v in (1, completa, 0, 1, 0)))  # ClientMessage: _NET_WM_STATE_ADD
+xcb.xcb_send_event(c, 0, root, (1 << 19) | (1 << 20), ev)                 # SubstructureNotify | SubstructureRedirect
+xcb.xcb_flush(c)
+time.sleep(1)                                                              # que el gestor la agrande
+pres.xcb_present_select_input(c, xcb.xcb_generate_id(c), w, 2)            # PresentCompleteNotifyMask
+xcb.xcb_flush(c)
+nombres = {0: "copia", 1: "flip", 2: "salto", 3: "copia-subóptima"}
+modos, fin = [], time.time() + 3
+while time.time() < fin and len(modos) < 60:
+    e = xcb.xcb_poll_for_event(c)
+    if not e: time.sleep(0.01); continue
+    b = bytes(e.contents)
+    # GenericEvent de Present: event_type (u16) en 8, kind en 10 (0: pixmap) y mode en 11
+    if b[0] & 0x7f == 35 and int.from_bytes(b[8:10], "little") == 1 and b[10] == 0:
+        modos.append(nombres.get(b[11], "otro"))
+print(" ".join(modos))
+PY
+}
 uno=$(leer_centro); sleep 1; dos=$(leer_centro)
-sleep 5; kill $pid 2>/dev/null; wait $pid 2>/dev/null
+# El compositor de xfwm4 deja redirigida la ventana a pantalla completa y Present copia: se apaga mientras se mide y
+# se deja como estaba
+compositor=$(xfconf-query -c xfwm4 -p /general/use_compositing 2>/dev/null)
+[ "$compositor" = true ] && { trap 'xfconf-query -c xfwm4 -p /general/use_compositing -s true' EXIT
+                              xfconf-query -c xfwm4 -p /general/use_compositing -s false; sleep 1; }
+modos=$(modos_pantalla_completa)
+[ "$compositor" = true ] && { xfconf-query -c xfwm4 -p /general/use_compositing -s true; trap - EXIT; }
+sleep 2; kill $pid 2>/dev/null; wait $pid 2>/dev/null
 echo "      ventana es2gears: ${ventana:-ninguna}; centro (más claro, crc): $uno / $dos"
 grep -m1 "FPS" "$d/gl.log" | sed 's/^/      /'
 caso "hay una ventana es2gears"  '[ -n "$ventana" ]'
 caso "el centro cambia de un segundo al siguiente (los engranajes giran)"  '[[ $uno =~ ^[0-9a-f]{6}\ [0-9a-f]{8}$ ]] && [ "${uno#* }" != "${dos#* }" ]'
 caso "EGL no cae al camino sin DRI3 (sin \"DRI3 error\")"  '! grep -q "DRI3 error" "$d/gl.log"'
+echo "      a pantalla completa, modos: $(tr ' ' '\n' <<<"$modos" | sort | uniq -c | tr '\n' ' ')"
+caso "a pantalla completa los cuadros de es2gears se entregan por flip"  '[ -n "$modos" ] && [ "${modos##* }" = flip ]'
 renderer=$(con-gpu eglinfo -p x11 2>/dev/null | grep -m1 "OpenGL ES profile renderer")
 echo "      ${renderer:-sin renderer}"
 caso "el renderer es Zink sobre Turnip"  'grep -q "zink.*Turnip" <<<"$renderer"'

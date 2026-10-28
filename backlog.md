@@ -145,10 +145,12 @@ Escritorios del instalador oficial que todavía no tenemos. Cada uno deja de ser
 - **B33** · Capturar el mouse en juegos y apps 3D (movimiento relativo)
 - **B34** · Teclado de Android con autocorrector y predicción en apps Linux
 - **B35** · Lápiz con presión e inclinación (Krita, Xournal++)
-- **B36** · OpenGL por GPU en X11 sin copias a la CPU
-  - Firefox en XFCE X11 hoy dibuja el contenido de la ventana vacío con rayas (los menús salen bien) y avisa `MESA-EGL: DRI3 error`: el servidor no tiene DRI3.
-  - Pasar a `AHardwareBuffer` + `ASurfaceTransaction` en el DDX.
-  - GLX o DRI3 sobre la GPU.
+- **B87** · Juegos y videos a pantalla completa en XFCE X11 sin copia, con el compositor de xfwm4 encendido
+  - Hoy xfwm4 deja redirigida una ventana administrada a pantalla completa (aunque tenga `unredirect_overlays` o `_NET_WM_BYPASS_COMPOSITOR`) y Present la entrega por copia; sin compositor va por flip (B36).
+  - Averiguar qué le falta a xfwm4 para sacarla del compositor y arreglarlo (ajuste o parche).
+- **B88** · OpenGL y Vulkan por GPU sin copias a la CPU en Xwayland (sway y los demás escritorios Wayland)
+  - Hoy Xwayland no tiene DRI3 (sin dispositivo DRM no hay glamor): GL va por drisw y Vulkan por el camino sw del WSI, y cada cuadro se copia a la CPU. En X11 directo ya no (B36).
+  - Darle a Xwayland DRI3 con buffers AHardwareBuffer, sobre `android_ahb_v1`, o llevar las apps X11 de esos escritorios al servidor X de la app.
 - **B37** · Cada ventana Linux es una ventana de Android (recientes, pantalla dividida, flotantes)
 - **B38** · Cursor de tamaño legible en el teléfono
 - **B39** · Notificaciones, abrir enlaces y `/sdcard` en todos los escritorios, no solo en sway
