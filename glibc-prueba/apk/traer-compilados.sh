@@ -4,7 +4,7 @@
 #   ~/wlroots ~/sway ~/turnip ~/turnip-x11 ~/mesa-gl (sin include/) y /opt/gtk2 (sin include/)
 # Volver a correrlo después de recompilar algo de eso en el teléfono.
 #   apk/traer-compilados.sh [sdk36]
-# files/archlinux ya no existe en los teléfonos con instancias: con --de se reemplazan solo esos componentes del
+# files/archlinux ya no existe en los teléfonos con instancias (sin él, sin --de falla sin tocar nada): con --de se reemplazan solo esos componentes del
 # compilados.tar que ya hay, tomándolos de una instancia (compilados con prefijo /home/user/<nombre>: capa.py solo
 # reescribe /home/user/ → /usr/local/).
 #   apk/traer-compilados.sh sdk36 --de <instancia> <nombre>...     p. ej.  --de arch-debian-38075 turnip-x11
@@ -25,6 +25,11 @@ if [ "$2" = --de ]; then
   mv trabajo/compilados.tar.part trabajo/compilados.tar
   echo "trabajo/compilados.tar: $(du -h trabajo/compilados.tar | cut -f1) ($* de $inst)"
   exit 0
+fi
+if [ "$(adb exec-out "run-as $PKG sh -c '[ -d files/archlinux ] && echo si'")" != si ]; then
+  echo "el teléfono no tiene files/archlinux (lo compilado vive en las instancias): usar" >&2
+  echo "  $0 ${1:-sdk36} --de <instancia> <nombre>...     p. ej.  --de arch-debian-38075 turnip-x11" >&2
+  exit 1
 fi
 adb exec-out "run-as $PKG sh -c 'cd files/archlinux && tar -cf - --exclude=include \
   home/user/wlroots home/user/sway home/user/turnip home/user/turnip-x11 home/user/mesa-gl opt/gtk2'" \

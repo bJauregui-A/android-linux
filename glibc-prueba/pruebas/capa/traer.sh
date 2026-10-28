@@ -35,5 +35,11 @@ caso "turnip-x11 es el de la instancia"  '[ "$(tar -xOf "$T/repo/trabajo/compila
 caso "no quedan archivos viejos de turnip-x11"  '! grep -q "turnip-x11/lib/sobra.so" <<<"$lista"'
 caso "sin include/"  '! grep -q "turnip-x11/include" <<<"$lista"'
 caso "lo demás (sway) sigue igual"  '[ "$(tar -xOf "$T/repo/trabajo/compilados.tar" home/user/sway/bin/sway)" = sway ]'
+# Sin --de, en un teléfono sin files/archlinux: falla, dice que se use --de y no toca el compilados.tar que hay
+cp "$T/repo/trabajo/compilados.tar" "$T/antes.tar"
+(cd "$T/repo" && TEL=$T/tel PATH="$T/bin:$PATH" apk/traer-compilados.sh sdk36 > "$T/salida" 2>&1); rc=$?
+caso "sin --de ni files/archlinux sale con error"  '[ $rc -ne 0 ]'
+caso "sin --de ni files/archlinux sugiere --de"  'grep -q -- "--de" "$T/salida" || { cat "$T/salida"; false; }'
+caso "sin --de ni files/archlinux compilados.tar sigue igual"  'cmp -s "$T/antes.tar" "$T/repo/trabajo/compilados.tar"'
 echo "fallas: $fallas"
 [ $fallas -eq 0 ]
