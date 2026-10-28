@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-# B11: la configuración de meson que usa x11/compilar.sh deja apagados GLX, DRI, MIT-SHM, XDMCP, TCP y el
+# B11: la configuración de meson que usa x11/compilar.sh deja apagados GLX, DRI1/2, MIT-SHM, XDMCP, TCP y el
 # socket abstracto, y el servidor toma las carpetas del socket y del lock que le pasa la app (parches de
 # xtrans y de os/utils.c; sin ellas, las de siempre).
 # Corre en el PC:  pruebas/x11/configuracion.sh
@@ -15,7 +15,11 @@ opcion() { meson introspect --buildoptions "$B" | python3 -c "
 import json,sys
 print(next(o['value'] for o in json.load(sys.stdin) if o['name']=='$1'))"; }
 
-for o in glx dri1 dri2 dri3 mitshm xdmcp listen_tcp listen_local; do
+# B36: DRI3 se enciende (los clientes reciben por él los dmabuf de AHardwareBuffer que reserva el servidor); GLX, DRI1/2,
+# MIT-SHM y glamor siguen apagados.
+caso "opción dri3 encendida"  "[ \"\$(opcion dri3)\" = True ] || [ \"\$(opcion dri3)\" = true ]"
+caso "dix-config.h con DRI3"  "grep -qE '^#define DRI3 1' $CFG"
+for o in glx dri1 dri2 mitshm glamor xdmcp listen_tcp listen_local; do
   caso "opción $o apagada"  "[ \"\$(opcion $o)\" = False ] || [ \"\$(opcion $o)\" = false ]"
 done
 caso "opción listen_unix encendida"  "[ \"\$(opcion listen_unix)\" = True ] || [ \"\$(opcion listen_unix)\" = true ]"

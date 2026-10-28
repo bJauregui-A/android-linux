@@ -36,5 +36,11 @@ caso "todo lo de salida/ se llama lib<nombre>.so (jniLibs no extrae otros nombre
 # libX11 sin xlocale dejaba _Xi18n_lock sin definir y xkbcomp no enlazaba en el teléfono (CANNOT LINK EXECUTABLE)
 [ -f x11/salida/libX11.so ] && caso "libX11.so no deja sin definir símbolos propios (_X*)"  '! nm -D --undefined-only x11/salida/libX11.so | grep -q " _X"'
 
+# B36: DRI3 necesita xshmfence (las fences de Present entre cliente y servidor)
+case " $OBJETIVOS " in *" xserver "*)
+  caso "libxserver.so usa xshmfence y va junto a ella en salida/"  \
+    'necesarias x11/salida/libxserver.so | grep -qx "libxshmfence.so" && [ -f x11/salida/libxshmfence.so ]' ;;
+esac
+
 echo "fallas: $fallas"
 [ $fallas -eq 0 ]

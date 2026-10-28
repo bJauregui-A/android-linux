@@ -79,6 +79,15 @@ from The Open Group.
 #include <time.h>
 #include <sys/eventfd.h>
 #include <android/log.h>
+#include <sys/socket.h>
+#include <drm_fourcc.h>
+#include "dri3.h"
+#include "misyncshm.h"
+#include "present.h"
+#include <X11/extensions/presentproto.h>
+#include "extnsionst.h"
+#include <linux/dma-buf.h>
+#include <sys/ioctl.h>
 #include "android.h"
 #include <signal.h>
 
@@ -802,6 +811,11 @@ static WindowPtr tapa;
 
 /* present/present_fake.c (parche): retiene los avisos de vblank mientras no hay ventana */
 void present_fake_pausar(Bool pausar);
+/* present/present_priv.h: el vblank falso (un temporizador a 60 Hz) que también usa el flip */
+int present_fake_get_ust_msc(ScreenPtr screen, uint64_t *ust, uint64_t *msc);
+int present_fake_queue_vblank(ScreenPtr screen, uint64_t event_id, uint64_t msc);
+void present_fake_abort_vblank(ScreenPtr screen, uint64_t event_id, uint64_t msc);
+static RRCrtcPtr android_crtc;
 
 /* Sin ventana, una ventana del servidor encima de todo: las demás quedan tapadas, su dibujo se recorta a nada y
  * reciben VisibilityNotify (para lo que no espera a Present, como Openbox sin compositor). Fondo None: no pinta nada
@@ -846,6 +860,11 @@ static int liberacion_fence[3] = { -1, -1, -1 };
 static Bool en_vuelo;
 static CARD32 en_vuelo_desde;
 static int despertar = -1;
+/* B36: flip de Present. La ventana a pantalla completa va en una capa hija con el AHardwareBuffer de su pixmap (sin
+ * copia). flip_listo: el event_id cuyo OnComplete llegó y aún no se avisa a Present (se avisa en el hilo principal). */
+static ASurfaceControl *capa_flip;
+static uint64_t flip_listo;
+static Bool hay_flip_listo;
 
 void
 androidVentana(ANativeWindow *nueva)
@@ -858,6 +877,10 @@ androidVentana(ANativeWindow *nueva)
         ASurfaceTransaction_reparent(tr, capa, NULL);
         ASurfaceTransaction_apply(tr);
         ASurfaceTransaction_delete(tr);
+        if (capa_flip) {
+            ASurfaceControl_release(capa_flip);
+            capa_flip = NULL;
+        }
         ASurfaceControl_release(capa);
         capa = NULL;
         pthread_mutex_lock(&liberacion_mtx);
@@ -911,9 +934,19 @@ androidTransaccionCompleta(void *ctx, ASurfaceTransactionStats *stats)
 static void
 androidDespertado(int fd, int ready, void *data)
 {
-    uint64_t n;
+    uint64_t n, ust, msc, id;
+    Bool avisar;
 
     (void) read(fd, &n, sizeof(n));
+    pthread_mutex_lock(&liberacion_mtx);
+    avisar = hay_flip_listo;
+    id = flip_listo;
+    hay_flip_listo = FALSE;
+    pthread_mutex_unlock(&liberacion_mtx);
+    if (avisar) {
+            present_fake_get_ust_msc(screenInfo.screens[0], &ust, &msc);
+        present_event_notify(id, ust, msc);
+    }
 }
 
 /* La fence con la que SurfaceFlinger soltó el buffer i; -1 si ya está libre o no contestó a tiempo. Con tres buffers
@@ -1037,6 +1070,8 @@ androidDanioDestruido(DamagePtr d, void *closure)
     ventana_nueva = TRUE;
 }
 
+static void androidEnvolverPresent(void);
+
 /* pScreen->BlockHandler que envuelve androidBlockHandler */
 static ScreenBlockHandlerProcPtr bloqueo_envuelto;
 
@@ -1049,6 +1084,7 @@ androidBlockHandler(ScreenPtr pScreen, void *timeout)
     RegionRec todo;
     Bool ocupado;
 
+    androidEnvolverPresent();
     pScreen->BlockHandler = bloqueo_envuelto;
     (*pScreen->BlockHandler) (pScreen, timeout);
     bloqueo_envuelto = pScreen->BlockHandler;
@@ -1088,6 +1124,391 @@ androidBlockHandler(ScreenPtr pScreen, void *timeout)
     else
         ventana_nueva = TRUE;
     RegionUninit(&todo);
+}
+
+/* B36: DRI3. No hay nodo DRM (DRI3Open da BadMatch, que el WSI X11 de Mesa toma como "dispositivo compatible") y la NDK
+ * no deja convertir un dmabuf ajeno en AHardwareBuffer: PixmapFromBuffers se rechaza. Al revés, como android_ahb_v1 en
+ * Wayland: el cliente crea un pixmap y pide BuffersFromPixmap; el servidor le pone debajo un AHardwareBuffer (con su
+ * contenido) y le da el dmabuf. fb sigue dibujando en él por el mapa bloqueado. */
+typedef struct {
+    AHardwareBuffer *ahb;
+    void *mapa;
+    int fd;                     /* el dmabuf; al cliente va una copia (DRI3 cierra la que envía) */
+    uint32_t stride;            /* en bytes */
+} androidPixmapAhb;
+
+static DevPrivateKeyRec pixmap_ahb_key;
+static DestroyPixmapProcPtr destruir_pixmap_envuelto;
+
+/* El dmabuf de un AHardwareBuffer: la API pública solo lo entrega serializado por un socket (como en anfitrion.c). Con
+ * gralloc de Qualcomm el primer fd es el buffer y el segundo, los metadatos. */
+static int
+androidFdDeAhb(AHardwareBuffer *ahb)
+{
+    int sv[2], fd = -1;
+
+    if (socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, sv) != 0)
+        return -1;
+    if (AHardwareBuffer_sendHandleToUnixSocket(ahb, sv[0]) == 0) {
+        uint32_t datos[256];
+        char control[CMSG_SPACE(16 * sizeof(int))];
+        struct iovec iov = { datos, sizeof(datos) };
+        struct msghdr msg = { .msg_iov = &iov, .msg_iovlen = 1, .msg_control = control,
+                              .msg_controllen = sizeof(control) };
+        ssize_t n = recvmsg(sv[1], &msg, MSG_CMSG_CLOEXEC);
+        struct cmsghdr *cm = n > 0 ? CMSG_FIRSTHDR(&msg) : NULL;
+
+        if (cm && cm->cmsg_type == SCM_RIGHTS) {
+            int i, nfds = (cm->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+            int *fds = (int *) CMSG_DATA(cm);
+
+            fd = fds[0];
+            for (i = 1; i < nfds; i++)
+                close(fds[i]);
+        }
+    }
+    close(sv[0]);
+    close(sv[1]);
+    return fd;
+}
+
+/* El AHardwareBuffer del pixmap; si no tiene, se le pone uno con su contenido. NULL si el pixmap no es de 32 bpp. */
+static androidPixmapAhb *
+androidPixmapConAhb(PixmapPtr pixmap)
+{
+    ScreenPtr pScreen = pixmap->drawable.pScreen;
+    androidPixmapAhb *p = dixLookupPrivate(&pixmap->devPrivates, &pixmap_ahb_key);
+    AHardwareBuffer_Desc desc = {
+        .width = pixmap->drawable.width, .height = pixmap->drawable.height, .layers = 1,
+        .format = HAL_BGRA_8888,
+        .usage = AHARDWAREBUFFER_USAGE_GPU_COLOR_OUTPUT | AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE |
+                 AHARDWAREBUFFER_USAGE_COMPOSER_OVERLAY |
+                 AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN | AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN,
+    };
+    int y, ancho = pixmap->drawable.width * 4;
+
+    if (p)
+        return p;
+    if (pixmap->drawable.bitsPerPixel != 32 || !desc.width || !desc.height)
+        return NULL;
+    p = calloc(1, sizeof(*p));
+    if (!p)
+        return NULL;
+    if (AHardwareBuffer_allocate(&desc, &p->ahb) != 0) {
+        free(p);
+        return NULL;
+    }
+    AHardwareBuffer_describe(p->ahb, &desc);
+    p->stride = desc.stride * 4;
+    p->fd = androidFdDeAhb(p->ahb);
+    if (p->fd < 0 || AHardwareBuffer_lock(p->ahb, AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN |
+                                          AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN, -1, NULL, &p->mapa) != 0) {
+        if (p->fd >= 0)
+            close(p->fd);
+        AHardwareBuffer_release(p->ahb);
+        free(p);
+        return NULL;
+    }
+    for (y = 0; y < pixmap->drawable.height; y++)
+        memcpy((char *) p->mapa + (size_t) y * p->stride,
+               (char *) pixmap->devPrivate.ptr + (size_t) y * pixmap->devKind, ancho);
+    /* Lo copiado queda en la caché de la CPU: sin volcarlo, esas líneas pueden escribirse a la memoria después de que el
+     * cliente dibuje y pisar su cuadro. unlock lo vuelca; se vuelve a bloquear (el mapa puede cambiar). */
+    if (AHardwareBuffer_unlock(p->ahb, NULL) != 0 ||
+        AHardwareBuffer_lock(p->ahb, AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN | AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN, -1,
+                             NULL, &p->mapa) != 0) {
+        close(p->fd);
+        AHardwareBuffer_release(p->ahb);
+        free(p);
+        return NULL;
+    }
+    /* la memoria de fb va pegada al pixmap y se libera con él */
+    pScreen->ModifyPixmapHeader(pixmap, 0, 0, 0, 0, p->stride, p->mapa);
+    dixSetPrivate(&pixmap->devPrivates, &pixmap_ahb_key, p);
+    return p;
+}
+
+static Bool
+androidDestruirPixmap(PixmapPtr pixmap)
+{
+    ScreenPtr pScreen = pixmap->drawable.pScreen;
+    androidPixmapAhb *p = dixLookupPrivate(&pixmap->devPrivates, &pixmap_ahb_key);
+    Bool ret;
+
+    if (p && pixmap->refcnt == 1) {
+        AHardwareBuffer_unlock(p->ahb, NULL);
+        AHardwareBuffer_release(p->ahb);
+        close(p->fd);
+        free(p);
+        dixSetPrivate(&pixmap->devPrivates, &pixmap_ahb_key, NULL);
+    }
+    pScreen->DestroyPixmap = destruir_pixmap_envuelto;
+    ret = (*pScreen->DestroyPixmap) (pixmap);
+    destruir_pixmap_envuelto = pScreen->DestroyPixmap;
+    pScreen->DestroyPixmap = androidDestruirPixmap;
+    return ret;
+}
+
+static int
+androidFdsDePixmap(ScreenPtr pScreen, PixmapPtr pixmap, int *fds, uint32_t *strides, uint32_t *offsets,
+                   uint64_t *modifier)
+{
+    androidPixmapAhb *p = androidPixmapConAhb(pixmap);
+
+    if (!p || (fds[0] = dup(p->fd)) < 0)
+        return 0;
+    strides[0] = p->stride;
+    offsets[0] = 0;
+    *modifier = DRM_FORMAT_MOD_LINEAR;
+    return 1;
+}
+
+static int
+androidFdDePixmap(ScreenPtr pScreen, PixmapPtr pixmap, CARD16 *stride, CARD32 *size)
+{
+    androidPixmapAhb *p = androidPixmapConAhb(pixmap);
+
+    if (!p || p->stride > 0xffff)
+        return -1;
+    *stride = p->stride;
+    *size = p->stride * pixmap->drawable.height;
+    return dup(p->fd);
+}
+
+/* Un dmabuf ajeno no se puede mostrar sin leerlo con la CPU: el cliente debe pedir los buffers del servidor. */
+static PixmapPtr
+androidPixmapDeFds(ScreenPtr pScreen, CARD8 num_fds, const int *fds, CARD16 width, CARD16 height,
+                   const CARD32 *strides, const CARD32 *offsets, CARD8 depth, CARD8 bpp, CARD64 modifier)
+{
+    return NULL;
+}
+
+static PixmapPtr
+androidPixmapDeFd(ScreenPtr pScreen, int fd, CARD16 width, CARD16 height, CARD16 stride, CARD8 depth, CARD8 bpp)
+{
+    return NULL;
+}
+
+/* BGRA en memoria: ARGB8888 / XRGB8888 de DRM. dri3 guarda el arreglo de formatos en su caché; el de modificadores
+ * lo libera él. */
+static int
+androidFormatos(ScreenPtr pScreen, CARD32 *num_formats, CARD32 **formats)
+{
+    static CARD32 formatos[] = { DRM_FORMAT_ARGB8888, DRM_FORMAT_XRGB8888 };
+
+    *num_formats = ARRAY_SIZE(formatos);
+    *formats = formatos;
+    return TRUE;
+}
+
+static int
+androidModificadores(ScreenPtr pScreen, uint32_t format, uint32_t *num_modifiers, uint64_t **modifiers)
+{
+    *modifiers = malloc(sizeof(uint64_t));
+    if (!*modifiers)
+        return FALSE;
+    (*modifiers)[0] = DRM_FORMAT_MOD_LINEAR;
+    *num_modifiers = 1;
+    return TRUE;
+}
+
+static int
+androidModificadoresDeDrawable(DrawablePtr draw, uint32_t format, uint32_t *num_modifiers, uint64_t **modifiers)
+{
+    *num_modifiers = 0;
+    *modifiers = NULL;
+    return TRUE;
+}
+
+static const dri3_screen_info_rec android_dri3 = {
+    .version = 2,
+    .open = NULL,
+    .pixmap_from_fd = androidPixmapDeFd,
+    .fd_from_pixmap = androidFdDePixmap,
+    .pixmap_from_fds = androidPixmapDeFds,
+    .fds_from_pixmap = androidFdsDePixmap,
+    .get_formats = androidFormatos,
+    .get_modifiers = androidModificadores,
+    .get_drawable_modifiers = androidModificadoresDeDrawable,
+};
+
+/* B36: Present. Los vblank siguen siendo los falsos (con su pausa sin ventana); el flip pone el AHardwareBuffer del
+ * pixmap del cliente en una capa hija, encima de la pantalla: sin copia. El cursor por software se dibuja en la
+ * pantalla, debajo, y no se ve mientras dura (decidido: se acepta por ahora). */
+static RRCrtcPtr
+androidCrtc(WindowPtr window)
+{
+    return android_crtc;
+}
+
+static int
+androidUstMsc(RRCrtcPtr crtc, uint64_t *ust, uint64_t *msc)
+{
+    return present_fake_get_ust_msc(crtc->pScreen, ust, msc);
+}
+
+static Bool
+androidEncolarVblank(RRCrtcPtr crtc, uint64_t event_id, uint64_t msc)
+{
+    return present_fake_queue_vblank(crtc->pScreen, event_id, msc) == Success;
+}
+
+static void
+androidAbortarVblank(RRCrtcPtr crtc, uint64_t event_id, uint64_t msc)
+{
+    present_fake_abort_vblank(crtc->pScreen, event_id, msc);
+}
+
+static Bool
+androidPuedeFlip(RRCrtcPtr crtc, WindowPtr window, PixmapPtr pixmap, Bool sync_flip)
+{
+    return capa && dixLookupPrivate(&pixmap->devPrivates, &pixmap_ahb_key) != NULL;
+}
+
+typedef struct {
+    ASurfaceControl *capa;
+    uint64_t event_id;
+} androidFlipEnVuelo;
+
+/* OnComplete del flip (hilo de binder): el aviso a Present lo da el hilo principal */
+static void
+androidFlipCompleto(void *ctx, ASurfaceTransactionStats *stats)
+{
+    androidFlipEnVuelo *f = ctx;
+
+    ASurfaceControl_release(f->capa);
+    pthread_mutex_lock(&liberacion_mtx);
+    flip_listo = f->event_id;
+    hay_flip_listo = TRUE;
+    pthread_mutex_unlock(&liberacion_mtx);
+    free(f);
+    if (despertar >= 0) {
+        uint64_t uno = 1;
+
+        (void) write(despertar, &uno, sizeof(uno));
+    }
+}
+
+static Bool
+androidFlip(RRCrtcPtr crtc, uint64_t event_id, uint64_t target_msc, PixmapPtr pixmap, Bool sync_flip)
+{
+    androidPixmapAhb *p = dixLookupPrivate(&pixmap->devPrivates, &pixmap_ahb_key);
+    vfbScreenInfoPtr pvfb = &vfbScreens[0];
+    struct dma_buf_export_sync_file exp = { DMA_BUF_SYNC_READ, -1 };
+    ASurfaceTransaction *tr;
+    androidFlipEnVuelo *f;
+    int w, h;
+
+    if (!p || !capa || !ventana)
+        return FALSE;
+    if (!capa_flip && !(capa_flip = ASurfaceControl_create(capa, "x11-flip")))
+        return FALSE;
+    f = malloc(sizeof(*f));
+    if (!f)
+        return FALSE;
+    w = ANativeWindow_getWidth(ventana);
+    h = ANativeWindow_getHeight(ventana);
+    ASurfaceControl_acquire(capa_flip);
+    f->capa = capa_flip;
+    f->event_id = event_id;
+    tr = ASurfaceTransaction_create();
+    /* acquire fence: la del render del cliente, implícita en el dmabuf */
+    ASurfaceTransaction_setBuffer(tr, capa_flip, p->ahb,
+                                  ioctl(p->fd, DMA_BUF_IOCTL_EXPORT_SYNC_FILE, &exp) == 0 ? exp.fd : -1);
+    ASurfaceTransaction_setCrop(tr, capa_flip, &(ARect) { 0, 0, pixmap->drawable.width, pixmap->drawable.height });
+    if (ASurfaceTransaction_setScale) {
+        ASurfaceTransaction_setPosition(tr, capa_flip, 0, 0);
+        ASurfaceTransaction_setScale(tr, capa_flip, (float) w / pvfb->width, (float) h / pvfb->height);
+    }
+    ASurfaceTransaction_setBufferTransparency(tr, capa_flip, ASURFACE_TRANSACTION_TRANSPARENCY_OPAQUE);
+    ASurfaceTransaction_setZOrder(tr, capa_flip, 1);
+    ASurfaceTransaction_setVisibility(tr, capa_flip, ASURFACE_TRANSACTION_VISIBILITY_SHOW);
+    ASurfaceTransaction_setOnComplete(tr, f, androidFlipCompleto);
+    ASurfaceTransaction_apply(tr);
+    ASurfaceTransaction_delete(tr);
+    return TRUE;
+}
+
+/* Vuelve a la pantalla: Present ya copió el último cuadro del flip al pixmap de pantalla (y su daño se entrega). */
+static void
+androidUnflip(ScreenPtr pScreen, uint64_t event_id)
+{
+    uint64_t ust, msc;
+
+    if (capa_flip) {
+        ASurfaceTransaction *tr = ASurfaceTransaction_create();
+
+        ASurfaceTransaction_setVisibility(tr, capa_flip, ASURFACE_TRANSACTION_VISIBILITY_HIDE);
+        ASurfaceTransaction_apply(tr);
+        ASurfaceTransaction_delete(tr);
+    }
+    present_fake_get_ust_msc(pScreen, &ust, &msc);
+    present_event_notify(event_id, ust, msc);
+}
+
+/* Camino copia: fb lee el AHardwareBuffer con la CPU, pero la GPU del cliente puede seguir escribiéndolo (sincronización
+ * implícita, en el dmabuf) y la caché de la CPU puede tener datos viejos. Present no tiene un gancho del DDX antes de
+ * copiar: se envuelve la petición PresentPixmap y DMA_BUF_IOCTL_SYNC espera la fence implícita e invalida la caché. */
+static int (*present_proc_envuelto) (ClientPtr client);
+static unsigned long present_envuelto_gen;  /* al reiniciarse el servidor las extensiones se vuelven a registrar */
+
+static int
+androidProcPresent(ClientPtr client)
+{
+    REQUEST(xPresentPixmapReq);
+
+    if (stuff->presentReqType == X_PresentPixmap && client->req_len >= bytes_to_int32(sizeof(xPresentPixmapReq))) {
+        PixmapPtr pixmap;
+        androidPixmapAhb *p;
+
+        if (dixLookupResourceByType((void **) &pixmap, stuff->pixmap, RT_PIXMAP, client, DixReadAccess) == Success &&
+            (p = dixLookupPrivate(&pixmap->devPrivates, &pixmap_ahb_key))) {
+            struct dma_buf_sync sync = { DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ };
+
+            ioctl(p->fd, DMA_BUF_IOCTL_SYNC, &sync);
+            sync.flags = DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ;
+            ioctl(p->fd, DMA_BUF_IOCTL_SYNC, &sync);
+        }
+    }
+    return (*present_proc_envuelto) (client);
+}
+
+/* Las extensiones se inician después de las pantallas: se envuelve en el primer block handler. */
+static void
+androidEnvolverPresent(void)
+{
+    ExtensionEntry *ext;
+
+    if (present_envuelto_gen == serverGeneration || !(ext = CheckExtension(PRESENT_NAME)))
+        return;
+    present_envuelto_gen = serverGeneration;
+    present_proc_envuelto = ProcVector[ext->base];
+    ProcVector[ext->base] = androidProcPresent;
+}
+
+static present_screen_info_rec android_present = {
+    .version = 0,
+    .get_crtc = androidCrtc,
+    .get_ust_msc = androidUstMsc,
+    .queue_vblank = androidEncolarVblank,
+    .abort_vblank = androidAbortarVblank,
+    .flush = NULL,
+    .capabilities = PresentCapabilityNone,
+    .check_flip = androidPuedeFlip,
+    .flip = androidFlip,
+    .unflip = androidUnflip,
+};
+
+static Bool
+androidDri3Init(ScreenPtr pScreen)
+{
+    if (!dixRegisterPrivateKey(&pixmap_ahb_key, PRIVATE_PIXMAP, 0))
+        return FALSE;
+    destruir_pixmap_envuelto = pScreen->DestroyPixmap;
+    pScreen->DestroyPixmap = androidDestruirPixmap;
+    /* las fences de los clientes DRI3 (FenceFromFD) son xshmfence, como en Xwayland */
+    return miSyncShmScreenInit(pScreen) && dri3_screen_init(pScreen, &android_dri3) &&
+           present_screen_init(pScreen, &android_present);
 }
 
 static Bool
@@ -1212,6 +1633,7 @@ vfbRandRInit(ScreenPtr pScreen)
        return FALSE;
 
     crtc = RRCrtcCreate (pScreen, NULL);
+    android_crtc = crtc;
     if (!crtc)
        return FALSE;
 
@@ -1329,6 +1751,8 @@ vfbScreenInit(ScreenPtr pScreen, int argc, char **argv)
     if (despertar < 0)
         despertar = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
     if (despertar < 0 || !SetNotifyFd(despertar, androidDespertado, X_NOTIFY_READ, NULL))
+        return FALSE;
+    if (!androidDri3Init(pScreen))
         return FALSE;
 
     vfbWriteXWDFileHeader(pScreen);

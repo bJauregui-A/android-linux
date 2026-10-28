@@ -57,12 +57,11 @@ caso "sesion-android corre firefox-ajustes"  'grep -q "comun/firefox-ajustes" es
 caso "primer-arranque.sh usa firefox-ajustes en vez de su bloque propio"  \
   'grep -q "comun/firefox-ajustes" apk/primer-arranque.sh && ! grep -q "^FF=/usr/lib/firefox" apk/primer-arranque.sh'
 
-# El lanzador con GPU (mesa-gl/firefox → /usr/local/bin/firefox; el panel lo halla primero en el PATH) fuerza Zink por
-# drisw y WebRender, y en X11 directo eso deja la ventana vacía hasta que el servidor tenga DRI3 (B36, Paso 1). Ahí abre
-# Firefox sin forzar nada.
+# El lanzador con GPU (mesa-gl/firefox → /usr/local/bin/firefox; el panel lo halla primero en el PATH) saltaba la GPU en
+# X11 directo porque Zink por drisw dejaba la ventana vacía. Con DRI3 en el servidor, con-gpu elige kopper ahí (B36, Paso
+# 1, prueba 16): el lanzador ya no hace excepción.
 L=mesa-gl/firefox
-caso "el lanzador con GPU no la fuerza en X11 directo"  \
-  'grep -q "x11-directo" $L && sed -n "/x11-directo/,/esac\|fi/p" $L | grep -q "exec /usr/lib/firefox/firefox"'
+caso "el lanzador con GPU no hace excepción en X11 directo"  '! grep -q "x11-directo" $L'
 
 # El lanzador (/usr/local/bin/firefox) tiene que llegar a las instancias que ya existen al abrirlas, como sesion-android.
 caso "la capa de sesión lleva mesa-gl/firefox"  'grep -q "\"mesa-gl/firefox\"" app/build.gradle.kts'

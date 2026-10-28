@@ -87,10 +87,11 @@ xkbcomp() {
 }
 
 # meson <nombre> <url> [opciones]: compila e instala con un archivo de compilación cruzada.
-# La marca .listo vale solo para descarga y configuración; ninja corre siempre (es incremental).
+# La marca .listo guarda las opciones con que se configuró: si cambian se vuelve a configurar. ninja corre siempre
+# (es incremental).
 meson_cruzado() {
   local n=$1 url=$2; shift 2
-  if [ ! -f "$BUILD/$n.listo" ]; then
+  if [ "$(cat "$BUILD/$n.listo" 2>/dev/null)" != "$*" ]; then
   bajar "$n" "$url"
   cat > "$BUILD/cruzado.ini" <<INI
 [binaries]
@@ -114,7 +115,7 @@ endian = 'little'
 INI
   rm -rf "$BUILD/$n"
   meson setup "$BUILD/$n" "$FUENTES/$n" --cross-file "$BUILD/cruzado.ini" --prefix="$PREFIJO" --libdir=lib "$@"
-  touch "$BUILD/$n.listo"
+  echo "$*" > "$BUILD/$n.listo"
   fi
   ninja -C "$BUILD/$n"; ninja -C "$BUILD/$n" install
 }
@@ -125,6 +126,18 @@ dependencias_xserver() {
   autotools libfontenc-1.1.8 $XORG/lib
   autotools libXfont2-2.0.7 $XORG/lib --disable-freetype --disable-bzip2 --disable-devel-docs --disable-fc --disable-pcfformat --disable-bdfformat
   autotools nettle-3.10 https://ftp.gnu.org/gnu/nettle --disable-shared --enable-static --enable-mini-gmp --disable-documentation --disable-assembler
+  # B36: DRI3 necesita xshmfence (fences de Present; con futex y memfd, que bionic tiene) y drm_fourcc.h. Sin libdrm:
+  # no hay nodo DRM, solo hacen falta los encabezados.
+  autotools libxshmfence-1.3.2 $XORG/lib --enable-futex
+  encabezados_drm
+}
+
+encabezados_drm() {
+  local n=libdrm-2.4.124
+  [ -f "$PREFIJO/include/drm_fourcc.h" ] && return
+  bajar $n https://dri.freedesktop.org/libdrm
+  mkdir -p "$PREFIJO/include"
+  cp "$FUENTES/$n"/include/drm/{drm.h,drm_mode.h,drm_fourcc.h} "$PREFIJO/include/"
 }
 
 xserver() {
@@ -134,7 +147,7 @@ xserver() {
   rm -rf "$FUENTES/$n/hw/android"; cp -r "$RAIZ/ddx/android" "$FUENTES/$n/hw/android"
   meson_cruzado $n $XORG/xserver \
     -Dlisten_tcp=false -Dlisten_local=false -Dlisten_unix=true -Dmitshm=false \
-    -Dglx=false -Ddri1=false -Ddri2=false -Ddri3=false -Dglamor=false \
+    -Dglx=false -Ddri1=false -Ddri2=false -Ddri3=true -Dglamor=false \
     -Dxorg=false -Dxephyr=false -Dxnest=false -Dxvfb=false -Dxwin=false -Dxquartz=false \
     -Dudev=false -Dudev_kms=false -Dhal=false -Dsystemd_logind=false -Dxdmcp=false -Dint10=false -Dsecure-rpc=false \
     -Dxdm-auth-1=false -Dxcsecurity=false -Dxselinux=false -Dsha1=libnettle -Ddocs=false -Ddevel-docs=false \

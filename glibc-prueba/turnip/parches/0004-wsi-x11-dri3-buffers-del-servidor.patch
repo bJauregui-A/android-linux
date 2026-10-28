@@ -1,0 +1,222 @@
+diff --git a/src/vulkan/wsi/wsi_common_x11.c b/src/vulkan/wsi/wsi_common_x11.c
+index bba4fd1..e862d14 100644
+--- a/src/vulkan/wsi/wsi_common_x11.c
++++ b/src/vulkan/wsi/wsi_common_x11.c
+@@ -1203,6 +1203,11 @@ struct x11_image_pending_completion {
+ struct x11_image {
+    struct wsi_image                          base;
+    xcb_pixmap_t                              pixmap;
++   /* Servidor X de la app (Android): el pixmap lo creó el cliente y el
++    * servidor le puso un AHardwareBuffer; su dmabuf es la memoria de la imagen. */
++   int                                       ahb_fd;
++   uint32_t                                  ahb_stride;
++   uint32_t                                  ahb_offset;
+    xcb_xfixes_region_t                       update_region; /* long lived XID */
+    xcb_xfixes_region_t                       update_area;   /* the above or None */
+    struct xshmfence *                        shm_fence;
+@@ -1243,6 +1248,10 @@ struct x11_swapchain {
+ 
+    bool                                         has_dri3_modifiers;
+    bool                                         has_mit_shm;
++   /* Imágenes con la memoria de los pixmaps del servidor (x11_ahb_pedir). */
++   bool                                         ahb;
++   VkSubresourceLayout                          ahb_plano;
++   VkImageDrmFormatModifierExplicitCreateInfoEXT ahb_explicito;
+    bool                                         has_async_may_tear;
+    bool                                         msc_estimate_is_stable;
+ 
+@@ -2626,6 +2635,147 @@ alloc_shm(struct wsi_image *imagew, unsigned size)
+ #endif
+ }
+ 
++#ifdef HAVE_X11_DRM
++/* Servidor X de la app (Android): la NDK no deja convertir un dmabuf ajeno en
++ * AHardwareBuffer, así que PixmapFromBuffers no sirve. Al revés, como el
++ * protocolo android_ahb_v1 de Wayland (parche 0001): el cliente crea el pixmap,
++ * el servidor le pone un AHardwareBuffer y le da su dmabuf (BuffersFromPixmap),
++ * y Turnip dibuja ahí. El servidor lo entrega a SurfaceFlinger sin copias
++ * (flip) o lo copia a la ventana. */
++static VkResult
++x11_ahb_create_mem(const struct wsi_swapchain *chain,
++                   const struct wsi_image_info *info,
++                   struct wsi_image *image)
++{
++   struct x11_image *x11_image = container_of(image, struct x11_image, base);
++   const struct wsi_device *wsi = chain->wsi;
++
++   VkMemoryRequirements reqs;
++   wsi->GetImageMemoryRequirements(chain->device, image->image, &reqs);
++
++   int fd = os_dupfd_cloexec(x11_image->ahb_fd);
++   if (fd < 0)
++      return VK_ERROR_OUT_OF_HOST_MEMORY;
++
++   const struct wsi_memory_allocate_info memory_wsi_info = {
++      .sType = VK_STRUCTURE_TYPE_WSI_MEMORY_ALLOCATE_INFO_MESA,
++      .implicit_sync = !info->explicit_sync && !chain->dma_buf_semaphore,
++      .dma_buf_sync_file = chain->dma_buf_semaphore,
++   };
++   const VkImportMemoryFdInfoKHR import_info = {
++      .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR,
++      .pNext = &memory_wsi_info,
++      .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
++      .fd = fd,
++   };
++   const VkMemoryDedicatedAllocateInfo memory_dedicated_info = {
++      .sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO,
++      .pNext = &import_info,
++      .image = image->image,
++   };
++   const VkMemoryAllocateInfo memory_info = {
++      .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
++      .pNext = &memory_dedicated_info,
++      .allocationSize = reqs.size,
++      .memoryTypeIndex = wsi_select_device_memory_type(wsi, reqs.memoryTypeBits),
++   };
++   VkResult result = wsi->AllocateMemory(chain->device, &memory_info,
++                                         &chain->alloc, &image->memory);
++   if (result != VK_SUCCESS) {
++      close(fd);
++      return result;
++   }
++
++   /* La sincronización implícita de la WSI usa este fd. */
++   image->dma_buf_fd = x11_image->ahb_fd;
++   x11_image->ahb_fd = -1;
++   image->drm_modifier = DRM_FORMAT_MOD_LINEAR;
++   image->num_planes = 1;
++   image->sizes[0] = reqs.size;
++   image->row_pitches[0] = x11_image->ahb_stride;
++   image->offsets[0] = x11_image->ahb_offset;
++   return VK_SUCCESS;
++}
++
++static void
++x11_ahb_soltar(struct x11_swapchain *chain)
++{
++   for (uint32_t i = 0; i < chain->base.image_count; i++) {
++      struct x11_image *image = &chain->images[i];
++      if (image->pixmap) {
++         xcb_void_cookie_t cookie = xcb_free_pixmap(chain->conn, image->pixmap);
++         xcb_discard_reply(chain->conn, cookie.sequence);
++      }
++      image->pixmap = None;
++      if (image->ahb_fd >= 0)
++         close(image->ahb_fd);
++      image->ahb_fd = -1;
++   }
++}
++
++/* Crea un pixmap por imagen y le pide sus buffers al servidor. Si no los da
++ * todos (un servidor X común no entrega LINEAR de un pixmap cualquiera), se
++ * sigue por el camino de siempre. */
++static bool
++x11_ahb_pedir(struct x11_swapchain *chain)
++{
++   struct wsi_image_info *info = &chain->base.image_info;
++
++   for (uint32_t i = 0; i < chain->base.image_count; i++) {
++      struct x11_image *image = &chain->images[i];
++      image->ahb_fd = -1;
++      image->pixmap = xcb_generate_id(chain->conn);
++      xcb_create_pixmap(chain->conn, chain->depth, image->pixmap, chain->window,
++                        chain->extent.width, chain->extent.height);
++      xcb_dri3_buffers_from_pixmap_reply_t *b =
++         xcb_dri3_buffers_from_pixmap_reply(chain->conn,
++                                            xcb_dri3_buffers_from_pixmap(chain->conn, image->pixmap),
++                                            NULL);
++      if (!b)
++         goto fail;
++      int *fds = xcb_dri3_buffers_from_pixmap_reply_fds(chain->conn, b);
++      if (b->nfd != 1 || b->modifier != DRM_FORMAT_MOD_LINEAR) {
++         for (int j = 0; j < b->nfd; j++)
++            close(fds[j]);
++         free(b);
++         goto fail;
++      }
++      image->ahb_fd = fds[0];
++      image->ahb_stride = xcb_dri3_buffers_from_pixmap_strides(b)[0];
++      image->ahb_offset = xcb_dri3_buffers_from_pixmap_offsets(b)[0];
++      free(b);
++      if (image->ahb_stride != chain->images[0].ahb_stride ||
++          image->ahb_offset != chain->images[0].ahb_offset)
++         goto fail;
++   }
++
++   /* Lista de modificadores (solo LINEAR) -> layout explícito. */
++   for (VkBaseOutStructure *s = (VkBaseOutStructure *)&info->create; s->pNext; s = s->pNext) {
++      if (s->pNext == (VkBaseOutStructure *)&info->drm_mod_list) {
++         s->pNext = s->pNext->pNext;
++         break;
++      }
++   }
++   chain->ahb_plano = (VkSubresourceLayout) {
++      .offset = chain->images[0].ahb_offset,
++      .rowPitch = chain->images[0].ahb_stride,
++   };
++   chain->ahb_explicito = (VkImageDrmFormatModifierExplicitCreateInfoEXT) {
++      .sType = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_EXPLICIT_CREATE_INFO_EXT,
++      .drmFormatModifier = DRM_FORMAT_MOD_LINEAR,
++      .drmFormatModifierPlaneCount = 1,
++      .pPlaneLayouts = &chain->ahb_plano,
++   };
++   __vk_append_struct(&info->create, &chain->ahb_explicito);
++   info->create_mem = x11_ahb_create_mem;
++   return true;
++
++fail:
++   x11_ahb_soltar(chain);
++   return false;
++}
++#endif
++
+ static VkResult
+ x11_image_init(VkDevice device_h, struct x11_swapchain *chain,
+                const VkSwapchainCreateInfoKHR *pCreateInfo,
+@@ -2669,6 +2819,9 @@ x11_image_init(VkDevice device_h, struct x11_swapchain *chain,
+       xcb_discard_reply(chain->conn, cookie.sequence);
+       goto out_fence;
+    }
++   /* El pixmap ya existe: el servidor le puso el AHardwareBuffer (x11_ahb_pedir). */
++   if (chain->ahb)
++      goto out_fence;
+    image->pixmap = xcb_generate_id(chain->conn);
+ 
+    if (image->base.drm_modifier != DRM_FORMAT_MOD_INVALID) {
+@@ -3234,7 +3387,20 @@ x11_surface_create_swapchain(VkIcdSurfaceBase *icd_surface,
+             false,
+ #endif
+       };
+-      if (use_modifiers(wsi_device)) {
++      /* Servidor X de la app: imágenes LINEAR con la memoria de sus pixmaps
++       * (x11_ahb_pedir); MESA_WSI_AHB=0 lo desactiva. */
++      bool ahb = wsi_conn->has_dri3 && wsi_device->supports_modifiers &&
++                 !drm_image_params.explicit_sync && (bit_depth == 24 || bit_depth == 32) &&
++                 debug_get_bool_option("MESA_WSI_AHB", true);
++      if (ahb) {
++         static const uint64_t lineal[] = { DRM_FORMAT_MOD_LINEAR };
++         static const uint64_t *const lineal_lista[] = { lineal };
++         static const uint32_t uno = 1;
++         drm_image_params.num_modifier_lists = 1;
++         drm_image_params.num_modifiers = &uno;
++         drm_image_params.modifiers = lineal_lista;
++         chain->ahb = true;
++      } else if (use_modifiers(wsi_device)) {
+          wsi_x11_get_dri3_modifiers(wsi_conn, conn, window, bit_depth, 32,
+                                     modifiers, num_modifiers,
+                                     &drm_image_params.num_modifier_lists,
+@@ -3352,6 +3518,14 @@ x11_surface_create_swapchain(VkIcdSurfaceBase *icd_surface,
+                           (uint32_t []) { 0 });
+    xcb_discard_reply(chain->conn, cookie.sequence);
+ 
++#ifdef HAVE_X11_DRM
++   /* Si el servidor no entrega sus buffers, imágenes como siempre: sin la
++    * memoria importada (create_mem) ni el layout explícito, que no se tocaron. */
++   if (chain->ahb && !x11_ahb_pedir(chain)) {
++      mesa_logw("MESA: el servidor X no entregó sus buffers (BuffersFromPixmap); MESA_WSI_AHB=0 lo desactiva");
++      chain->ahb = false;
++   }
++#endif
+    uint32_t image = 0;
+    for (; image < chain->base.image_count; image++) {
+       result = x11_image_init(device, chain, pCreateInfo, pAllocator,

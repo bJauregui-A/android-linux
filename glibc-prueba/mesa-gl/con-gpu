@@ -1,7 +1,7 @@
 #!/bin/sh
 # /usr/local/bin/con-gpu: corre un programa con el OpenGL de mesa-gl (Zink sobre Turnip por drisw,
 # parche mesa-gl/parches/0001: el cuadro se copia a la ventana) en vez de llvmpipe.
-# Sirve para EGL Wayland y GLX (Xwayland). Sin mesa-gl corre el programa tal cual.
+# Sirve para EGL Wayland, GLX (Xwayland) y X11 directo (kopper). Sin mesa-gl corre el programa tal cual.
 # Lo compilado va en /usr/local/<nombre> (APK autoinstalable) o en ~/<nombre> (compilado a mano).
 #   con-gpu glxgears
 G=/usr/local/mesa-gl; [ -d $G ] || G=$HOME/mesa-gl
@@ -13,5 +13,10 @@ if [ -d "$G/lib" ]; then
   export GALLIUM_DRIVER=zink
   # turnip-x11: el mismo Turnip con la plataforma x11 (para GLX/Xwayland)
   export VK_ICD_FILENAMES=$X/share/vulkan/icd.d/freedreno_icd.aarch64.json
+  # X11 directo (servidor X de la app, con DRI3 y buffers AHardwareBuffer): kopper, Zink sobre el WSI X11 de Turnip
+  # (sin copias a la CPU). DRI3Open no da dispositivo: LIBGL_KOPPER_DRI2 salta esa comprobación. Sin esto, drisw.
+  case " $ARCH_ANDROID_PROVIDER_CAPABILITIES " in
+    *" x11-directo "*) export MESA_LOADER_DRIVER_OVERRIDE=zink LIBGL_KOPPER_DRI2=1 ;;
+  esac
 fi
 exec "$@"

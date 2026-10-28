@@ -1,0 +1,21 @@
+--- a/src/xshmfence_futex.h
++++ b/src/xshmfence_futex.h
+@@ -48,7 +48,8 @@
+ #else
+ 
+ #include <stdint.h>
+-#include <values.h>
++/* Android: bionic no tiene <values.h> (MAXINT); INT_MAX es lo mismo */
++#include <limits.h>
+ #include <linux/futex.h>
+ #include <sys/time.h>
+ #include <sys/syscall.h>
+@@ -59,7 +60,7 @@
+ }
+ 
+ static inline int futex_wake(int32_t *addr) {
+-	return sys_futex(addr, FUTEX_WAKE, MAXINT, NULL, NULL, 0);
++	return sys_futex(addr, FUTEX_WAKE, INT_MAX, NULL, NULL, 0);
+ }
+ 
+ static inline int futex_wait(int32_t *addr, int32_t value) {
