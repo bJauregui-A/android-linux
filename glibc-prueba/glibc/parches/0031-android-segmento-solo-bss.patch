@@ -1,0 +1,42 @@
+--- a/elf/dl-load.h
++++ b/elf/dl-load.h
+@@ -78,6 +78,7 @@
+   ElfW(Addr) mapstart, mapend, dataend, allocend, mapalign;
+   ElfW(Off) mapoff;
+   int prot;                             /* PROT_* bits.  */
++  int sin_archivo;                      /* p_filesz == 0: nada que mapear del archivo.  */
+ };
+ 
+ 
+--- a/elf/dl-load.c
++++ b/elf/dl-load.c
+@@ -1149,6 +1149,7 @@
+ 	  c->mapend = ALIGN_UP (ph->p_vaddr + ph->p_filesz, GLRO(dl_pagesize));
+ 	  c->dataend = ph->p_vaddr + ph->p_filesz;
+ 	  c->allocend = ph->p_vaddr + ph->p_memsz;
++	  c->sin_archivo = ph->p_filesz == 0;
+ 	  /* Remember the maximum p_align.  */
+ 	  if (powerof2 (ph->p_align) && ph->p_align > p_align_max)
+ 	    p_align_max = ph->p_align;
+--- a/elf/dl-map-segments.h
++++ b/elf/dl-map-segments.h
+@@ -135,12 +135,17 @@
+ 
+   while (c < &loadcmds[nloadcmds])
+     {
++      /* Android: un segmento sin bytes en el archivo (solo .bss, p_filesz == 0)
++         no se mapea del archivo: su desplazamiento puede estar más allá del
++         final y tocar esas páginas da SIGBUS.  El kernel tampoco lo hace.  */
+       if (c->mapend > c->mapstart
+           /* Map the segment contents from the file.  */
+           && (__mmap ((void *) (l->l_addr + c->mapstart),
+                       c->mapend - c->mapstart, c->prot,
+-                      MAP_FIXED|MAP_COPY|MAP_FILE,
+-                      fd, c->mapoff)
++                      c->sin_archivo ? MAP_FIXED|MAP_PRIVATE|MAP_ANON
++                                     : MAP_FIXED|MAP_COPY|MAP_FILE,
++                      c->sin_archivo ? -1 : fd,
++                      c->sin_archivo ? 0 : c->mapoff)
+               == MAP_FAILED))
+         return DL_MAP_SEGMENTS_ERROR_MAP_SEGMENT;
+ 

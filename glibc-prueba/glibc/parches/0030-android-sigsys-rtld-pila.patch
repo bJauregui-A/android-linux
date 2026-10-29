@@ -1,0 +1,118 @@
+--- a/sysdeps/unix/sysv/linux/aarch64/android-path.c
++++ b/sysdeps/unix/sysv/linux/aarch64/android-path.c
+@@ -3497,6 +3497,96 @@
+ #endif
+ 
+ #if IS_IN (rtld)
++# include <sys/mman.h>
++
++/* Los estáticos (Go) corren sus goroutines en pilas chicas de su heap, y la traducción usa ~29 KB de pila: hecha donde
++   estaba el programa, pisa su memoria ("alloc unmarked").  Sin TLS (Go no escribe TPIDR_EL0) no hay pila por hilo
++   como en libc (trampa_en_pila): un grupo de pilas, una por manejador activo, que se toma con un bit atómico.  El
++   manejador bloquea las demás señales, así ninguna anidada pisa el marco que dejó el kernel.  Sin pila libre se
++   traduce donde se está, como antes.  */
++# define PILAS_RTLD 64
++# define PILA_RTLD (256 * 1024)
++# define GUARDA_RTLD 4096
++static unsigned long int pilas_ocupadas;
++static char *pilas_rtld[PILAS_RTLD];
++
++/* en_pila (arg, f, tope): f (arg) con la pila en tope.  */
++long int __android_rtld_en_pila (void *, long int (*) (void *), void *)
++  attribute_hidden;
++asm (".text\n"
++     ".p2align 2\n"
++     ".hidden __android_rtld_en_pila\n"
++     ".type __android_rtld_en_pila, %function\n"
++     "__android_rtld_en_pila:\n"
++     "	stp x29, x30, [sp, #-16]!\n"
++     "	mov x29, sp\n"
++     "	mov sp, x2\n"
++     "	blr x1\n"
++     "	mov sp, x29\n"
++     "	ldp x29, x30, [sp], #16\n"
++     "	ret\n"
++     ".size __android_rtld_en_pila, .-__android_rtld_en_pila\n");
++
++struct llamada_rtld
++{
++  long int nr;
++  unsigned long long int *r;
++  sigset_t *mascara;
++};
++
++static long int
++trampa_llamada_rtld (void *p)
++{
++  struct llamada_rtld *l = p;
++  return trampa (l->nr, l->r, l->mascara);
++}
++
++/* Toma una pila libre del grupo (NULL si no hay o no se pudo crear).  */
++static char *
++pila_rtld_tomar (int *indice)
++{
++  for (;;)
++    {
++      unsigned long int libres = ~__atomic_load_n (&pilas_ocupadas,
++						   __ATOMIC_RELAXED);
++      if (libres == 0)
++	return NULL;
++      int i = __builtin_ctzl (libres);
++      unsigned long int bit = 1UL << i;
++      if (__atomic_fetch_or (&pilas_ocupadas, bit, __ATOMIC_ACQUIRE) & bit)
++	continue;
++      if (pilas_rtld[i] == NULL)
++	{
++	  long int q = RAW (__NR_mmap, 0, GUARDA_RTLD + PILA_RTLD,
++			    PROT_READ | PROT_WRITE,
++			    MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
++	  if ((unsigned long int) q > -4096UL)
++	    {
++	      __atomic_fetch_and (&pilas_ocupadas, ~bit, __ATOMIC_RELEASE);
++	      return NULL;
++	    }
++	  RAW (__NR_mprotect, q, GUARDA_RTLD, PROT_NONE);
++	  pilas_rtld[i] = (char *) q;
++	}
++      *indice = i;
++      return pilas_rtld[i];
++    }
++}
++
++static long int
++trampa_en_pila_rtld (long int nr, unsigned long long int *r, sigset_t *mascara)
++{
++  struct llamada_rtld l = { nr, r, mascara };
++  int i;
++  char *p = pila_rtld_tomar (&i);
++  if (p == NULL)
++    return trampa (nr, r, mascara);
++  long int ret = __android_rtld_en_pila (&l, trampa_llamada_rtld,
++					 p + GUARDA_RTLD + PILA_RTLD);
++  __atomic_fetch_and (&pilas_ocupadas, ~(1UL << i), __ATOMIC_RELEASE);
++  return ret;
++}
++
+ static void
+ sigsys_handler_rtld (int sig, siginfo_t *si, void *ctx)
+ {
+@@ -3505,7 +3595,8 @@
+   unsigned long long int *r = ((ucontext_t *) ctx)->uc_mcontext.regs;
+   if (si->si_errno == DATOS)
+     {
+-      r[0] = trampa (si->si_syscall, r, &((ucontext_t *) ctx)->uc_sigmask);
++      r[0] = trampa_en_pila_rtld (si->si_syscall, r,
++				  &((ucontext_t *) ctx)->uc_sigmask);
+       if (debug_sigsys)
+ 	{
+ 	  char msg[80], *q = msg;
+@@ -3525,7 +3616,7 @@
+ {
+   struct k_sigaction ka;
+   ka.handler = (void *) sigsys_handler_rtld;
+-  ka.flags = SA_SIGINFO | SA_NODEFER;
++  ka.flags = SA_SIGINFO | SA_ONSTACK | SA_NODEFER;
+   ka.restorer = NULL;
+   ka.mask = ~0UL & ~(1UL << (SIGSYS - 1));
+   RAW (__NR_rt_sigaction, SIGSYS, &ka, 0, sizeof (unsigned long int));

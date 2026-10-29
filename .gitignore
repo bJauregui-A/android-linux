@@ -36,3 +36,5 @@ glibc-prueba/pruebas/raiz/estatico-arm64
 glibc-prueba/app/src/main/jniLibs/arm64-v8a/*
 !glibc-prueba/app/src/main/jniLibs/arm64-v8a/libldp.so
 glibc-prueba/pruebas/raiz/estatico-pie-arm64
+glibc-prueba/pruebas/estaticos/pila-arm64
+glibc-prueba/pruebas/estaticos/bss-arm64
