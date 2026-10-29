@@ -10,7 +10,7 @@ HUMO=$PWD/pruebas/humo/humo.sh
 # Entorno nuevo: bin/ solo con las herramientas básicas (sin pacman ni apt-get del PC) y los falsos que cada caso agrega.
 entorno() {
   e=$(mktemp -d -p "$tmp"); mkdir "$e/bin"; : > "$e/log"
-  for c in bash env timeout grep cat mktemp rm sleep sed date mkdir touch wc tee head tr ls chmod printf stdbuf python3 pgrep; do
+  for c in bash env timeout grep cat mktemp rm sleep sed date mkdir touch wc tee head tr ls chmod printf stdbuf python3 pgrep readlink; do
     ln -s "$(command -v "$c")" "$e/bin/$c"
   done
   falso sudo 'if [ "$1" = -n ] && [ "$2" = true ]; then exit 0; fi; [ "$1" = -n ] && shift; exec "$@"'
@@ -64,6 +64,15 @@ con_clave; HUMO_CLAVE=mala correr shell
 caso "sudo con clave: HUMO_CLAVE mala, la línea de sudo es FALLA"  'linea FALLA "sudo" >/dev/null && [ "$rc" -ne 0 ]'
 con_clave; correr shell
 caso "sudo con clave: sin HUMO_CLAVE la línea de sudo es FALLA"  'linea FALLA "sudo" >/dev/null && [ "$rc" -ne 0 ]'
+
+# 6b. /usr unificado (B19): /bin, /sbin y /lib resuelven dentro de /usr; la raíz de la prueba es HUMO_RAIZ (por defecto /)
+raiz_falsa() { entorno; pacman_bueno; mkdir -p "$e/raiz/usr/bin" "$e/raiz/usr/sbin" "$e/raiz/usr/lib"; }
+raiz_falsa; for c in bin sbin lib; do ln -s usr/$c "$e/raiz/$c"; done; correr shell HUMO_RAIZ="$e/raiz"
+caso "/usr unificado: las tres enlazadas dentro de /usr es OK"  'linea OK "usr unificado" >/dev/null && [ "$rc" -eq 0 ]'
+raiz_falsa; for c in sbin lib; do ln -s usr/$c "$e/raiz/$c"; done; mkdir "$e/raiz/bin"; correr shell HUMO_RAIZ="$e/raiz"
+caso "/usr unificado: /bin como carpeta real es FALLA y nombra /bin"  'linea FALLA "usr unificado.*/bin" >/dev/null && [ "$rc" -ne 0 ]'
+raiz_falsa; for c in bin sbin; do ln -s usr/$c "$e/raiz/$c"; done; ln -s ../tmp "$e/raiz/lib"; correr shell HUMO_RAIZ="$e/raiz"
+caso "/usr unificado: /lib que sale de /usr es FALLA"  'linea FALLA "usr unificado.*/lib" >/dev/null'
 
 # --- gpu ---
 vk() { falso vulkaninfo "echo '	deviceName         = $1'"; }

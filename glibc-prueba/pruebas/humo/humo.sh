@@ -51,6 +51,10 @@ if grupo shell; then
   caso "shell: bash corre comandos"  '[ "$(bash -c "echo hola")" = hola ]'
   caso "shell: sudo funciona"  'como_root true >/dev/null'
   caso "shell: /tmp escribe y lee"   'f=$(mktemp) && echo dato > "$f" && [ "$(cat "$f")" = dato ]; r=$?; rm -f "$f"; [ $r -eq 0 ]'
+  # /usr unificado: /bin, /sbin y /lib son enlaces que resuelven dentro de /usr (HUMO_RAIZ cambia la raíz, para las pruebas)
+  for c in bin sbin lib; do
+    caso "shell: usr unificado: /$c resuelve dentro de /usr"  'case "$(readlink -f "${HUMO_RAIZ%/}/'$c'")/" in "$(readlink -f "${HUMO_RAIZ%/}/usr")"/*) ;; *) false;; esac'
+  done
   command -v tree >/dev/null 2>&1 && previo=1
   caso "paquetes: instala tree"  'instalar tree' 120
   if [ -n "$previo" ]; then salta "paquetes: tree ya estaba instalado, no se quita"

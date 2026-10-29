@@ -73,5 +73,65 @@ caso "cada GID de passwd existe en group" \
 caso "los usuarios de sistema no tienen shell de login (salvo root y sync)" \
   '! awk -F: "\$1!=\"root\" && \$1!=\"sync\" && \$1!=\"sshd\" && \$7 !~ /nologin\$/" "$d/passwd" | grep -q .'
 
+# B19: /usr unificado como en un Debian real (usrmerge): bin, sbin y lib son enlaces a usr/. Antes eran carpetas reales
+# y usr/bin/bash enlazaba "al revés" a ../../bin/bash; usr-is-merged y los paquetes que asumen el /usr unificado fallaban.
+. pruebas/comun/usr-unificado.sh
+caso "/usr unificado: bin, sbin y lib son enlaces a /usr"  'usr_unificado "$d/lista" bin:usr/bin sbin:usr/sbin lib:usr/lib'
+caso "usr/bin/bash es un archivo, no un enlace a ../../bin/bash"  'grep -qE "^-.* usr/bin/bash$" "$d/lista"'
+sed -E 's/^[^ ]+ [^ ]+ +[0-9]+ [0-9-]+ [0-9:]+ //; s/ -> .*$//; s#/$##' "$d/lista" | sort | uniq -d > "$d/repetidos"
+caso "el tar no repite ningún nombre"  '! [ -s "$d/repetidos" ] || { head -5 "$d/repetidos" | sed "s/^/  repetido: /"; false; }'
+for f in usr/lib/ld-linux-aarch64.so.1 usr/lib/aarch64-linux-gnu/libc.so.6; do
+  caso "$f es el de nuestra glibc"  '[ "$(tar -xOf "$d/base.tar" $f | sha256sum)" = "$(sha256sum < glibc/salida/usr/lib/${f##*/})" ]'
+done
+# Cada enlace relativo resuelve (siguiendo los demás enlaces del tar, y los absolutos desde el prefijo) a un miembro.
+cat > "$d/rotos.py" <<'PY'
+import posixpath, sys, tarfile
+PREFIJO = sys.argv[2]
+miembros = {}
+for m in tarfile.open(sys.argv[1]):
+    miembros[m.name.rstrip("/")] = m
+def resolver(ruta, vistos=0):
+    """Ruta normalizada de verdad (sin enlaces en el camino); None si cae fuera del tar."""
+    partes, hechas = ruta.split("/"), ""
+    for i, p in enumerate(partes):
+        if p in ("", "."): continue
+        if p == "..":
+            hechas = posixpath.dirname(hechas); continue
+        hechas = posixpath.join(hechas, p)
+        m = miembros.get(hechas)
+        if m is not None and m.issym():
+            if vistos > 40: return None
+            t = m.linkname
+            if t.startswith("/"):
+                t = t[len(PREFIJO):] if t.startswith(PREFIJO + "/") else None
+                if t is None: return "/fuera"
+                nueva = resolver(t, vistos + 1)
+            else:
+                nueva = resolver(posixpath.join(posixpath.dirname(hechas), t), vistos + 1)
+            if nueva is None or nueva == "/fuera": return nueva
+            hechas = nueva
+    return hechas
+rotos = 0
+for n, m in miembros.items():
+    if m.issym() and not m.linkname.startswith("/"):
+        d = resolver(posixpath.join(posixpath.dirname(n), m.linkname))
+        if d is None or (d != "/fuera" and d != "" and d not in miembros):
+            print(f"  roto: {n} -> {m.linkname}"); rotos += 1
+sys.exit(1 if rotos else 0)
+PY
+caso "ningún enlace relativo de la base queda roto"  'python3 "$d/rotos.py" "$d/base.tar" /data/user/0/prueba/files/debian'
+tar -xOf "$d/base.tar" var/lib/dpkg/info/bash.list > "$d/bash.list"
+caso "bash.list sigue listando /bin/bash (ruta original, como en un Debian real)"  'grep -qx "/bin/bash" "$d/bash.list"'
+
+# B53: hostname (paquete "hostname", Essential en Debian) y los usuarios y grupos de sistema oficiales: los de passwd.master
+# y group.master de base-passwd tienen que estar en etc/passwd y etc/group con el mismo UID/GID.
+caso "la base trae usr/bin/hostname"  'grep -qE " usr/bin/hostname$" "$d/lista"'
+tar -xOf "$d/base.tar" usr/share/base-passwd/passwd.master > "$d/passwd.master"
+tar -xOf "$d/base.tar" usr/share/base-passwd/group.master > "$d/group.master"
+caso "cada usuario de passwd.master está en etc/passwd con el mismo UID" \
+  'faltan=$(awk -F: "NR==FNR{u[\$1]=\$3; next} !(\$1 in u) || u[\$1]!=\$3{print \$1}" "$d/passwd" "$d/passwd.master" 2>/dev/null; [ -s "$d/passwd.master" ] || echo "(sin passwd.master)"); [ -z "$faltan" ] || { echo "  faltan: $faltan"; false; }'
+caso "cada grupo de group.master está en etc/group con el mismo GID" \
+  'faltan=$(awk -F: "NR==FNR{u[\$1]=\$3; next} !(\$1 in u) || u[\$1]!=\$3{print \$1}" "$d/group" "$d/group.master" 2>/dev/null; [ -s "$d/group.master" ] || echo "(sin group.master)"); [ -z "$faltan" ] || { echo "  faltan: $faltan"; false; }'
+
 echo "fallas: $fallas"
 [ $fallas -eq 0 ]

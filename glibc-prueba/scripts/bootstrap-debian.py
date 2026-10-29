@@ -33,6 +33,12 @@ MIRROR = "http://deb.debian.org/debian"
 SUITE = "bookworm"
 ARCH = "arm64"
 
+# /usr unificado como Debian (usrmerge): estas carpetas son enlaces a su equivalente en /usr
+USR_UNIFICADO = {"bin": "usr/bin", "sbin": "usr/sbin", "lib": "usr/lib"}
+
+# Archivos que escribe el bootstrap y que un paquete también trae: queda el nuestro
+ARCHIVOS_PROPIOS = ["etc/ld.so.conf"]
+
 # Carpetas de Android que la glibc no traduce
 PASSTHROUGH = {"proc", "sys", "dev", "data", "system", "apex", "vendor", "product",
                "odm", "system_ext", "storage", "sdcard", "linkerconfig"}
@@ -118,7 +124,8 @@ PAQUETES_OBJETIVO = [
     "libc-bin",
     "util-linux",
     "usr-is-merged",
-    "perl-base"
+    "perl-base",
+    "hostname"
 ]
 
 
@@ -271,12 +278,25 @@ class ExtractorDeb:
 
 
 class SalidaTar:
-    def __init__(self, path):
+    def __init__(self, path, reservados=()):
+        """reservados: nombres que escribe el bootstrap (nuestra glibc, configuración): si un paquete trae el mismo,
+        se omite y queda el nuestro."""
         self.t = tarfile.open(path, "w", format=tarfile.GNU_FORMAT)
         self.dirs = set()
+        self.reservados = set(reservados)
+        for enlace_, destino in USR_UNIFICADO.items():
+            self._escribir_simbolico(enlace_, destino)
+
+    @staticmethod
+    def unificar(nombre):
+        """bin/x -> usr/bin/x: lo que cuelga de un enlace del /usr unificado se escribe debajo de usr/."""
+        for carpeta, destino in USR_UNIFICADO.items():
+            if nombre == carpeta or nombre.startswith(carpeta + "/"):
+                return destino + nombre[len(carpeta):]
+        return nombre
 
     def directorio(self, nombre, modo=0o755):
-        partes = nombre.strip("/").split("/")
+        partes = self.unificar(nombre.strip("/")).split("/")
         for i in range(1, len(partes) + 1):
             d = "/".join(partes[:i])
             if d and d not in self.dirs:
@@ -286,21 +306,50 @@ class SalidaTar:
                 self.dirs.add(d)
 
     def archivo(self, nombre, data, modo=0o644):
+        nombre = self.unificar(nombre)
         self.directorio(os.path.dirname(nombre))
         ti = tarfile.TarInfo(nombre)
         ti.size, ti.mode, ti.mtime = len(data), modo, int(time.time())
         self.t.addfile(ti, io.BytesIO(data))
 
+    def simbolico(self, nombre, destino):
+        nombre = self.unificar(nombre)
+        self.directorio(os.path.dirname(nombre))
+        self._escribir_simbolico(nombre, destino)
+
+    def _escribir_simbolico(self, nombre, destino):
+        ti = tarfile.TarInfo(nombre)
+        ti.type, ti.linkname, ti.mode, ti.mtime = tarfile.SYMTYPE, destino, 0o777, int(time.time())
+        self.t.addfile(ti)
+
+    def _destino_movido(self, nombre, nuevo, linkname):
+        """Un enlace relativo que se mueve (bin/x -> usr/bin/x) o que apunta a algo que se mueve se recalcula desde
+        su carpeta nueva, para que siga apuntando al mismo archivo."""
+        origen = os.path.dirname(nombre)
+        destino = os.path.normpath(os.path.join(origen, linkname))
+        nuevo_destino = self.unificar(destino)
+        if nuevo == nombre and nuevo_destino == destino:
+            return linkname
+        return os.path.relpath(nuevo_destino, os.path.dirname(nuevo))
+
     def miembro(self, m, f, prefijo):
         m = m.replace(uid=0, gid=0, uname="", gname="", deep=False)
-        self.directorio(os.path.dirname(m.name.rstrip("/")))
+        original = m.name.rstrip("/")
+        m.name = self.unificar(original) + ("/" if m.isdir() else "")
+        nombre = m.name.rstrip("/")
+        self.directorio(os.path.dirname(nombre))
         if m.isdir():
-            if m.name.rstrip("/") in self.dirs:
+            if nombre in self.dirs:
                 return
-            self.dirs.add(m.name.rstrip("/"))
+            self.dirs.add(nombre)
             self.t.addfile(m)
+        elif nombre in self.reservados:
+            return
         elif m.issym():
-            self.t.addfile(m.replace(linkname=enlace(m.linkname, prefijo), deep=False))
+            linkname = enlace(m.linkname, prefijo)
+            if not linkname.startswith("/"):
+                linkname = self._destino_movido(original, nombre, linkname)
+            self.t.addfile(m.replace(linkname=linkname, deep=False))
         elif m.islnk():  # enlace duro -> copia regular
             data = f.read()
             m.type, m.linkname, m.size = tarfile.REGTYPE, "", len(data)
@@ -334,10 +383,14 @@ def main():
     seleccionados = resolver_dependencias(PAQUETES_OBJETIVO, todos)
     print(f"Total paquetes resueltos: {len(seleccionados)}", file=sys.stderr)
 
-    out = SalidaTar(a.out)
+    # Nuestra glibc va encima de la de los paquetes (y la configuración que escribimos, encima de la suya)
+    libs = sorted(f for f in os.listdir(a.glibc)
+                  if re.search(r"\.so(\.\d+)+$", f) or f.startswith("ld-linux"))
+    reservados = [f"usr/lib/{f}" for f in libs] + [f"usr/lib/aarch64-linux-gnu/{f}" for f in libs] + ARCHIVOS_PROPIOS
+    out = SalidaTar(a.out, reservados)
 
-    # Estructura base de directorios FHS y Debian usrmerge
-    for d in ["bin", "sbin", "lib", "usr/bin", "usr/sbin", "usr/lib",
+    # Estructura base de directorios FHS (bin, sbin y lib son enlaces a usr/, los crea SalidaTar)
+    for d in ["usr/bin", "usr/sbin", "usr/lib",
               "usr/lib/aarch64-linux-gnu", "usr/local/bin", "usr/local/sbin",
               "etc/apt/apt.conf.d", "etc/apt/sources.list.d", "etc/dpkg/dpkg.cfg.d",
               "var/lib/dpkg/info", "var/lib/dpkg/updates", "var/log", "tmp",
@@ -421,8 +474,6 @@ def main():
     out.archivo("var/lib/dpkg/available", b"")
 
     # 5. Inyectar glibc propia encima del rootfs
-    libs = sorted(f for f in os.listdir(a.glibc)
-                  if re.search(r"\.so(\.\d+)+$", f) or f.startswith("ld-linux"))
     for f in libs:
         data = open(os.path.join(a.glibc, f), "rb").read()
         out.archivo(f"usr/lib/{f}", data, 0o755)
@@ -440,53 +491,22 @@ def main():
     out.archivo("etc/environment", b"LD_LIBRARY_PATH=/usr/lib/aarch64-linux-gnu:/lib/aarch64-linux-gnu:/usr/lib:/lib\nPATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n", 0o644)
 
     # Enlace de la llave GPG oficial de Debian en trusted.gpg.d para verificacion de firmas en apt
-    ti_key = tarfile.TarInfo("etc/apt/trusted.gpg.d/debian-archive-keyring.gpg")
-    ti_key.type = tarfile.SYMTYPE
-    ti_key.linkname = "../../../usr/share/keyrings/debian-archive-keyring.gpg"
-    ti_key.mode = 0o777
-    ti_key.mtime = int(time.time())
-    out.t.addfile(ti_key)
-
-    # Enlaces de compatibilidad usrmerge y utilidades esenciales en /usr/bin y /usr/sbin
-    for b in ["bash", "sh", "dash", "tar", "grep", "sed", "gzip", "cat", "ls", "cp",
-              "mv", "rm", "mkdir", "uname", "date", "sleep", "readlink", "mktemp",
-              "sync", "stty", "echo", "false", "true", "pwd", "ln", "df"]:
-        ti = tarfile.TarInfo(f"usr/bin/{b}")
-        ti.type = tarfile.SYMTYPE
-        ti.linkname = f"../../bin/{b}"
-        ti.mode = 0o777
-        ti.mtime = int(time.time())
-        out.t.addfile(ti)
+    out.simbolico("etc/apt/trusted.gpg.d/debian-archive-keyring.gpg", "../../../usr/share/keyrings/debian-archive-keyring.gpg")
 
     # Alternativas que registrarían los postinst de la base (which, awk, lzma...), como enlaces directos al destino.
     for link, destino in sorted(alternativas(postinsts).items()):
-        ti = tarfile.TarInfo(link.lstrip("/"))
-        ti.type = tarfile.SYMTYPE
-        ti.linkname = os.path.relpath(destino, os.path.dirname(link))
-        ti.mode = 0o777
-        ti.mtime = int(time.time())
-        out.directorio(os.path.dirname(ti.name))
-        out.t.addfile(ti)
+        enlace_, destino = out.unificar(link.lstrip("/")), out.unificar(destino.lstrip("/"))
+        out.simbolico(enlace_, os.path.relpath(destino, os.path.dirname(enlace_)))
 
     # Nuestra glibc usa --libdir=/usr/lib y busca los módulos de iconv en /usr/lib/gconv; Debian los guarda en el
     # directorio multiarch. Sin este enlace iconv() falla y el postinst de dictionaries-common rompe la instalación.
-    ti_gconv = tarfile.TarInfo("usr/lib/gconv")
-    ti_gconv.type = tarfile.SYMTYPE
-    ti_gconv.linkname = "aarch64-linux-gnu/gconv"
-    ti_gconv.mode = 0o777
-    ti_gconv.mtime = int(time.time())
-    out.t.addfile(ti_gconv)
+    out.simbolico("usr/lib/gconv", "aarch64-linux-gnu/gconv")
 
     # Stub de update-rc.d para evitar fallos de demonios init/systemd en Android
     out.archivo("usr/sbin/update-rc.d", b"#!/bin/sh\nexit 0\n", 0o755)
 
     # nologin -> false
-    ti_nologin = tarfile.TarInfo("usr/sbin/nologin")
-    ti_nologin.type = tarfile.SYMTYPE
-    ti_nologin.linkname = "../bin/false"
-    ti_nologin.mode = 0o777
-    ti_nologin.mtime = int(time.time())
-    out.t.addfile(ti_nologin)
+    out.simbolico("usr/sbin/nologin", "../bin/false")
 
     out.directorio("run/sshd")
 
