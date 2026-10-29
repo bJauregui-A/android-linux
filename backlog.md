@@ -8,11 +8,6 @@ El detalle técnico de los ítems anteriores (B04–B61) está en `git show c268
 
 Ordenadas por cuánto destraban.
 
-- **B16** · Batería de pruebas de humo que corre en una instancia y dice en un minuto si algo se rompió
-  - Shell y paquetes (instalar y quitar uno chico).
-  - App gráfica y GPU.
-  - Audio y red.
-  - Un solo comando que corre todo y resume qué falló.
 - **B19** · `/bin`, `/sbin` y `/lib` unificados con `/usr` en Debian, como en un Debian actual
   - Convertir las carpetas en enlaces a `/usr` en instancias nuevas.
   - Migrar las instancias existentes.
