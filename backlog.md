@@ -9,6 +9,16 @@ El detalle técnico de los ítems anteriores (B04–B61) está en `git show c268
 
 Ordenadas por cuánto destraban.
 
+- **B99** · `stat` muestra el dueño real de los archivos que el dueño real no puede leer
+  - El dueño virtual vive en un xattr y el kernel no deja leerlo si el dueño real no puede leer el archivo (`044`, `000`): `stat` los muestra del usuario principal aunque sean de root. El acceso sí se decide bien (B96 concede la lectura solo al decidir un acceso).
+  - Guardar el dueño donde se pueda leer siempre, sin un `chmod` por cada `stat` (desataría `inotify` en los gestores de archivos), por ejemplo guardando también el modo virtual.
+  - Comprobar con `stat -c %U` sobre un `044` y un `000` de root.
+- **B100** · El primer arranque no aplana los modos de las carpetas del sistema
+  - `apk/primer-arranque.sh` pasa a `755` toda carpeta de `/usr`, `/etc`, `/var` y `/opt` hasta tres niveles (era por avisos de `pacman` cuando nacían en `700`), y deja abiertas las que en Linux son más cerradas (`/etc/ssl/private`, `/var/lib/private`, `/etc/sudoers.d`).
+  - Quitar la línea ahora que los procesos usan `umask 022` y comprobar que `pacman` y `apt` no avisan.
+- **B101** · El escritorio `xfce-x11` va lento, en Debian y en Arch
+  - En una instancia Debian nueva con la libc base (sin el parche de permisos) ya iba lenta; en `sfce` (Arch, `xfce-x11`) se nota con trancones desde que se actualizó con el parche (no se probó sin él), y el XFCE de Arch con Wayland (`xfce`) va bien: el común es la ruta X11 de la app.
+  - Medir dónde se va el tiempo (servidor X11 de la app, arranque de la sesión, `fontconfig`) y compararlo con `lxqt` de Debian; probar `sfce` con la libc base para saber si el costo de abrir archivos del parche pesa ahí (B96 mide unos 20 µs por `open`).
 - **B92** · Los enlaces simbólicos absolutos se guardan como en Linux, sin la ruta real de Android
   - Hoy `symlinkat` guarda `/data/user/0/<app>/files/instancias/<id>/usr/...` y `readlinkat` le quita el prefijo al leer: si la instancia cambia de carpeta, se rompen (ya hay 4 rotos en `dev-6918`).
   - Que el enlace guarde el destino de Linux y se resuelva con el prefijo de la instancia donde está guardado.
