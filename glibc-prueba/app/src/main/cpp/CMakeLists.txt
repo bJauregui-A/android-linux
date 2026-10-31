@@ -6,6 +6,7 @@ set(WL ${CMAKE_CURRENT_SOURCE_DIR}/../../../../wayland/salida)
 
 add_library(anfitrion SHARED
     anfitrion.c
+    instancia.c
     ${WL}/proto/xdg-shell-protocol.c
     ${WL}/proto/linux-dmabuf-v1-protocol.c
     ${WL}/proto/android-ahb-v1-protocol.c

@@ -208,7 +208,7 @@ final class ClienteX11 {
         }
     }
 
-    // /tmp/.X11-unix/X10 de la instancia -> files/x11/[<letra>/].X11-unix/X10 (como wayland-0 en Wayland.iniciarPara).
+    // /tmp/.X11-unix/X10 de la instancia -> files/x11/[<letra>/].X11-unix/X10 (como wayland-0 -> files/wayland/wayland-0 en Wayland.iniciarPara).
     private void enlazarSocket(String instanciaId) throws ErrnoException {
         File dir = new File(SistemaLinux.raiz(app, instanciaId), "tmp/.X11-unix");
         dir.mkdirs();

@@ -1,7 +1,8 @@
 /* Anfitrión Wayland mínimo dentro de la app (bionic, NDK).
 
    Los programas glibc (sway anidado, foot...) se conectan al socket
-   <prefijo>/run/user/<uid>/wayland-0 y comparten sus cuadros por memfd
+   files/wayland/wayland-0 (enlazado en <prefijo>/run/user/<uid> de cada
+   instancia, ver Wayland.java) y comparten sus cuadros por memfd
    (wl_shm).  El anfitrión muestra a pantalla completa el último xdg_toplevel
    mapeado: copia el buffer a una ANativeWindow (el SurfaceView de
    WaylandActivity) y le devuelve el tacto (gestos -> puntero y scroll) y el teclado
@@ -24,11 +25,13 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <jni.h>
+#include <limits.h>
 #include <linux/dma-buf.h>
 #include <linux/input-event-codes.h>
 #include <poll.h>
 #include <pthread.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/eventfd.h>
@@ -41,6 +44,7 @@
 #include <wayland-server.h>
 
 #include "android-ahb-v1-server-protocol.h"
+#include "instancia.h"
 #include "keymap.h"
 #include "linux-dmabuf-v1-server-protocol.h"
 #include "pointer-constraints-unstable-v1-server-protocol.h"
@@ -97,7 +101,7 @@ static struct
 #define VENTANA_BGRA 5
 
 /* Cola Java -> hilo del anfitrión.  */
-enum { EV_VENTANA, EV_MOVER, EV_BOTON, EV_EJE, EV_GESTO, EV_TECLA, EV_TOMADA, EV_COMPLETADA, EV_VSYNC };
+enum { EV_VENTANA, EV_MOVER, EV_BOTON, EV_EJE, EV_GESTO, EV_TECLA, EV_TOMADA, EV_COMPLETADA, EV_VSYNC, EV_FRENTE };
 struct evento { int tipo, a; float x, y; void *p; };
 static struct evento cola[512];
 static int ncola, evfd = -1;
@@ -772,6 +776,17 @@ guardar_sin_ventana (struct wl_list *cbs)
   wl_list_init (cbs);
 }
 
+/* Lo mismo para los de una superficie que no es la que se ve (otra instancia
+   Wayland de fondo): esperan a que cambie el foco.  Hilo del anfitrión.  */
+static struct wl_list en_fondo;
+
+static void
+guardar_en_fondo (struct wl_list *cbs)
+{
+  wl_list_insert_list (en_fondo.prev, cbs);
+  wl_list_init (cbs);
+}
+
 static void
 responder_callbacks (struct wl_list *cbs)
 {
@@ -952,6 +967,12 @@ cambiar_foco (struct superficie *s)
       if (wl_resource_get_client (r) == wl_resource_get_client (foco->res))
 	wl_keyboard_send_leave (r, wl_display_next_serial (display), foco->res);
   foco = s;
+  if (!wl_list_empty (&en_fondo))
+    {
+      wl_list_insert_list (para_vsync.prev, &en_fondo);
+      wl_list_init (&en_fondo);
+      pedir_vsync ();
+    }
   if (s == NULL)
     return;
   struct wl_array teclas;
@@ -965,13 +986,47 @@ cambiar_foco (struct superficie *s)
   wl_array_release (&teclas);
 }
 
-/* El último toplevel mapeado que quede.  */
+/* Raíz de la instancia al frente (Wayland.alFrente); NULL = cualquiera.  */
+static char *raiz_frente;
+
+/* ¿El cliente es de la instancia al frente?  Por su pid, como Pausa.  */
+static bool
+de_la_que_esta_al_frente (struct wl_client *c)
+{
+  if (raiz_frente == NULL)
+    return true;
+  pid_t pid;
+  wl_client_get_credentials (c, &pid, NULL, NULL);
+  char ruta[64], cwd[PATH_MAX], cmdline[4096];
+  snprintf (ruta, sizeof ruta, "/proc/%d/cwd", pid);
+  ssize_t n = readlink (ruta, cwd, sizeof cwd - 1);
+  cwd[n > 0 ? n : 0] = '\0';
+  snprintf (ruta, sizeof ruta, "/proc/%d/cmdline", pid);
+  n = 0;
+  int fd = open (ruta, O_RDONLY | O_CLOEXEC);
+  if (fd >= 0)
+    {
+      n = read (fd, cmdline, sizeof cmdline - 1);
+      close (fd);
+    }
+  if (n < 0)
+    n = 0;
+  for (ssize_t i = 0; i < n; i++)
+    if (cmdline[i] == '\0')
+      cmdline[i] = ' ';
+  while (n > 0 && cmdline[n - 1] == ' ')
+    n--;
+  cmdline[n] = '\0';
+  return de_la_instancia (cwd, cmdline, raiz_frente);
+}
+
+/* El último toplevel mapeado que quede de la instancia al frente.  */
 static void
 elegir_foco (void)
 {
   struct superficie *s, *elegida = NULL;
   wl_list_for_each (s, &toplevels, link)
-    if (s->mapeado)
+    if (s->mapeado && de_la_que_esta_al_frente (wl_resource_get_client (s->res)))
       elegida = s;
   if (foco_puntero != NULL && foco_puntero != elegida)
     foco_puntero = NULL;
@@ -1258,6 +1313,11 @@ surface_commit (struct wl_client *c, struct wl_resource *r)
   if (!hay_ventana)
     {
       guardar_sin_ventana (&s->callbacks);
+      return;
+    }
+  if (foco != NULL && raiz != foco)
+    {
+      guardar_en_fondo (&s->callbacks);
       return;
     }
   uint32_t t = ahora_ms ();
@@ -2285,6 +2345,21 @@ procesar_cola (int fd, uint32_t mask, void *data)
       case EV_VSYNC:
 	responder_callbacks (&para_vsync);
 	break;
+      case EV_FRENTE:
+	{
+	  free (raiz_frente);
+	  raiz_frente = ev[i].p;
+	  struct superficie *antes = foco;
+	  elegir_foco ();
+	  if (foco == antes)
+	    break;
+	  /* El cuadro que queda es de la instancia anterior: fuera.  */
+	  ocultar_capa ();
+	  liberar_cpu ();
+	  if (foco != NULL)
+	    enviar_configure (foco);	/* que mande un cuadro */
+	  break;
+	}
       }
   return 0;
 }
@@ -2400,6 +2475,7 @@ Java_dev_ben4shot_glibcprueba_Wayland_iniciar (JNIEnv *env, jclass cls, jstring 
 
   wl_list_init (&para_vsync);
   wl_list_init (&sin_ventana);
+  wl_list_init (&en_fondo);
   vsync_fd = eventfd (0, EFD_CLOEXEC | EFD_NONBLOCK);
   pthread_t tv;
   pthread_create (&tv, NULL, hilo_vsync, NULL);
@@ -2470,6 +2546,15 @@ Java_dev_ben4shot_glibcprueba_Wayland_limpiarPantalla (JNIEnv *env, jclass cls)
     }
   en_pantalla = NULL;
   pthread_mutex_unlock (&mtx);
+}
+
+JNIEXPORT void JNICALL
+Java_dev_ben4shot_glibcprueba_Wayland_alFrenteNativo (JNIEnv *env, jclass cls, jstring jraiz)
+{
+  const char *raiz = (*env)->GetStringUTFChars (env, jraiz, NULL);
+  char *copia = strdup (raiz);
+  (*env)->ReleaseStringUTFChars (env, jraiz, raiz);
+  encolar ((struct evento) { .tipo = EV_FRENTE, .p = copia });
 }
 
 JNIEXPORT void JNICALL

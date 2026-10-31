@@ -422,8 +422,8 @@ public class TerminalService extends Service implements TerminalSessionClient {
     synchronized void cerrarSoloCompositor(SesionInstancia s) {
         if (s == null) return;
         Pausa.reanudar(this, s.id);
-        // La pantalla Wayland es una sola: cerrar un escritorio X11 no debe borrar la de otro Wayland que esté a la vista.
-        if (!Pantalla.esX11(this, s.id)) {
+        // La pantalla Wayland es una sola: cerrar un escritorio X11 o un Wayland de fondo no debe borrar el que está a la vista.
+        if (!Pantalla.esX11(this, s.id) && Wayland.estaAlFrente(SistemaLinux.raiz(this, s.id).getAbsolutePath())) {
             try {
                 Wayland.limpiarPantalla();
             } catch (Throwable ignorada) { }
@@ -629,18 +629,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
             return;
         }
 
-        // El anfitrión Wayland es uno solo: si otra instancia Wayland tiene escritorio, se cierra solo su compositor para
-        // dar paso al nuevo, preservando su terminal y archivos. Los escritorios X11 no entran en esto: cada uno tiene su
-        // servidor (ClienteX11), así que conviven entre sí y con un Wayland, y la pantalla muestra uno.
-        boolean nuevaEsX11 = Pantalla.esX11(this, idActual);
-        for (SesionInstancia otra : sesiones.values()) {
-            if (!otra.id.equals(idActual) && otra.tieneEscritorio()
-                    && !nuevaEsX11 && !Pantalla.esX11(this, otra.id)) {
-                Log.i(TAG, "Cerrando compositor gráfico previo de " + otra.id + " para iniciar " + idActual);
-                cerrarSoloCompositor(otra);
-            }
-        }
-
+        // Los escritorios de otras instancias siguen vivos (Wayland y X11): la pantalla muestra uno.
         actualizarNotificacion();
         AdaptadorInstalacion instalacion = SistemaLinux.adaptador(this, idActual);
         if (!instalacion.instalada(this) && instalacion.instaladorDisponible(this)) return;

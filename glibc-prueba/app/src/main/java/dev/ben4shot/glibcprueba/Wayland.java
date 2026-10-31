@@ -7,8 +7,9 @@ import android.view.Surface;
 
 import java.io.File;
 
-// Anfitrión Wayland (app/src/main/cpp/anfitrion.c): socket wayland-0 en
-// <prefijo>/run/user/<uid>, que dentro del prefijo es XDG_RUNTIME_DIR=/run/user/<uid>.
+// Anfitrión Wayland (app/src/main/cpp/anfitrion.c): un solo socket para toda la app, files/wayland/wayland-0.
+// Cada instancia lo ve por un enlace en <prefijo>/run/user/<uid> (XDG_RUNTIME_DIR=/run/user/<uid> dentro del prefijo),
+// así borrar una instancia no se lleva el socket de las demás.
 final class Wayland {
     static {
         System.loadLibrary("anfitrion");
@@ -19,7 +20,7 @@ final class Wayland {
         return "/run/user/" + Process.myUid();
     }
 
-    private static File dirAnfitrion;
+    private static boolean anfitrionIniciado;
 
     // Idempotente: lo llaman la terminal y WaylandActivity.
     static synchronized void iniciar(Context ctx) {
@@ -27,8 +28,23 @@ final class Wayland {
     }
 
     static synchronized void iniciarPara(Context ctx, String instanciaId) {
+        File carpetaApp = new File(ctx.getFilesDir(), "wayland");
+        soloDelDueno(carpetaApp);
+        if (!anfitrionIniciado) {
+            anfitrionIniciado = iniciar(carpetaApp.getAbsolutePath());
+            if (!anfitrionIniciado) Log.e("WAYLAND", "no arrancó el anfitrión en " + carpetaApp);
+        }
         File raiz = instanciaId != null ? SistemaLinux.raiz(ctx, instanciaId) : SistemaLinux.raizSeleccionada(ctx);
         File dir = new File(raiz, runtimeDir().substring(1));
+        soloDelDueno(dir);
+        try {
+            EnlacesWayland.enlazar(carpetaApp, dir);
+        } catch (java.io.IOException e) {
+            Log.w("WAYLAND", "enlace simbólico wayland-0", e);
+        }
+    }
+
+    private static void soloDelDueno(File dir) {
         dir.mkdirs();
         dir.setReadable(false, false);
         dir.setWritable(false, false);
@@ -36,35 +52,23 @@ final class Wayland {
         dir.setReadable(true, true);
         dir.setWritable(true, true);
         dir.setExecutable(true, true);
-        if (dirAnfitrion == null) {
-            if (iniciar(dir.getAbsolutePath())) {
-                dirAnfitrion = dir;
-            } else {
-                Log.e("WAYLAND", "no arrancó el anfitrión en " + dir);
-            }
-        }
-        // Si el anfitrión ya arrancó en otra instancia, enlazar el socket wayland-0
-        if (dirAnfitrion != null && !dirAnfitrion.equals(dir)) {
-            File srcSock = new File(dirAnfitrion, "wayland-0");
-            File dstSock = new File(dir, "wayland-0");
-            File srcLock = new File(dirAnfitrion, "wayland-0.lock");
-            File dstLock = new File(dir, "wayland-0.lock");
-            try {
-                if (srcSock.exists() && (!dstSock.exists() || !dstSock.getCanonicalPath().equals(srcSock.getCanonicalPath()))) {
-                    dstSock.delete();
-                    android.system.Os.symlink(srcSock.getAbsolutePath(), dstSock.getAbsolutePath());
-                }
-                if (srcLock.exists() && (!dstLock.exists() || !dstLock.getCanonicalPath().equals(srcLock.getCanonicalPath()))) {
-                    dstLock.delete();
-                    android.system.Os.symlink(srcLock.getAbsolutePath(), dstLock.getAbsolutePath());
-                }
-            } catch (Exception e) {
-                Log.w("WAYLAND", "enlace simbólico wayland-0", e);
-            }
-        }
     }
 
     private static native boolean iniciar(String dir);
+
+    private static String raizAlFrente;
+
+    // El anfitrión muestra y da la entrada al escritorio de la instancia con esta raíz; los de las demás quedan de fondo.
+    static synchronized void alFrente(String raiz) {
+        raizAlFrente = raiz;
+        alFrenteNativo(raiz);
+    }
+
+    static synchronized boolean estaAlFrente(String raiz) {
+        return raiz.equals(raizAlFrente);
+    }
+
+    private static native void alFrenteNativo(String raiz);
 
     // surface null = la ventana se fue (el último cuadro queda guardado).
     static native void ventana(Surface surface, int ancho, int alto, int mmAncho, int mmAlto);

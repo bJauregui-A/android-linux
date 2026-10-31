@@ -268,6 +268,9 @@ public class WaylandActivity extends Activity {
     protected void onResume() {
         super.onResume();
         Audio.alFrente(instanciaId);
+        if (!Pantalla.esX11(this, instanciaId)) {
+            Wayland.alFrente(SistemaLinux.raiz(this, instanciaId).getAbsolutePath());
+        }
         inmersivo();
         reconectarVentana();
     }
