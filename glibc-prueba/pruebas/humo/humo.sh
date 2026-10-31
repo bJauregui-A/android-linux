@@ -50,6 +50,9 @@ instalar() {
 if grupo shell; then
   caso "shell: bash corre comandos"  '[ "$(bash -c "echo hola")" = hola ]'
   caso "shell: sudo funciona"  'como_root true >/dev/null'
+  # B47: la raíz es de root y tiene el modo de su distro: Debian 755; Arch 555 (o 755 mientras TerminalService la sube, hasta B95)
+  caso "shell: raíz root:root con el modo de su distro"  'r=$(stat -c "%a %U:%G" "${HUMO_RAIZ:-/}"); if command -v pacman >/dev/null 2>&1; then [ "$r" = "555 root:root" ] || [ "$r" = "755 root:root" ]; else [ "$r" = "755 root:root" ]; fi'
+  caso "shell: sudo mkdir crea y borra una carpeta en /"  'como_root mkdir "${HUMO_RAIZ%/}/x" && como_root rmdir "${HUMO_RAIZ%/}/x"'
   caso "shell: /tmp escribe y lee"   'f=$(mktemp) && echo dato > "$f" && [ "$(cat "$f")" = dato ]; r=$?; rm -f "$f"; [ $r -eq 0 ]'
   # /usr unificado: /bin, /sbin y /lib son enlaces que resuelven dentro de /usr (HUMO_RAIZ cambia la raíz, para las pruebas)
   for c in bin sbin lib; do

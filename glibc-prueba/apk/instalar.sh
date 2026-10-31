@@ -85,6 +85,13 @@ extraer() { # extraer <offset> <largo> <qué> [tar options...]
     fi
 }
 
+# B47: modo de la raíz como en la distro real: Debian 755; Arch 555 (systemd: tmpfiles.d/root.conf, "z / 555"). Android
+# crea la carpeta en 700 y el tar de Android no aplica la entrada ./ de un tar. Se llama al final: con 555 este
+# instalador ya no podría crear archivos en $P.
+fijar_raiz() {
+    if [ "$GLIBC_PKG_BACKEND" = "apt" ]; then chmod 755 "$P"; else chmod 555 "$P"; fi
+}
+
 # Lo gráfico de la capa: no va en las instancias sin entorno. Una opción de tar por línea (sin comillas: quien las
 # use debe expandirlas con set -f).
 exclusiones_graficas() {
@@ -376,6 +383,7 @@ fi
 # DNS de Android (el tar trae uno de respaldo)
 rm -f "$P/etc/resolv.conf"
 for s in $ANDROID_DNS; do echo "nameserver $s"; done > "$P/etc/resolv.conf"
+fijar_raiz
 cd "$P"
 echo ""
 echo "➜ Iniciando configuración del entorno Linux..."

@@ -9,10 +9,16 @@ El detalle técnico de los ítems anteriores (B04–B61) está en `git show c268
 
 Ordenadas por cuánto destraban.
 
-- **B47** · La raíz de las instancias Arch nuevas no queda en `555`
-  - Hoy se tapa al abrir la instancia (`TerminalService`, `prefijo.setWritable`); falta saber qué la deja así en la base.
-  - Arreglarlo en `bootstrap.py`, con su prueba en `pruebas/arch/base.sh`.
-  - Quitar el parche de `TerminalService` y comprobar `sudo mkdir /x` en una instancia nueva.
+- **B95** · root salta los permisos de archivos y carpetas, como en Linux
+  - Hoy el kernel revisa con el UID de la app y root virtual no tiene ventaja: `sudo mkdir` en una carpeta `555` o `sudo cat` de un `000` fallan.
+  - root lee, escribe, crea y borra aunque el modo no lo permita; ejecutar sigue pidiendo algún bit `x`.
+  - El modo del archivo queda como estaba.
+  - Comprobar con `sudo` sobre carpetas `555` y archivos `000` y `444`.
+- **B96** · Los permisos se aplican según el usuario virtual: dueño, grupo y otros
+  - Hoy cuentan solo los bits del dueño, para todos: `user` crea en `/` sin `sudo` y `www-data` lee un `600` de `user`.
+  - Decidir el acceso con el dueño virtual (0026, 0027), el modo y las credenciales del proceso (uid, gid y grupos extra) al abrir, crear, borrar, renombrar, ejecutar, entrar a carpetas y en `access`.
+  - El bit sticky de `/tmp`: solo el dueño borra lo suyo.
+  - Comprobar con `user`, `www-data` y root sobre `600`, `640`, `644`, `755` y `1777`.
 - **B92** · Los enlaces simbólicos absolutos se guardan como en Linux, sin la ruta real de Android
   - Hoy `symlinkat` guarda `/data/user/0/<app>/files/instancias/<id>/usr/...` y `readlinkat` le quita el prefijo al leer: si la instancia cambia de carpeta, se rompen (ya hay 4 rotos en `dev-6918`).
   - Que el enlace guarde el destino de Linux y se resuelva con el prefijo de la instancia donde está guardado.
@@ -104,7 +110,15 @@ Escritorios del instalador oficial que todavía no tenemos. Cada uno deja de ser
 ## P3 — Servicios y manejo de instancias
 
 - **B27a** · `sshd` corre como root con separación de privilegios, con la configuración oficial de OpenSSH (depende de B89)
-- **B27b** · Apache atiende con sus procesos como `www-data`
+- **B27b** · Apache atiende con sus procesos como `www-data` (depende de B96)
+- **B97** · Capacidades y límites de root virtuales
+  - `capset`, `capget`, `PR_SET_KEEPCAPS` y `PR_CAPBSET_*` virtuales (hoy `setpriv --reuid` exige bajar primero el gid).
+  - `setrlimit` respeta el tope duro que recuerda el proceso.
+  - `mount`, `unshare` y `setns` de un usuario que no es root dan `EPERM`, como en Linux (los de root son B90).
+- **B98** · Detalles de setuid y setgid como en Linux
+  - `no_new_privs` impide que `execve` de un setuid cambie el usuario.
+  - `chown` limpia los bits setuid y setgid.
+  - Una carpeta con setgid hace que lo creado dentro herede su grupo.
 - **B51** · Ver el log de `sshd` con `service logs ssh`
   - Hoy `sshd -D -e` deja sus errores en `/dev/null` y el log solo tiene las líneas `INICIO`.
   - Que sus mensajes lleguen al log del supervisor.

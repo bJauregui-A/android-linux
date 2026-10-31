@@ -10,12 +10,14 @@ HUMO=$PWD/pruebas/humo/humo.sh
 # Entorno nuevo: bin/ solo con las herramientas básicas (sin pacman ni apt-get del PC) y los falsos que cada caso agrega.
 entorno() {
   e=$(mktemp -d -p "$tmp"); mkdir "$e/bin"; : > "$e/log"
-  for c in bash env timeout grep cat mktemp rm sleep sed date mkdir touch wc tee head tr ls chmod printf stdbuf python3 pgrep readlink; do
+  mkdir -p "$e/raiz/usr/bin" "$e/raiz/usr/sbin" "$e/raiz/usr/lib"; for c in bin sbin lib; do ln -s usr/$c "$e/raiz/$c"; done
+  for c in bash env timeout grep cat mktemp rm sleep sed date mkdir touch wc tee head tr ls chmod printf stdbuf python3 pgrep readlink rmdir; do
     ln -s "$(command -v "$c")" "$e/bin/$c"
   done
+  falso stat 'echo "755 root:root"'
   falso sudo 'if [ "$1" = -n ] && [ "$2" = true ]; then exit 0; fi; [ "$1" = -n ] && shift; exec "$@"'
 }
-falso() { printf '#!/bin/sh\n%s\n' "$2" > "$e/bin/$1"; chmod +x "$e/bin/$1"; }
+falso() { rm -f "$e/bin/$1"; printf '#!/bin/sh\n%s\n' "$2" > "$e/bin/$1"; chmod +x "$e/bin/$1"; }
 # pacman falso: anota los argumentos; con $e/falla-una-vez la primera instalación dice "target not found".
 pacman_bueno() {
   falso pacman 'echo "$*" >> '"$e"'/log
@@ -25,7 +27,7 @@ exit 0'
 # correr <grupo> [VAR=valor...]: entorno limpio (sin el DISPLAY del PC); salida en $e/out, código en $rc
 correr() {
   g=$1; shift
-  /usr/bin/env -i PATH="$e/bin" HUMO_SOLO="$g" HUMO_X11_DIR="$e/x11" HUMO_GPU_SEGUNDOS=3 ${HUMO_CLAVE:+HUMO_CLAVE="$HUMO_CLAVE"} "$@" \
+  /usr/bin/env -i PATH="$e/bin" HUMO_SOLO="$g" HUMO_RAIZ="$e/raiz" HUMO_X11_DIR="$e/x11" HUMO_GPU_SEGUNDOS=3 ${HUMO_CLAVE:+HUMO_CLAVE="$HUMO_CLAVE"} "$@" \
     /usr/bin/bash "$HUMO" > "$e/out" 2>&1; rc=$?
 }
 linea() { grep -E "^$1 +.*$2" "$e/out"; }
@@ -66,13 +68,36 @@ con_clave; correr shell
 caso "sudo con clave: sin HUMO_CLAVE la línea de sudo es FALLA"  'linea FALLA "sudo" >/dev/null && [ "$rc" -ne 0 ]'
 
 # 6b. /usr unificado (B19): /bin, /sbin y /lib resuelven dentro de /usr; la raíz de la prueba es HUMO_RAIZ (por defecto /)
-raiz_falsa() { entorno; pacman_bueno; mkdir -p "$e/raiz/usr/bin" "$e/raiz/usr/sbin" "$e/raiz/usr/lib"; }
+raiz_falsa() { entorno; pacman_bueno; rm -rf "$e/raiz"; mkdir -p "$e/raiz/usr/bin" "$e/raiz/usr/sbin" "$e/raiz/usr/lib"; }
 raiz_falsa; for c in bin sbin lib; do ln -s usr/$c "$e/raiz/$c"; done; correr shell HUMO_RAIZ="$e/raiz"
 caso "/usr unificado: las tres enlazadas dentro de /usr es OK"  'linea OK "usr unificado" >/dev/null && [ "$rc" -eq 0 ]'
 raiz_falsa; for c in sbin lib; do ln -s usr/$c "$e/raiz/$c"; done; mkdir "$e/raiz/bin"; correr shell HUMO_RAIZ="$e/raiz"
 caso "/usr unificado: /bin como carpeta real es FALLA y nombra /bin"  'linea FALLA "usr unificado.*/bin" >/dev/null && [ "$rc" -ne 0 ]'
 raiz_falsa; for c in bin sbin; do ln -s usr/$c "$e/raiz/$c"; done; ln -s ../tmp "$e/raiz/lib"; correr shell HUMO_RAIZ="$e/raiz"
 caso "/usr unificado: /lib que sale de /usr es FALLA"  'linea FALLA "usr unificado.*/lib" >/dev/null'
+
+# 6c. raíz (B47): dueño root:root y el modo de su distro (Debian 755; Arch 555, o 755 mientras TerminalService la sube hasta B95)
+raiz_modo() { falso stat "echo '$1'"; correr shell; }
+entorno; falso apt-get 'exit 0'; raiz_modo '755 root:root'
+caso "raíz: Debian 755 root:root es OK"  'linea OK "raíz" >/dev/null'
+entorno; falso apt-get 'exit 0'; raiz_modo '555 root:root'
+caso "raíz: Debian 555 es FALLA"  'linea FALLA "raíz" >/dev/null && [ "$rc" -ne 0 ]'
+entorno; falso apt-get 'exit 0'; raiz_modo '755 user:user'
+caso "raíz: Debian con dueño user:user es FALLA"  'linea FALLA "raíz" >/dev/null'
+for m in 555 755; do
+  entorno; pacman_bueno; raiz_modo "$m root:root"
+  caso "raíz: Arch $m root:root es OK"  'linea OK "raíz" >/dev/null'
+done
+entorno; pacman_bueno; raiz_modo '700 root:root'
+caso "raíz: Arch 700 es FALLA"  'linea FALLA "raíz" >/dev/null'
+entorno; pacman_bueno; raiz_modo '555 user:user'
+caso "raíz: Arch con dueño user:user es FALLA"  'linea FALLA "raíz" >/dev/null'
+
+# 6d. sudo crea y borra una carpeta en la raíz (B47)
+entorno; pacman_bueno; correr shell
+caso "sudo mkdir: crea y borra /x, OK y no deja la carpeta"  'linea OK "mkdir" >/dev/null && [ ! -e "$e/raiz/x" ]'
+entorno; pacman_bueno; falso mkdir 'exit 1'; correr shell
+caso "sudo mkdir: mkdir que falla es FALLA"  'linea FALLA "mkdir" >/dev/null && [ "$rc" -ne 0 ]'
 
 # --- gpu ---
 vk() { falso vulkaninfo "echo '	deviceName         = $1'"; }
