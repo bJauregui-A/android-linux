@@ -449,7 +449,8 @@ grep -q "^/bin/bash$" /etc/shells 2>/dev/null || echo "/bin/bash" >> /etc/shells
 grep -q "^/usr/bin/bash$" /etc/shells 2>/dev/null || echo "/usr/bin/bash" >> /etc/shells
 # Normalizar permisos de directorios del sistema para evitar advertencias de pacman
 umask 022
-find /usr /etc /var /opt -maxdepth 3 -type d -exec chmod 755 {} + 2>/dev/null || true
+# (sin tocar las de sticky: /tmp y /var/tmp son 1777)
+find /usr /etc /var /opt -maxdepth 3 -type d ! -perm -1000 -exec chmod 755 {} + 2>/dev/null || true
 mkdir -p /etc/services.d /usr/lib/systemd/system 2>/dev/null || true
 # El home con las configs de /etc/skel (sway, waybar, kitty, zsh...)
 mkdir -p /home/$N/.config

@@ -393,9 +393,12 @@ def main():
     for d in ["usr/bin", "usr/sbin", "usr/lib",
               "usr/lib/aarch64-linux-gnu", "usr/local/bin", "usr/local/sbin",
               "etc/apt/apt.conf.d", "etc/apt/sources.list.d", "etc/dpkg/dpkg.cfg.d",
-              "var/lib/dpkg/info", "var/lib/dpkg/updates", "var/log", "tmp",
-              "home/user", "var/lib/linux-android", "dev/shm/.sysv"]:
+              "var/lib/dpkg/info", "var/lib/dpkg/updates", "var/log",
+              "home/user", "var/lib/linux-android", "dev/shm/.sysv", "mnt", "media"]:
         out.directorio(d)
+    # /tmp y /var/tmp: de root, con sticky, como en Debian (B96); la carpeta padre ya existe, con su modo
+    out.directorio("tmp", 0o1777)
+    out.directorio("var/tmp", 0o1777)
 
     # Base de datos de dpkg
     status_entries = []

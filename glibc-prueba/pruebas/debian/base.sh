@@ -133,5 +133,11 @@ caso "cada usuario de passwd.master está en etc/passwd con el mismo UID" \
 caso "cada grupo de group.master está en etc/group con el mismo GID" \
   'faltan=$(awk -F: "NR==FNR{u[\$1]=\$3; next} !(\$1 in u) || u[\$1]!=\$3{print \$1}" "$d/group" "$d/group.master" 2>/dev/null; [ -s "$d/group.master" ] || echo "(sin group.master)"); [ -z "$faltan" ] || { echo "  faltan: $faltan"; false; }'
 
+# B96: las carpetas de FHS que son de root: /tmp y /var/tmp con sticky (1777), /mnt y /media (755), que Debian trae y la base no.
+caso "tmp es 1777"  'grep -qE "^drwxrwxrwt .* tmp/?$" "$d/lista"'
+caso "var/tmp es 1777"  'grep -qE "^drwxrwxrwt .* var/tmp/?$" "$d/lista"'
+caso "mnt existe y es 755"  'grep -qE "^drwxr-xr-x .* mnt/?$" "$d/lista"'
+caso "media existe y es 755"  'grep -qE "^drwxr-xr-x .* media/?$" "$d/lista"'
+
 echo "fallas: $fallas"
 [ $fallas -eq 0 ]

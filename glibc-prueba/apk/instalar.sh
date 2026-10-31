@@ -92,6 +92,14 @@ fijar_raiz() {
     if [ "$GLIBC_PKG_BACKEND" = "apt" ]; then chmod 755 "$P"; else chmod 555 "$P"; fi
 }
 
+# B96: /tmp y /var/tmp son de todos, con sticky (1777): el tar de Android crea la carpeta antes y no conserva el sticky.
+fijar_temporales() {
+    for _d in tmp var/tmp; do
+        [ -d "$P/$_d" ] && chmod 1777 "$P/$_d"
+    done
+    return 0
+}
+
 # Lo gráfico de la capa: no va en las instancias sin entorno. Una opción de tar por línea (sin comillas: quien las
 # use debe expandirlas con set -f).
 exclusiones_graficas() {
@@ -383,6 +391,7 @@ fi
 # DNS de Android (el tar trae uno de respaldo)
 rm -f "$P/etc/resolv.conf"
 for s in $ANDROID_DNS; do echo "nameserver $s"; done > "$P/etc/resolv.conf"
+fijar_temporales
 fijar_raiz
 cd "$P"
 echo ""
