@@ -454,7 +454,81 @@
  /* Escribe (VAL) o borra (VAL == NULL) un xattr.  Si el archivo no deja
     escribir (0444, 0555), se le da permiso un instante.  */
  static long int
-@@ -2512,6 +2881,169 @@
+@@ -1133,6 +1502,41 @@
+   cred_serializar (cred, root, su, sg);
+ }
+ 
++/* Abre T (ruta ya traducida) para leer su encabezado, como el kernel antes de
++   ejecutarlo.  Quien ejecuta como usuario virtual (no root): necesita x en el
++   camino y del archivo según su clase (dueño, grupo u otros), y no hace falta
++   que pueda leerlo (un ELF 111 se ejecuta): si el kernel niega la lectura se
++   le da un instante.  *DECIDIDO queda en 1 si ya se comprobó x (si no, lo que
++   no es de la instancia sigue con el faccessat del kernel).  */
++static int
++abrir_ejecutable (const char *t, int root, int *decidido)
++{
++  *decidido = 0;
++  if (root || root_virtual ())
++    {
++      int fd = RAW (__NR_openat, AT_FDCWD, t, O_RDONLY | O_CLOEXEC);
++      if (fd == -EACCES)
++	fd = con_permiso (AT_FDCWD, t, 0400, 0, fd, __NR_openat, AT_FDCWD,
++			  (long int) t, O_RDONLY | O_CLOEXEC, 0, 0, 0);
++      return fd;
++    }
++  struct camino c;
++  char buf[PATH_MAX];
++  if (camino_entrar (&c, AT_FDCWD, t, 0, 0) == ACC_NO)
++    return -EACCES;
++  int ax = acceso_virtual (AT_FDCWD, t, 0, 0, 0, 1, buf);
++  if (ax == ACC_NO && !permisos_registro)
++    return -EACCES;
++  *decidido = ax == ACC_SI;
++  camino_dar (&c);
++  int fd = RAW (__NR_openat, AT_FDCWD, t, O_RDONLY | O_CLOEXEC);
++  if (fd == -EACCES && ax == ACC_SI)
++    fd = con_permiso (AT_FDCWD, t, 0400, 0, fd, __NR_openat, AT_FDCWD,
++		      (long int) t, O_RDONLY | O_CLOEXEC, 0, 0, 0);
++  camino_devolver (&c);
++  return fd;
++}
++
+ static long int
+ do_execve (const char *path, char *const argv[], char *const envp[],
+ 	   char *buf, int depth, char *cred, int root)
+@@ -1146,13 +1550,11 @@
+   if (t == NULL)
+     return -ENAMETOOLONG;
+ 
+-  int fd = RAW (__NR_openat, AT_FDCWD, t, O_RDONLY | O_CLOEXEC);
+-  if (fd == -EACCES && (root || root_virtual ()))
+-    fd = con_permiso (AT_FDCWD, t, 0400, 0, fd, __NR_openat, AT_FDCWD, (long int) t,
+-		      O_RDONLY | O_CLOEXEC, 0, 0, 0);
++  int decidido;
++  int fd = abrir_ejecutable (t, root, &decidido);
+   if (fd < 0)
+     return fd;
+-  long int r = acceso_root (AT_FDCWD, (long int) t, X_OK, root);
++  long int r = decidido ? 0 : acceso_root (AT_FDCWD, (long int) t, X_OK, root);
+   if (r < 0)
+     {
+       RAW (__NR_close, fd);
+@@ -1165,6 +1567,14 @@
+   if (n >= 2 && hdr[0] == '#' && hdr[1] == '!')
+     {
+       RAW (__NR_close, fd);
++      /* Un script también hay que poder leerlo: el intérprete lo abre.  */
++      if (decidido)
++	{
++	  char tmp[PATH_MAX];
++	  if (acceso_virtual (AT_FDCWD, t, 0, 0, 0, 4, tmp) == ACC_NO
++	      && !permisos_registro)
++	    return -EACCES;
++	}
+       /* Como el kernel: #!intérprete [un solo argumento]  */
+       hdr[n] = '\0';
+       char *s = hdr + 2;
+@@ -2512,6 +2922,239 @@
    return out_len;
  }
  
@@ -471,6 +545,26 @@
 +			| (a2 & O_TRUNC ? 2 : 0);
 +  int comprobar = !root && !(a2 & (O_PATH | O_TMPFILE))
 +		  && (a2 & (O_CREAT | O_EXCL)) != (O_CREAT | O_EXCL);
++#if IS_IN (rtld)
++  /* El cargador abre el programa y las bibliotecas para mapearlos: un ELF que
++     solo se puede ejecutar (111) tiene que poder abrirse, como lo ejecuta el
++     kernel sin pedir lectura.  */
++  if (comprobar && pedido == 4)
++    {
++      char tmp[PATH_MAX];
++      if (acceso_virtual ((int) a0, (const char *) a1, a2 & O_NOFOLLOW, 0, 1,
++			  4, tmp) == ACC_NO
++	  && acceso_virtual ((int) a0, (const char *) a1, a2 & O_NOFOLLOW, 0,
++			     1, 1, tmp) == ACC_SI)
++	{
++	  long int r = raw (nr, a0, a1, a2, a3, a4, a5);
++	  if (r == -EACCES)
++	    r = con_permiso ((int) a0, (const char *) a1, 0400,
++			     a2 & O_NOFOLLOW, r, nr, a0, a1, a2, a3, a4, a5);
++	  return r;
++	}
++    }
++#endif
 +  if (comprobar
 +      && acceso_negado ((int) a0, (const char *) a1, a2 & O_NOFOLLOW, 0, 1,
 +			pedido))
@@ -511,9 +605,10 @@
 +    r = con_permiso (AT_FDCWD, (const char *) l->a0,
 +		     l->nr == __NR_chdir ? 0100 : 0200, 0, r, l->nr, l->a0,
 +		     l->a1, l->a2, l->a3, l->a4, l->a5);
-+  if (l->nr == __NR_truncate)
-+    r = con_acceso (AT_FDCWD, (const char *) l->a0, 0, 0, 2, r, l->nr, l->a0,
-+		    l->a1, l->a2, l->a3, l->a4, l->a5);
++  if (l->nr == __NR_truncate || l->nr == __NR_chdir)
++    r = con_acceso (AT_FDCWD, (const char *) l->a0, 0, 0,
++		    l->nr == __NR_chdir ? 1 : 2, r, l->nr, l->a0, l->a1, l->a2,
++		    l->a3, l->a4, l->a5);
 +  return r;
 +}
 +
@@ -561,9 +656,55 @@
 +  return r;
 +}
 +
++/* Si la carpeta que contiene DIRFD/PATH tiene el bit sticky (1000), quien no
++   es root solo puede borrarlo, renombrarlo o pisarlo si es suyo (fsuid = dueño
++   virtual del archivo) o si la carpeta es suya.  1 si lo niega (EPERM).  Lo
++   que no existe o no es de la instancia lo resuelve el kernel.  */
++static __attribute__ ((noinline)) int
++sticky_negado (int dirfd, const char *path)
++{
++  if (root_virtual () || permisos_registro || path == NULL)
++    return 0;
++  char padre[PATH_MAX];
++  size_t i = slen (path);
++  while (i > 1 && path[i - 1] == '/')
++    i--;
++  while (i > 0 && path[i - 1] != '/')
++    i--;
++  if (i == 0)
++    {
++      padre[0] = '.';
++      padre[1] = '\0';
++    }
++  else
++    {
++      while (i > 1 && path[i - 1] == '/')
++	i--;
++      if (i >= PATH_MAX)
++	return 0;
++      mcopy (padre, path, i);
++      padre[i] = '\0';
++    }
++  struct stat st;
++  if (RAW (__NR_newfstatat, dirfd, padre, &st, 0) != 0 || !S_ISDIR (st.st_mode)
++      || !(st.st_mode & S_ISVTX))
++    return 0;
++  if (RAW (__NR_newfstatat, dirfd, path, &st, AT_SYMLINK_NOFOLLOW) != 0)
++    return 0;
++  char buf[PATH_MAX];
++  unsigned int du, dg, fu, fg;
++  int par;
++  if (!dueno_virtual_acceso (dirfd, padre, 0, buf, &du, &dg, &par)
++      || !dueno_virtual_acceso (dirfd, path, 1, buf, &fu, &fg, &par))
++    return 0;
++  return cu.f != du && cu.f != fu;
++}
++
 +static long int
 +unlink_virtual (const struct llamada_sys *l)
 +{
++  if (sticky_negado ((int) l->a0, (const char *) l->a1))
++    return -EPERM;
 +  long int r = raw (l->nr, l->a0, l->a1, l->a2, l->a3, l->a4, l->a5);
 +  return con_padres (l->a0, (const char *) l->a1, 0, NULL, r, l->nr, l->a0,
 +		     l->a1, l->a2, l->a3, l->a4, l->a5);
@@ -580,6 +721,9 @@
 +static long int
 +rename_virtual (const struct llamada_sys *l)
 +{
++  if (sticky_negado ((int) l->a0, (const char *) l->a1)
++      || sticky_negado ((int) l->a2, (const char *) l->a3))
++    return -EPERM;
 +  long int r = raw (l->nr, l->a0, l->a1, l->a2, l->a3, l->a4, l->a5);
 +  return con_padres (l->a0, (const char *) l->a1, l->a2,
 +		     (const char *) l->a3, r, l->nr, l->a0, l->a1, l->a2,
@@ -624,7 +768,7 @@
  long int
  __android_path_syscall (long int nr, long int a0, long int a1, long int a2,
  			long int a3, long int a4, long int a5)
-@@ -2973,12 +3505,12 @@
+@@ -2973,12 +3616,14 @@
      case __NR_truncate:
        {
  	XLD (AT_FDCWD, a0, b1);
@@ -634,8 +778,10 @@
 -			   nr == __NR_chdir ? 0100 : 0200, 0, r, nr, a0, a1, a2,
 -			   a3, a4, a5);
 -	return r;
-+	if (nr == __NR_truncate
-+	    && acceso_negado (AT_FDCWD, (const char *) a0, 0, 0, 0, 2))
++	if ((nr == __NR_truncate
++	     && acceso_negado (AT_FDCWD, (const char *) a0, 0, 0, 0, 2))
++	    || (nr == __NR_chdir
++		&& acceso_negado (AT_FDCWD, (const char *) a0, 0, 0, 0, 1)))
 +	  return -EACCES;
 +	struct llamada_sys l = { nr, a0, a1, a2, a3, a4, a5 };
 +	return con_camino (AT_FDCWD, (const char *) a0, 0, 0,
@@ -643,7 +789,7 @@
        }
      case __NR_statfs:
      case __NR_acct:
-@@ -2990,8 +3522,11 @@
+@@ -2990,8 +3635,11 @@
      case __NR_llistxattr:
      case __NR_removexattr:
      case __NR_lremovexattr:
@@ -657,7 +803,7 @@
  
      /* Bloqueadas por el seccomp de apps (bionic no las usa): ENOSYS sin
         llamar al kernel, así glibc usa su alternativa (faccessat/fchmodat,
-@@ -3000,7 +3535,11 @@
+@@ -3000,7 +3648,11 @@
        if (a3 == 0)
  	{
  	  XLD (a0, a1, b1);
@@ -670,7 +816,7 @@
  	}
        return -ENOSYS;
      case __NR_fchmodat2:
-@@ -3022,41 +3561,24 @@
+@@ -3022,41 +3674,24 @@
  	    return r;
  	}
        {
@@ -723,7 +869,7 @@
        }
      case __NR_fstat:
        {
-@@ -3073,67 +3595,57 @@
+@@ -3073,67 +3708,57 @@
      case __NR_mknodat:
        {
  	XLD (a0, a1, b1);
@@ -820,7 +966,7 @@
        }
  
      case __NR_renameat:
-@@ -3141,9 +3653,9 @@
+@@ -3141,9 +3766,9 @@
        {
  	XLD (a0, a1, b1);
  	XLD (a2, a3, b2);
@@ -833,7 +979,7 @@
        }
  
      case __NR_symlinkat:
-@@ -3152,9 +3664,9 @@
+@@ -3152,9 +3777,9 @@
        {
  	XL (a0, b1);
  	XLD (a1, a2, b2);
@@ -846,7 +992,7 @@
        }
  
      case __NR_readlinkat:
-@@ -3169,7 +3681,8 @@
+@@ -3169,7 +3794,8 @@
  	else
  	  {
  	    XLD (a0, a1, b1);
