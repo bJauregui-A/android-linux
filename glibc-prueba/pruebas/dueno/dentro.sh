@@ -1,6 +1,6 @@
 # Pruebas del dueño persistente (B27 fase 2). Corre DENTRO de una instancia (probar-en-telefono.sh).
 D=/tmp/dueno-$$; fallas=0
-mkdir -p $D; cd $D
+mkdir -p $D; chmod 777 $D; cd $D   # otros usuarios crean aquí (B96: los permisos se comprueban)
 ok() { echo "OK $1"; }
 mal() { echo "FALLA $1: $2"; fallas=$((fallas+1)); }
 igual() { [ "$2" = "$3" ] && ok "$1" || mal "$1" "esperaba '$3', salió '$2'"; }

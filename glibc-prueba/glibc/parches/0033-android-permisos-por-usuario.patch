@@ -69,7 +69,62 @@
    if (comp_es (c, "var/tmp") || comp_es (c, "run/user"))
      return 0;
    for (int i = 0; root[i] != NULL; i++)
-@@ -869,6 +889,87 @@
+@@ -675,15 +695,27 @@
+   return 1;
+ }
+ 
++static long int con_permiso (int dirfd, const char *path, unsigned int bits,
++			     int nofollow, long int r, long int nr, long int a0,
++			     long int a1, long int a2, long int a3, long int a4,
++			     long int a5);
++
+ /* xattr user.linux.owner de BUF: "uid:gid", o "uid:gid:L" si el archivo es
+-   una de las dos copias que dejó linkat (ver marcar_par).  */
++   una de las dos copias que dejó linkat (ver marcar_par).  El kernel no deja
++   leer un xattr user.* si el dueño real no puede leer el archivo (0044, 0000):
++   CONCEDER le da el bit de lectura un instante, solo al decidir un acceso (en
++   stat, un chmod por cada ls de un 0000 desataría inotify).  */
+ static int
+-leer_dueno (const char *buf, int nofollow, unsigned int *uid,
++leer_dueno (const char *buf, int nofollow, int conceder, unsigned int *uid,
+ 	    unsigned int *gid, int *par)
+ {
+   char val[48];
+-  long int r = RAW (nofollow ? __NR_lgetxattr : __NR_getxattr, buf,
+-		    "user.linux.owner", val, sizeof val - 1);
++  long int nr = nofollow ? __NR_lgetxattr : __NR_getxattr;
++  long int r = RAW (nr, buf, "user.linux.owner", val, sizeof val - 1);
++  if (r == -EACCES && conceder)
++    r = con_permiso (AT_FDCWD, buf, 0400, nofollow, r, nr, (long int) buf,
++		     (long int) "user.linux.owner", (long int) val,
++		     sizeof val - 1, 0, 0);
+   if (r <= 0)
+     return 0;
+   unsigned long int v[2] = { 0, 0 };
+@@ -715,7 +747,21 @@
+   if (n == 0)
+     return 0;
+   *par = 0;
+-  if (leer_dueno (buf, nofollow, uid, gid, par))
++  if (leer_dueno (buf, nofollow, 0, uid, gid, par))
++    return 1;
++  return regla_dueno (buf, n, uid, gid);
++}
++
++/* Como dueno_virtual, para decidir un acceso: ver leer_dueno.  */
++static int
++dueno_virtual_acceso (int dirfd, const char *path, int nofollow, char *buf,
++		      unsigned int *uid, unsigned int *gid, int *par)
++{
++  size_t n = resolver_real (dirfd, path, buf);
++  if (n == 0)
++    return 0;
++  *par = 0;
++  if (leer_dueno (buf, nofollow, 1, uid, gid, par))
+     return 1;
+   return regla_dueno (buf, n, uid, gid);
+ }
+@@ -869,6 +915,329 @@
    return r;
  }
  
@@ -98,31 +153,47 @@
 +
 +static const char *own_exe (const char *path);
 +
-+/* El proceso (que no es root) no puede hacer PEDIDO sobre lo que está en
-+   DIRFD/PATH según su usuario virtual.  Lo que no existe o no es de la
-+   instancia no se niega aquí: lo resuelve el kernel.  NOFOLLOW: no seguir un
-+   enlace final.  REAL: compara con el uid y gid reales (faccessat); si no,
-+   con fsuid y fsgid, como el resto de las llamadas.  ABRIENDO: es un open;
-+   abrir una carpeta para escribir da EISDIR antes de mirar los permisos, y eso
-+   lo dice el kernel.  */
++/* Lo que dice el usuario virtual sobre lo que está en DIRFD/PATH, para PEDIDO
++   (r=4, w=2, x=1): ACC_SI lo deja hacer, ACC_NO no, y ACC_NO_APLICA si no
++   decide aquí: es root, no existe, es un enlace, no es de la instancia (lo
++   resuelve el kernel) o es abrir una carpeta para escribir (EISDIR, que
++   también lo dice el kernel antes de mirar los permisos).  NOFOLLOW: no seguir
++   un enlace final.  REAL: compara con el uid y gid reales (faccessat); si no,
++   con fsuid y fsgid, como el resto de las llamadas.  ABRIENDO: es un open.
++   BUF (PATH_MAX) queda con la ruta real.  */
++enum { ACC_NO_APLICA = -1, ACC_SI = 0, ACC_NO = 1 };
++
++static __attribute__ ((noinline)) int
++acceso_virtual (int dirfd, const char *path, int nofollow, int real,
++		int abriendo, unsigned int pedido, char *buf)
++{
++  if (root_virtual ())
++    return ACC_NO_APLICA;
++  struct stat st;
++  if (RAW (__NR_newfstatat, dirfd, path, &st,
++	   nofollow ? AT_SYMLINK_NOFOLLOW : 0) != 0
++      || S_ISLNK (st.st_mode)
++      || (abriendo && S_ISDIR (st.st_mode) && (pedido & 2)))
++    return ACC_NO_APLICA;
++  unsigned int u, g;
++  int par;
++  if (!dueno_virtual_acceso (dirfd, path, nofollow, buf, &u, &g, &par))
++    return ACC_NO_APLICA;
++  return acceso_permitido (real ? cu.r : cu.f, real ? cg.r : cg.f, cgrp, ncgrp,
++			   u, g, st.st_mode & 07777, pedido)
++	 ? ACC_SI : ACC_NO;
++}
++
++/* El proceso no puede hacer PEDIDO sobre DIRFD/PATH: la decisión de
++   acceso_virtual para quien no es root.  Con GLIBC_PERMISOS=registro no niega:
++   anota y lo deja pasar.  */
 +static __attribute__ ((noinline)) int
 +acceso_negado (int dirfd, const char *path, int nofollow, int real,
 +	       int abriendo, unsigned int pedido)
 +{
-+  if (root_virtual ())
-+    return 0;
-+  struct stat st;
-+  if (RAW (__NR_newfstatat, dirfd, path, &st,
-+	   nofollow ? AT_SYMLINK_NOFOLLOW : 0) != 0
-+      || S_ISLNK (st.st_mode) || (abriendo && S_ISDIR (st.st_mode) && (pedido & 2)))
-+    return 0;
 +  char buf[PATH_MAX];
-+  unsigned int u, g;
-+  int par;
-+  if (!dueno_virtual (dirfd, path, nofollow, buf, &u, &g, &par))
-+    return 0;
-+  if (acceso_permitido (real ? cu.r : cu.f, real ? cg.r : cg.f, cgrp, ncgrp, u,
-+			g, st.st_mode & 07777, pedido))
++  if (acceso_virtual (dirfd, path, nofollow, real, abriendo, pedido, buf)
++      != ACC_NO)
 +    return 0;
 +  if (!permisos_registro)
 +    return 1;
@@ -154,38 +225,634 @@
 +  return 0;
 +}
 +
++/* R es el resultado de la llamada NR que ya se intentó sobre DIRFD/PATH.  Si
++   fue EACCES porque el kernel solo mira los bits del dueño (todo es del UID de
++   la app) pero Linux deja a este usuario hacer PEDIDO por grupo u otros, se le
++   suma el bit de dueño que falta un instante y se reintenta (con_permiso).  */
++static __attribute__ ((noinline)) long int
++con_acceso (int dirfd, const char *path, int nofollow, int abriendo,
++	    unsigned int pedido, long int r, long int nr, long int a0,
++	    long int a1, long int a2, long int a3, long int a4, long int a5)
++{
++  char buf[PATH_MAX];
++  if (r != -EACCES || permisos_registro
++      || acceso_virtual (dirfd, path, nofollow, 0, abriendo, pedido, buf)
++	 != ACC_SI)
++    return r;
++  return con_permiso (dirfd, path,
++		      ((pedido & 4) ? 0400 : 0) | ((pedido & 2) ? 0200 : 0)
++		      | ((pedido & 1) ? 0100 : 0),
++		      nofollow, r, nr, a0, a1, a2, a3, a4, a5);
++}
++
++/* faccessat: R es lo que dijo el kernel.  Un EACCES que Linux no daría (por
++   los bits de grupo u otros) se vuelve éxito.  */
++static long int
++acceso_virtual_faccessat (int dirfd, const char *path, unsigned int pedido,
++			  long int r)
++{
++  char buf[PATH_MAX];
++  if (r == -EACCES && !permisos_registro
++      && acceso_virtual (dirfd, path, 0, 1, 0, pedido, buf) == ACC_SI)
++    return 0;
++  return r;
++}
++
++/* Las carpetas que se recorren hasta una ruta (todas menos el último
++   componente) y las que el kernel niega aunque Linux deje pasar: el kernel
++   solo mira los bits de dueño, y todo es del UID de la app.  FIN: dónde
++   termina cada una en BUF (la ruta real); MODO: el que tenían.  */
++#define CAMINO_MAX 8
++struct camino
++{
++  int n;
++  size_t fin[CAMINO_MAX];
++  unsigned int modo[CAMINO_MAX];
++  unsigned int bits[CAMINO_MAX];
++  char buf[PATH_MAX];
++};
++
++/* Comprueba x en cada carpeta de DIRFD/PATH que se recorre, desde la raíz de
++   la instancia hasta el padre; en una ruta relativa, desde la carpeta de
++   DIRFD o del cwd y lo de adentro, sin mirar lo que hay por encima (como en
++   Linux).  ACC_NO si Linux la niega para este usuario; ACC_NO_APLICA si no es
++   de la instancia; si no, ACC_SI y las carpetas que hay que conceder en C.
++   Root pasa siempre: solo se anotan las que el kernel negaría.  REAL: ids
++   reales (faccessat) o fsuid y fsgid.  EXTRA: además de x, lo que se le pide
++   a la carpeta padre (2: w, para crear, borrar y renombrar).  */
++static __attribute__ ((noinline)) int
++camino_entrar (struct camino *c, int dirfd, const char *path, int real,
++	       unsigned int extra)
++{
++  c->n = 0;
++  if (path == NULL)
++    return ACC_NO_APLICA;
++  int root = root_virtual ();
++  size_t n = resolver_real (dirfd, path, c->buf);
++  if (n == 0)
++    return ACC_NO_APLICA;
++  size_t k;
++  if (plen != 0 && n >= plen && starts (c->buf, PREFIX, plen)
++      && (n == plen || c->buf[plen] == '/'))
++    k = plen;
++  else if (rlen != 0 && n >= rlen && starts (c->buf, real_prefix, rlen)
++	   && (n == rlen || c->buf[rlen] == '/'))
++    k = rlen;
++  else
++    return ACC_NO_APLICA;
++  size_t desde = k;
++  if (path[0] != '/')
++    {
++      size_t m = slen (path);
++      if (m == 0 || n <= m + 1)
++	return ACC_NO_APLICA;
++      desde = n - m - 1;
++    }
++  size_t fin = n;
++  while (fin > k + 1 && c->buf[fin - 1] == '/')
++    fin--;
++  for (size_t e = k; e < fin;)
++    {
++      size_t q = e + 1;
++      while (q < fin && c->buf[q] != '/')
++	q++;
++      if (e >= desde)
++	{
++	  unsigned int pide = 1 | (q >= fin ? extra : 0);
++	  char salvo = c->buf[e];
++	  c->buf[e] = '\0';
++	  struct stat st;
++	  if (RAW (__NR_newfstatat, AT_FDCWD, c->buf, &st, 0) != 0
++	      || !S_ISDIR (st.st_mode))
++	    {
++	      c->buf[e] = salvo;
++	      return ACC_SI;	/* el kernel dirá ENOENT o ENOTDIR */
++	    }
++	  unsigned int modo = st.st_mode & 07777;
++	  int permitido = root || (pide == 1 && (modo & 0111) == 0111);
++	  if (!permitido)
++	    {
++	      unsigned int u, g;
++	      int par;
++	      permitido = 1;
++	      if (leer_dueno (c->buf, 0, 1, &u, &g, &par)
++		  || regla_dueno (c->buf, e, &u, &g))
++		permitido = acceso_permitido (real ? cu.r : cu.f,
++					      real ? cg.r : cg.f, cgrp, ncgrp,
++					      u, g, modo, pide);
++	    }
++	  c->buf[e] = salvo;
++	  if (!permitido)
++	    return permisos_registro ? ACC_SI : ACC_NO;
++	  if (((modo >> 6) & pide) != pide && c->n < CAMINO_MAX)
++	    {
++	      c->fin[c->n] = e;
++	      c->modo[c->n] = modo;
++	      c->bits[c->n++] = pide << 6;
++	    }
++	}
++      e = q;
++    }
++  return ACC_SI;
++}
++
++/* Le da x de dueño a las carpetas de C mientras dura la llamada.  */
++static void
++camino_dar (struct camino *c)
++{
++  for (int i = 0; i < c->n; i++)
++    {
++      char salvo = c->buf[c->fin[i]];
++      struct stat st;
++      c->buf[c->fin[i]] = '\0';
++      /* suma a lo que tenga ahora: otra ruta de la misma llamada pudo darle algo  */
++      unsigned int ahora = RAW (__NR_newfstatat, AT_FDCWD, c->buf, &st, 0) == 0
++			   ? st.st_mode & 07777 : c->modo[i];
++      RAW (__NR_fchmodat, AT_FDCWD, c->buf, ahora | c->bits[i]);
++      c->buf[c->fin[i]] = salvo;
++    }
++}
++
++/* Vuelve a como estaban, aunque la llamada haya fallado.  */
++static void
++camino_devolver (struct camino *c)
++{
++  for (int i = c->n; i-- > 0;)
++    {
++      char salvo = c->buf[c->fin[i]];
++      c->buf[c->fin[i]] = '\0';
++      RAW (__NR_fchmodat, AT_FDCWD, c->buf, c->modo[i]);
++      c->buf[c->fin[i]] = salvo;
++    }
++}
++
++struct llamada_sys
++{
++  long int nr, a0, a1, a2, a3, a4, a5;
++};
++typedef long int (*llamada_sys_fn) (const struct llamada_sys *);
++
++/* Hace la llamada F sobre DIRFD/PATH (y sobre DIRFD2/PATH2, si hay: renombrar
++   y enlazar) comprobando antes el camino: x en las carpetas y EXTRA en el
++   padre.  Quien no es root: si Linux niega una carpeta, EACCES; las que el
++   kernel niega y Linux no, se conceden mientras dura.  Root: la llamada va
++   primero, y solo si el kernel responde EACCES se conceden las carpetas que
++   niega y se reintenta.  */
++static __attribute__ ((noinline)) long int
++camino_llamar (int dirfd, const char *path, int real, unsigned int extra,
++	       int dirfd2, const char *path2, unsigned int extra2,
++	       llamada_sys_fn f, const struct llamada_sys *l)
++{
++  struct camino c, c2;
++  c2.n = 0;
++  if (!root_virtual ())
++    {
++      if (camino_entrar (&c, dirfd, path, real, extra) == ACC_NO
++	  || (path2 != NULL
++	      && camino_entrar (&c2, dirfd2, path2, real, extra2) == ACC_NO))
++	return -EACCES;
++      camino_dar (&c);
++      camino_dar (&c2);
++      long int r = f (l);
++      camino_devolver (&c2);
++      camino_devolver (&c);
++      return r;
++    }
++  long int r = f (l);
++  if (r != -EACCES)
++    return r;
++  if (camino_entrar (&c, dirfd, path, real, extra) != ACC_SI)
++    c.n = 0;
++  if (path2 == NULL || camino_entrar (&c2, dirfd2, path2, real, extra2) != ACC_SI)
++    c2.n = 0;
++  if (c.n == 0 && c2.n == 0)
++    return r;
++  camino_dar (&c);
++  camino_dar (&c2);
++  r = f (l);
++  camino_devolver (&c2);
++  camino_devolver (&c);
++  return r;
++}
++
++static long int
++con_camino (int dirfd, const char *path, int real, unsigned int extra,
++	    llamada_sys_fn f, const struct llamada_sys *l)
++{
++  return camino_llamar (dirfd, path, real, extra, -1, NULL, 0, f, l);
++}
++
++/* Dos rutas: renameat y linkat.  */
++static long int
++con_camino2 (int dirfd, const char *path, unsigned int extra, int dirfd2,
++	     const char *path2, unsigned int extra2, llamada_sys_fn f,
++	     const struct llamada_sys *l)
++{
++  return camino_llamar (dirfd, path, 0, extra, dirfd2, path2, extra2, f, l);
++}
++
  /* Escribe (VAL) o borra (VAL == NULL) un xattr.  Si el archivo no deja
     escribir (0444, 0555), se le da permiso un instante.  */
  static long int
-@@ -3000,6 +3101,8 @@
+@@ -2512,6 +2881,169 @@
+   return out_len;
+ }
+ 
++/* openat de la instancia: dueño del archivo nuevo, permisos de root y del
++   usuario virtual.  El camino lo comprueba quien llama (con_camino).  */
++static long int
++abrir_virtual (const struct llamada_sys *l)
++{
++  long int nr = l->nr, a0 = l->a0, a1 = l->a1, a2 = l->a2, a3 = l->a3,
++	   a4 = l->a4, a5 = l->a5;
++  int root = root_virtual ();
++  unsigned int pedido = ((a2 & O_ACCMODE) == O_RDONLY ? 4
++			 : (a2 & O_ACCMODE) == O_WRONLY ? 2 : 6)
++			| (a2 & O_TRUNC ? 2 : 0);
++  int comprobar = !root && !(a2 & (O_PATH | O_TMPFILE))
++		  && (a2 & (O_CREAT | O_EXCL)) != (O_CREAT | O_EXCL);
++  if (comprobar
++      && acceso_negado ((int) a0, (const char *) a1, a2 & O_NOFOLLOW, 0, 1,
++			pedido))
++    return -EACCES;
++  if ((a2 & (O_CREAT | O_TMPFILE)) == O_CREAT && creador_distinto ())
++    {
++      long int r = abrir_creando (a0, a1, a2, a3);
++      if (root)
++	return abrir_root (a0, a1, a2, a3, r);
++      return !comprobar ? r
++	     : con_acceso ((int) a0, (const char *) a1, a2 & O_NOFOLLOW, 1,
++			   pedido, r, nr, a0, a1, a2, a3, a4, a5);
++    }
++  if (root)
++    return abrir_root (a0, a1, a2, a3, raw (nr, a0, a1, a2, a3, a4, a5));
++  if (comprobar)
++    return con_acceso ((int) a0, (const char *) a1, a2 & O_NOFOLLOW, 1, pedido,
++		       raw (nr, a0, a1, a2, a3, a4, a5), nr, a0, a1, a2, a3, a4,
++		       a5);
++  return raw (nr, a0, a1, a2, a3, a4, a5);
++}
++
++static long int
++faccessat_virtual (const struct llamada_sys *l)
++{
++  return acceso_virtual_faccessat ((int) l->a0, (const char *) l->a1,
++				   l->a2 & 7,
++				   acceso_root (l->a0, l->a1, l->a2, 0));
++}
++
++/* chdir y truncate: el destino también se concede (root, y quien no es root
++   cuando Linux lo permite por grupo u otros).  */
++static long int
++chdir_truncate_virtual (const struct llamada_sys *l)
++{
++  long int r = raw (l->nr, l->a0, l->a1, l->a2, l->a3, l->a4, l->a5);
++  if (r == -EACCES && root_virtual ())
++    r = con_permiso (AT_FDCWD, (const char *) l->a0,
++		     l->nr == __NR_chdir ? 0100 : 0200, 0, r, l->nr, l->a0,
++		     l->a1, l->a2, l->a3, l->a4, l->a5);
++  if (l->nr == __NR_truncate)
++    r = con_acceso (AT_FDCWD, (const char *) l->a0, 0, 0, 2, r, l->nr, l->a0,
++		    l->a1, l->a2, l->a3, l->a4, l->a5);
++  return r;
++}
++
++/* newfstatat y statx: lo que muestra stat de dueño y enlaces es el virtual.  */
++static long int
++stat_virtual_llamada (const struct llamada_sys *l)
++{
++  char b2[PATH_MAX];
++  long int r = raw (l->nr, l->a0, l->a1, l->a2, l->a3, l->a4, l->a5);
++  if (r != 0)
++    return r;
++  if (l->nr == __NR_newfstatat)
++    {
++      struct stat *st = (struct stat *) l->a2;
++      stat_virtual ((int) l->a0, (const char *) l->a1,
++		    l->a3 & AT_SYMLINK_NOFOLLOW, st->st_mode, &st->st_uid,
++		    &st->st_gid, &st->st_nlink, b2);
++    }
++  else
++    {
++      /* struct statx: stx_uid en 20, stx_gid en 24, stx_mode (16 bits) en 28.  */
++      unsigned int *sx = (unsigned int *) l->a4;
++      stat_virtual ((int) l->a0, (const char *) l->a1,
++		    l->a2 & AT_SYMLINK_NOFOLLOW, sx[7] & 0xffff, &sx[5], &sx[6],
++		    &sx[4], b2);
++    }
++  return r;
++}
++
++static long int
++raw_virtual (const struct llamada_sys *l)
++{
++  return raw (l->nr, l->a0, l->a1, l->a2, l->a3, l->a4, l->a5);
++}
++
++/* mkdirat y mknodat: el dueño de lo creado sale del que crea (0027).  */
++static long int
++mkdir_mknod_virtual (const struct llamada_sys *l)
++{
++  long int r = raw (l->nr, l->a0, l->a1, l->a2, l->a3, l->a4, l->a5);
++  r = con_padres (l->a0, (const char *) l->a1, 0, NULL, r, l->nr, l->a0,
++		  l->a1, l->a2, l->a3, l->a4, l->a5);
++  if (r == 0 && creador_distinto ())
++    dueno_nuevo ((int) l->a0, (const char *) l->a1, 1);
++  return r;
++}
++
++static long int
++unlink_virtual (const struct llamada_sys *l)
++{
++  long int r = raw (l->nr, l->a0, l->a1, l->a2, l->a3, l->a4, l->a5);
++  return con_padres (l->a0, (const char *) l->a1, 0, NULL, r, l->nr, l->a0,
++		     l->a1, l->a2, l->a3, l->a4, l->a5);
++}
++
++static long int
++symlink_virtual (const struct llamada_sys *l)
++{
++  long int r = raw (l->nr, l->a0, l->a1, l->a2, l->a3, l->a4, l->a5);
++  return con_padres (l->a1, (const char *) l->a2, 0, NULL, r, l->nr, l->a0,
++		     l->a1, l->a2, l->a3, l->a4, l->a5);
++}
++
++static long int
++rename_virtual (const struct llamada_sys *l)
++{
++  long int r = raw (l->nr, l->a0, l->a1, l->a2, l->a3, l->a4, l->a5);
++  return con_padres (l->a0, (const char *) l->a1, l->a2,
++		     (const char *) l->a3, r, l->nr, l->a0, l->a1, l->a2,
++		     l->a3, l->a4, l->a5);
++}
++
++static long int
++link_virtual (const struct llamada_sys *l)
++{
++  long int a0 = l->a0, a1 = l->a1, a2 = l->a2, a3 = l->a3, a4 = l->a4;
++  long int r = raw (l->nr, a0, a1, a2, a3, a4, l->a5);
++  if (r == -EACCES || r == -EPERM)
++    {
++      r = link_copy (a0, (const char *) a1, a2, (const char *) a3, a4);
++      if (r == -EACCES && root_virtual ())
++	{
++	  struct padre p;
++	  padre_dar (&p, a2, (const char *) a3, NULL);
++	  if (p.dado)
++	    r = link_copy (a0, (const char *) a1, a2, (const char *) a3, a4);
++	  padre_devolver (&p);
++	}
++    }
++  return r;
++}
++
++static long int
++fchownat_virtual (const struct llamada_sys *l)
++{
++  if (root_virtual ())
++    {
++      int hecho;
++      long int r = chown_virtual ((int) l->a0, (const char *) l->a1, l->a2,
++				  l->a3, l->a4, &hecho);
++      if (hecho)
++	return r;
++    }
++  long int r = raw (l->nr, l->a0, l->a1, l->a2, l->a3, l->a4, l->a5);
++  return r == -EPERM && root_virtual () ? 0 : r;
++}
++
+ long int
+ __android_path_syscall (long int nr, long int a0, long int a1, long int a2,
+ 			long int a3, long int a4, long int a5)
+@@ -2973,12 +3505,12 @@
+     case __NR_truncate:
+       {
+ 	XLD (AT_FDCWD, a0, b1);
+-	long int r = raw (nr, a0, a1, a2, a3, a4, a5);
+-	if (r == -EACCES && root_virtual ())
+-	  r = con_permiso (AT_FDCWD, (const char *) a0,
+-			   nr == __NR_chdir ? 0100 : 0200, 0, r, nr, a0, a1, a2,
+-			   a3, a4, a5);
+-	return r;
++	if (nr == __NR_truncate
++	    && acceso_negado (AT_FDCWD, (const char *) a0, 0, 0, 0, 2))
++	  return -EACCES;
++	struct llamada_sys l = { nr, a0, a1, a2, a3, a4, a5 };
++	return con_camino (AT_FDCWD, (const char *) a0, 0, 0,
++			   chdir_truncate_virtual, &l);
+       }
+     case __NR_statfs:
+     case __NR_acct:
+@@ -2990,8 +3522,11 @@
+     case __NR_llistxattr:
+     case __NR_removexattr:
+     case __NR_lremovexattr:
+-      XLD (AT_FDCWD, a0, b1);
+-      break;
++      {
++	XLD (AT_FDCWD, a0, b1);
++	struct llamada_sys l = { nr, a0, a1, a2, a3, a4, a5 };
++	return con_camino (AT_FDCWD, (const char *) a0, 0, 0, raw_virtual, &l);
++      }
+ 
+     /* Bloqueadas por el seccomp de apps (bionic no las usa): ENOSYS sin
+        llamar al kernel, así glibc usa su alternativa (faccessat/fchmodat,
+@@ -3000,7 +3535,11 @@
        if (a3 == 0)
  	{
  	  XLD (a0, a1, b1);
+-	  return acceso_root (a0, a1, a2, 0);
 +	  if (acceso_negado ((int) a0, (const char *) a1, 0, 1, 0, a2 & 7))
 +	    return -EACCES;
- 	  return acceso_root (a0, a1, a2, 0);
++	  struct llamada_sys l = { __NR_faccessat, a0, a1, a2, 0, 0, 0 };
++	  return con_camino ((int) a0, (const char *) a1, 1, 0,
++			     faccessat_virtual, &l);
  	}
        return -ENOSYS;
-@@ -3023,6 +3126,13 @@
+     case __NR_fchmodat2:
+@@ -3022,41 +3561,24 @@
+ 	    return r;
  	}
        {
- 	int root = root_virtual ();
-+	if (!root && !(a2 & (O_PATH | O_TMPFILE))
-+	    && (a2 & (O_CREAT | O_EXCL)) != (O_CREAT | O_EXCL)
-+	    && acceso_negado ((int) a0, (const char *) a1, a2 & O_NOFOLLOW, 0, 1,
-+			      ((a2 & O_ACCMODE) == O_RDONLY ? 4
-+			       : (a2 & O_ACCMODE) == O_WRONLY ? 2 : 6)
-+			      | (a2 & O_TRUNC ? 2 : 0)))
-+	  return -EACCES;
- 	if ((a2 & (O_CREAT | O_TMPFILE)) == O_CREAT && creador_distinto ())
+-	int root = root_virtual ();
+-	if ((a2 & (O_CREAT | O_TMPFILE)) == O_CREAT && creador_distinto ())
++	struct llamada_sys l = { nr, a0, a1, a2, a3, a4, a5 };
++	unsigned int extra = 0;
++	if ((a2 & O_CREAT) && !(a2 & O_TMPFILE))
  	  {
- 	    long int r = abrir_creando (a0, a1, a2, a3);
-@@ -3082,6 +3192,8 @@
+-	    long int r = abrir_creando (a0, a1, a2, a3);
+-	    return root ? abrir_root (a0, a1, a2, a3, r) : r;
++	    struct stat st;
++	    if (RAW (__NR_newfstatat, a0, a1, &st, AT_SYMLINK_NOFOLLOW) != 0)
++	      extra = 2;	/* crea: w en la carpeta padre */
+ 	  }
+-	if (root)
+-	  return abrir_root (a0, a1, a2, a3,
+-			     raw (nr, a0, a1, a2, a3, a4, a5));
++	return con_camino ((int) a0, (const char *) a1, 0, extra, abrir_virtual,
++			   &l);
+       }
+-      break;
+     case __NR_newfstatat:
+-      {
+-	XLD (a0, a1, b1);
+-	long int r = raw (nr, a0, a1, a2, a3, a4, a5);
+-	if (r == 0)
+-	  {
+-	    struct stat *st = (struct stat *) a2;
+-	    stat_virtual ((int) a0, (const char *) a1, a3 & AT_SYMLINK_NOFOLLOW,
+-			  st->st_mode, &st->st_uid, &st->st_gid, &st->st_nlink, b2);
+-	  }
+-	return r;
+-      }
+     case __NR_statx:
+       {
+ 	XLD (a0, a1, b1);
+-	long int r = raw (nr, a0, a1, a2, a3, a4, a5);
+-	if (r == 0)
+-	  {
+-	    /* struct statx: stx_uid en 20, stx_gid en 24, stx_mode (16 bits) en 28.  */
+-	    unsigned int *sx = (unsigned int *) a4;
+-	    stat_virtual ((int) a0, (const char *) a1, a2 & AT_SYMLINK_NOFOLLOW,
+-			  sx[7] & 0xffff, &sx[5], &sx[6], &sx[4], b2);
+-	  }
+-	return r;
++	struct llamada_sys l = { nr, a0, a1, a2, a3, a4, a5 };
++	return con_camino ((int) a0, (const char *) a1, 0, 0,
++			   stat_virtual_llamada, &l);
+       }
+     case __NR_fstat:
+       {
+@@ -3073,67 +3595,57 @@
+     case __NR_mknodat:
+       {
+ 	XLD (a0, a1, b1);
+-	long int r = raw (nr, a0, a1, a2, a3, a4, a5);
+-	r = con_padres (a0, (const char *) a1, 0, NULL, r, nr, a0, a1, a2, a3,
+-			a4, a5);
+-	if (r == 0 && creador_distinto ())
+-	  dueno_nuevo ((int) a0, (const char *) a1, 1);
+-	return r;
++	struct llamada_sys l = { nr, a0, a1, a2, a3, a4, a5 };
++	return con_camino ((int) a0, (const char *) a1, 0, 2,
++			   mkdir_mknod_virtual, &l);
        }
      case __NR_faccessat:
        XLD (a0, a1, b1);
+-      return acceso_root (a0, a1, a2, 0);
 +      if (acceso_negado ((int) a0, (const char *) a1, 0, 1, 0, a2 & 7))
 +	return -EACCES;
-       return acceso_root (a0, a1, a2, 0);
++      {
++	struct llamada_sys l = { __NR_faccessat, a0, a1, a2, 0, 0, 0 };
++	return con_camino ((int) a0, (const char *) a1, 1, 0, faccessat_virtual,
++			   &l);
++      }
      case __NR_unlinkat:
        {
+ 	XLD (a0, a1, b1);
+-	long int r = raw (nr, a0, a1, a2, a3, a4, a5);
+-	return con_padres (a0, (const char *) a1, 0, NULL, r, nr, a0, a1, a2,
+-			   a3, a4, a5);
++	struct llamada_sys l = { nr, a0, a1, a2, a3, a4, a5 };
++	return con_camino ((int) a0, (const char *) a1, 0, 2, unlink_virtual,
++			   &l);
+       }
+     case __NR_openat2:
+     case __NR_fchmodat:
+     case __NR_utimensat:
+     case __NR_name_to_handle_at:
+-      XLD (a0, a1, b1);
+-      break;
++      {
++	XLD (a0, a1, b1);
++	struct llamada_sys l = { nr, a0, a1, a2, a3, a4, a5 };
++	return con_camino ((int) a0, (const char *) a1, 0, 0, raw_virtual, &l);
++      }
+     case __NR_inotify_add_watch:
+-      XLD (AT_FDCWD, a1, b1);
+-      break;
++      {
++	XLD (AT_FDCWD, a1, b1);
++	struct llamada_sys l = { nr, a0, a1, a2, a3, a4, a5 };
++	return con_camino (AT_FDCWD, (const char *) a1, 0, 0, raw_virtual, &l);
++      }
+ 
+     case __NR_fchownat:
+       {
+ 	XLD (a0, a1, b1);
+-	if (root_virtual ())
+-	  {
+-	    int hecho;
+-	    long int r = chown_virtual ((int) a0, (const char *) a1, a2, a3, a4,
+-					&hecho);
+-	    if (hecho)
+-	      return r;
+-	  }
+-	long int r = raw (nr, a0, a1, a2, a3, a4, a5);
+-	return r == -EPERM && root_virtual () ? 0 : r;
++	struct llamada_sys l = { nr, a0, a1, a2, a3, a4, a5 };
++	return con_camino ((int) a0, (const char *) a1, 0, 0, fchownat_virtual,
++			   &l);
+       }
+ 
+     case __NR_linkat:
+       {
+ 	XLD (a0, a1, b1);
+ 	XLD (a2, a3, b2);
+-	long int r = raw (nr, a0, a1, a2, a3, a4, a5);
+-	if (r == -EACCES || r == -EPERM)
+-	  {
+-	    r = link_copy (a0, (const char *) a1, a2, (const char *) a3, a4);
+-	    if (r == -EACCES && root_virtual ())
+-	      {
+-		struct padre p;
+-		padre_dar (&p, a2, (const char *) a3, NULL);
+-		if (p.dado)
+-		  r = link_copy (a0, (const char *) a1, a2, (const char *) a3,
+-				 a4);
+-		padre_devolver (&p);
+-	      }
+-	  }
+-	return r;
++	struct llamada_sys l = { nr, a0, a1, a2, a3, a4, a5 };
++	return con_camino2 ((int) a0, (const char *) a1, 0, (int) a2,
++			    (const char *) a3, 2, link_virtual, &l);
+       }
+ 
+     case __NR_renameat:
+@@ -3141,9 +3653,9 @@
+       {
+ 	XLD (a0, a1, b1);
+ 	XLD (a2, a3, b2);
+-	long int r = raw (nr, a0, a1, a2, a3, a4, a5);
+-	return con_padres (a0, (const char *) a1, a2, (const char *) a3, r, nr,
+-			   a0, a1, a2, a3, a4, a5);
++	struct llamada_sys l = { nr, a0, a1, a2, a3, a4, a5 };
++	return con_camino2 ((int) a0, (const char *) a1, 2, (int) a2,
++			    (const char *) a3, 2, rename_virtual, &l);
+       }
+ 
+     case __NR_symlinkat:
+@@ -3152,9 +3664,9 @@
+       {
+ 	XL (a0, b1);
+ 	XLD (a1, a2, b2);
+-	long int r = raw (nr, a0, a1, a2, a3, a4, a5);
+-	return con_padres (a1, (const char *) a2, 0, NULL, r, nr, a0, a1, a2,
+-			   a3, a4, a5);
++	struct llamada_sys l = { nr, a0, a1, a2, a3, a4, a5 };
++	return con_camino ((int) a1, (const char *) a2, 0, 2, symlink_virtual,
++			   &l);
+       }
+ 
+     case __NR_readlinkat:
+@@ -3169,7 +3681,8 @@
+ 	else
+ 	  {
+ 	    XLD (a0, a1, b1);
+-	    r = raw (nr, a0, a1, (long int) b2, PATH_MAX, 0, 0);
++	    struct llamada_sys l = { nr, a0, a1, (long int) b2, PATH_MAX, 0, 0 };
++	    r = con_camino ((int) a0, (const char *) a1, 0, 0, raw_virtual, &l);
+ 	    if (r < 0)
+ 	      return r;
+ 	  }
