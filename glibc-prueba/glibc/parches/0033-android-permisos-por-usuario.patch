@@ -1,0 +1,168 @@
+--- a/sysdeps/unix/sysv/linux/aarch64/android-path.c
++++ b/sysdeps/unix/sysv/linux/aarch64/android-path.c
+@@ -47,6 +47,8 @@
+ #define KEY_DEBUG_LEN 19
+ #define KEY_SECCOMP "GLIBC_SECCOMP="
+ #define KEY_SECCOMP_LEN 14
++#define KEY_PERMISOS "GLIBC_PERMISOS="
++#define KEY_PERMISOS_LEN 15
+ #define KEY_CRED "GLIBC_CRED="
+ #define KEY_CRED_LEN 11
+ 
+@@ -78,6 +80,7 @@
+ static unsigned int base_uid, base_gid;
+ static int debug_sigsys;
+ static int sin_seccomp;		/* GLIBC_SECCOMP=0: sin la capa propia */
++static int permisos_registro;	/* GLIBC_PERMISOS=registro: anota lo que negaría y lo deja pasar */
+ #define PREFIX (env_prefix + KEY_LEN)
+ #define LOADER (env_loader + KEY_LEN)
+ 
+@@ -346,7 +349,7 @@
+   char buf[512];
+   char credbuf[8 * 11 + NGRUPOS * 11 + 16];
+   size_t idx = 0, np = 0, nl = 0, ncr = 0;
+-  int mp = 1, ml = 1, mf = 1, md = 1, ms = 1, mc = 1;
++  int mp = 1, ml = 1, mf = 1, md = 1, ms = 1, mc = 1, mq = 1;
+   int gotp = 0, gotl = 0, gotc = 0;
+   for (;;)
+     {
+@@ -359,7 +362,7 @@
+ 	  if (c == '\0')
+ 	    {
+ 	      idx = 0;
+-	      mp = ml = mf = md = ms = mc = 1;
++	      mp = ml = mf = md = ms = mc = mq = 1;
+ 	      continue;
+ 	    }
+ 	  if (idx < KEY_CRED_LEN)
+@@ -382,6 +385,10 @@
+ 	    ms &= c == KEY_SECCOMP[idx];
+ 	  else if (idx == KEY_SECCOMP_LEN && ms)
+ 	    sin_seccomp = c == '0';
++	  if (idx < KEY_PERMISOS_LEN)
++	    mq &= c == KEY_PERMISOS[idx];
++	  else if (idx == KEY_PERMISOS_LEN && mq)
++	    permisos_registro = c == 'r';
+ 	  if (idx < KEY_LEN)
+ 	    {
+ 	      mp &= c == KEY_PREFIX[idx];
+@@ -869,6 +876,87 @@
+   return r;
+ }
+ 
++/* Lo que Linux deja hacer (PEDIDO: bits r=4, w=2, x=1) a un proceso con
++   UID/GID efectivos y GRUPOS extra sobre algo de DUENO:GRUPO con permisos
++   MODO: manda una sola clase, la del dueño, la del grupo o la de otros.  No
++   incluye a root, que salta los permisos.  */
++static int
++acceso_permitido (unsigned int uid, unsigned int gid,
++		  const unsigned int *grupos, int n, unsigned int dueno,
++		  unsigned int grupo, unsigned int modo, unsigned int pedido)
++{
++  unsigned int clase = modo;
++  if (uid == dueno)
++    clase = modo >> 6;
++  else
++    {
++      int en_grupo = gid == grupo;
++      for (int i = 0; i < n && !en_grupo; i++)
++	en_grupo = grupos[i] == grupo;
++      if (en_grupo)
++	clase = modo >> 3;
++    }
++  return (clase & pedido) == pedido;
++}
++
++static const char *own_exe (const char *path);
++
++/* El proceso (que no es root) no puede hacer PEDIDO sobre lo que está en
++   DIRFD/PATH según su usuario virtual.  Lo que no existe o no es de la
++   instancia no se niega aquí: lo resuelve el kernel.  NOFOLLOW: no seguir un
++   enlace final.  REAL: compara con el uid y gid reales (faccessat); si no,
++   con fsuid y fsgid, como el resto de las llamadas.  ABRIENDO: es un open;
++   abrir una carpeta para escribir da EISDIR antes de mirar los permisos, y eso
++   lo dice el kernel.  */
++static __attribute__ ((noinline)) int
++acceso_negado (int dirfd, const char *path, int nofollow, int real,
++	       int abriendo, unsigned int pedido)
++{
++  if (root_virtual ())
++    return 0;
++  struct stat st;
++  if (RAW (__NR_newfstatat, dirfd, path, &st,
++	   nofollow ? AT_SYMLINK_NOFOLLOW : 0) != 0
++      || S_ISLNK (st.st_mode) || (abriendo && S_ISDIR (st.st_mode) && (pedido & 2)))
++    return 0;
++  char buf[PATH_MAX];
++  unsigned int u, g;
++  int par;
++  if (!dueno_virtual (dirfd, path, nofollow, buf, &u, &g, &par))
++    return 0;
++  if (acceso_permitido (real ? cu.r : cu.f, real ? cg.r : cg.f, cgrp, ncgrp, u,
++			g, st.st_mode & 07777, pedido))
++    return 0;
++  if (!permisos_registro)
++    return 1;
++  /* GLIBC_PERMISOS=registro: se anota en stderr, con el programa que fue, y se deja pasar.  */
++  char resto[48], exe[PATH_MAX], *q = resto;
++  const char *programa = own_exe ("/proc/self/exe");
++  mcopy (q, " pedido=", 8);
++  q = utoa (q + 8, pedido);
++  mcopy (q, " uid=", 5);
++  q = utoa (q + 5, real ? cu.r : cu.f);
++  mcopy (q, " exe=", 5);
++  q += 5;
++  long int n;
++  if (programa != NULL)
++    {
++      n = slen (programa);
++      mcopy (exe, programa, n < PATH_MAX - 1 ? n : PATH_MAX - 1);
++    }
++  else
++    n = RAW (__NR_readlinkat, AT_FDCWD, "/proc/self/exe", exe, PATH_MAX - 1);
++  if (n > PATH_MAX - 1)
++    n = PATH_MAX - 1;
++  exe[n > 0 ? n : 0] = '\n';
++  static const char cabeza[] = "glibc: permisos: negaría ";
++  struct iovec v[4] = { { (void *) cabeza, sizeof cabeza - 1 },
++			{ buf, slen (buf) }, { resto, q - resto },
++			{ exe, (n > 0 ? n : 0) + 1 } };
++  RAW (__NR_writev, 2, v, 4);
++  return 0;
++}
++
+ /* Escribe (VAL) o borra (VAL == NULL) un xattr.  Si el archivo no deja
+    escribir (0444, 0555), se le da permiso un instante.  */
+ static long int
+@@ -3000,6 +3088,8 @@
+       if (a3 == 0)
+ 	{
+ 	  XLD (a0, a1, b1);
++	  if (acceso_negado ((int) a0, (const char *) a1, 0, 1, 0, a2 & 7))
++	    return -EACCES;
+ 	  return acceso_root (a0, a1, a2, 0);
+ 	}
+       return -ENOSYS;
+@@ -3023,6 +3113,13 @@
+ 	}
+       {
+ 	int root = root_virtual ();
++	if (!root && !(a2 & (O_PATH | O_TMPFILE))
++	    && (a2 & (O_CREAT | O_EXCL)) != (O_CREAT | O_EXCL)
++	    && acceso_negado ((int) a0, (const char *) a1, a2 & O_NOFOLLOW, 0, 1,
++			      ((a2 & O_ACCMODE) == O_RDONLY ? 4
++			       : (a2 & O_ACCMODE) == O_WRONLY ? 2 : 6)
++			      | (a2 & O_TRUNC ? 2 : 0)))
++	  return -EACCES;
+ 	if ((a2 & (O_CREAT | O_TMPFILE)) == O_CREAT && creador_distinto ())
+ 	  {
+ 	    long int r = abrir_creando (a0, a1, a2, a3);
+@@ -3082,6 +3179,8 @@
+       }
+     case __NR_faccessat:
+       XLD (a0, a1, b1);
++      if (acceso_negado ((int) a0, (const char *) a1, 0, 1, 0, a2 & 7))
++	return -EACCES;
+       return acceso_root (a0, a1, a2, 0);
+     case __NR_unlinkat:
+       {
