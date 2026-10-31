@@ -50,9 +50,18 @@ instalar() {
 if grupo shell; then
   caso "shell: bash corre comandos"  '[ "$(bash -c "echo hola")" = hola ]'
   caso "shell: sudo funciona"  'como_root true >/dev/null'
-  # B47: la raíz es de root y tiene el modo de su distro: Debian 755; Arch 555 (o 755 mientras TerminalService la sube, hasta B95)
-  caso "shell: raíz root:root con el modo de su distro"  'r=$(stat -c "%a %U:%G" "${HUMO_RAIZ:-/}"); if command -v pacman >/dev/null 2>&1; then [ "$r" = "555 root:root" ] || [ "$r" = "755 root:root" ]; else [ "$r" = "755 root:root" ]; fi'
+  # B47: la raíz es de root y tiene el modo de su distro: Debian 755; Arch 555
+  caso "shell: raíz root:root con el modo de su distro"  'r=$(stat -c "%a %U:%G" "${HUMO_RAIZ:-/}"); if command -v pacman >/dev/null 2>&1; then [ "$r" = "555 root:root" ]; else [ "$r" = "755 root:root" ]; fi'
   caso "shell: sudo mkdir crea y borra una carpeta en /"  'como_root mkdir "${HUMO_RAIZ%/}/x" && como_root rmdir "${HUMO_RAIZ%/}/x"'
+  # B95: root salta los permisos de archivos y carpetas (lee un 000, escribe en un 444, crea en una 555)
+  # (sin capturar la salida de como_root: su filtro del aviso de sudo se come la línea si el aviso queda pegado a ella)
+  caso "shell: sudo lee un 000, escribe en un 444 y crea en una 555"  'd=$(mktemp -d) || exit 1
+    echo dato > "$d/a"; chmod 000 "$d/a"; echo uno > "$d/b"; chmod 444 "$d/b"; mkdir "$d/c"; chmod 555 "$d/c"
+    r=0
+    como_root grep -qx dato "$d/a" || { echo "  sudo no lee un 000" >&2; r=1; }
+    como_root sh -c "echo dos >> \"\$1\"" _ "$d/b" && [ "$(cat "$d/b")" = "$(printf "uno\ndos")" ] || { echo "  sudo no escribe en un 444" >&2; r=1; }
+    como_root mkdir "$d/c/x" && [ -d "$d/c/x" ] || { echo "  sudo no crea en una 555" >&2; r=1; }
+    chmod 755 "$d/c"; chmod 644 "$d/a"; rm -rf "$d"; [ $r -eq 0 ]'
   caso "shell: /tmp escribe y lee"   'f=$(mktemp) && echo dato > "$f" && [ "$(cat "$f")" = dato ]; r=$?; rm -f "$f"; [ $r -eq 0 ]'
   # /usr unificado: /bin, /sbin y /lib son enlaces que resuelven dentro de /usr (HUMO_RAIZ cambia la raíz, para las pruebas)
   for c in bin sbin lib; do

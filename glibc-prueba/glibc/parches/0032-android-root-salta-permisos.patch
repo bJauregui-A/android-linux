@@ -1,0 +1,332 @@
+--- a/sysdeps/unix/sysv/linux/aarch64/android-path.c	2026-10-30 23:14:41.311175548 -0300
++++ b/sysdeps/unix/sysv/linux/aarch64/android-path.c	2026-10-30 23:24:03.007826004 -0300
+@@ -757,53 +757,161 @@
+     }
+ }
+ 
+-/* Escribe (VAL) o borra (VAL == NULL) un xattr.  Si el archivo no deja
+-   escribir (0444, 0555), se le da permiso un instante.  */
+-static long int
+-xattr_escribir (const char *ruta, int nofollow, const char *nombre,
+-		const char *val, size_t len)
++/* Root salta los permisos de archivos y carpetas.  R es el resultado de la
++   llamada NR que ya se intentó sobre DIRFD/PATH; si fue EACCES se le suma
++   BITS al modo del archivo (y 0100 si es carpeta) un instante, se reintenta y
++   el modo vuelve a como estaba.  NOFOLLOW: no seguir un enlace final (que
++   entonces no se toca).  Si no se puede cambiar el modo (fuera de la
++   instancia) queda el error original.  El dueño real no salta permisos: un
++   archivo 0440 no se abre para escribir (dpkg escribe dos veces el
++   .dpkg-new de un conffile).  */
++static __attribute__ ((noinline)) long int
++con_permiso (int dirfd, const char *path, unsigned int bits, int nofollow,
++	     long int r, long int nr, long int a0, long int a1, long int a2,
++	     long int a3, long int a4, long int a5)
+ {
+-  long int r;
+-  if (val != NULL)
+-    r = RAW (nofollow ? __NR_lsetxattr : __NR_setxattr, ruta, nombre, val,
+-	     len, 0);
+-  else
+-    r = RAW (nofollow ? __NR_lremovexattr : __NR_removexattr, ruta, nombre);
+   if (r != -EACCES)
+     return r;
+   struct stat st;
+-  if (RAW (__NR_newfstatat, AT_FDCWD, ruta, &st, AT_SYMLINK_NOFOLLOW) != 0
++  if (RAW (__NR_newfstatat, dirfd, path, &st,
++	   nofollow ? AT_SYMLINK_NOFOLLOW : 0) != 0
+       || S_ISLNK (st.st_mode))
+     return r;
+   unsigned int modo = st.st_mode & 07777;
+-  if (RAW (__NR_fchmodat, AT_FDCWD, ruta, modo | 0300) != 0)
++  if (S_ISDIR (st.st_mode))
++    bits |= 0100;
++  if (RAW (__NR_fchmodat, dirfd, path, modo | bits) != 0)
+     return r;
+-  if (val != NULL)
+-    r = RAW (__NR_setxattr, ruta, nombre, val, len, 0);
++  r = raw (nr, a0, a1, a2, a3, a4, a5);
++  RAW (__NR_fchmodat, dirfd, path, modo);
++  return r;
++}
++
++/* Carpeta padre de una ruta a la que root le da permiso de escribir un
++   instante (crear, borrar y renombrar piden escribir en la carpeta).  */
++struct padre
++{
++  int dirfd;
++  char ruta[PATH_MAX];
++  unsigned int modo;
++  dev_t dev;
++  ino_t ino;
++  int dado;
++};
++
++/* Le suma 0300 a la carpeta padre de PATH (relativa a DIRFD).  OTRO: otra
++   carpeta ya abierta; si es la misma no se toca dos veces.  */
++static void
++padre_dar (struct padre *p, int dirfd, const char *path,
++	   const struct padre *otro)
++{
++  p->dado = 0;
++  size_t n = slen (path), i = n;
++  while (i > 1 && path[i - 1] == '/')
++    i--;
++  while (i > 0 && path[i - 1] != '/')
++    i--;
++  if (i == 0)
++    {
++      p->ruta[0] = '.';
++      p->ruta[1] = '\0';
++    }
+   else
+-    r = RAW (__NR_removexattr, ruta, nombre);
+-  RAW (__NR_fchmodat, AT_FDCWD, ruta, modo);
++    {
++      while (i > 1 && path[i - 1] == '/')
++	i--;
++      if (i >= PATH_MAX)
++	return;
++      for (size_t k = 0; k < i; k++)
++	p->ruta[k] = path[k];
++      p->ruta[i] = '\0';
++    }
++  struct stat st;
++  if (RAW (__NR_newfstatat, dirfd, p->ruta, &st, 0) != 0
++      || !S_ISDIR (st.st_mode))
++    return;
++  if (otro != NULL && otro->dado && otro->dev == st.st_dev
++      && otro->ino == st.st_ino)
++    return;
++  p->dirfd = dirfd;
++  p->modo = st.st_mode & 07777;
++  p->dev = st.st_dev;
++  p->ino = st.st_ino;
++  p->dado = RAW (__NR_fchmodat, dirfd, p->ruta, p->modo | 0300) == 0;
++}
++
++static void
++padre_devolver (const struct padre *p)
++{
++  if (p->dado)
++    RAW (__NR_fchmodat, p->dirfd, p->ruta, p->modo);
++}
++
++/* Root crea, borra y renombra en carpetas sin permiso.  R es el resultado
++   de la llamada NR que ya se intentó; si fue EACCES se le da permiso a la
++   carpeta padre de P1 (y de P2, si hay) y se reintenta.  */
++static __attribute__ ((noinline)) long int
++con_padres (int dirfd1, const char *p1, int dirfd2, const char *p2,
++	    long int r, long int nr, long int a0, long int a1, long int a2,
++	    long int a3, long int a4, long int a5)
++{
++  if (r != -EACCES || !root_virtual ())
++    return r;
++  struct padre a, b;
++  padre_dar (&a, dirfd1, p1, NULL);
++  b.dado = 0;
++  if (p2 != NULL)
++    padre_dar (&b, dirfd2, p2, &a);
++  if (a.dado || b.dado)
++    r = raw (nr, a0, a1, a2, a3, a4, a5);
++  padre_devolver (&a);
++  padre_devolver (&b);
+   return r;
+ }
+ 
+-/* Root salta los permisos de lectura y escritura.  El dueño real no: un archivo
+-   0440 no se abre para escribir (dpkg escribe dos veces el .dpkg-new de un
+-   conffile).  R es el resultado del openat que ya se intentó; si fue EACCES se
+-   da permiso un instante y se reintenta.  */
++/* Escribe (VAL) o borra (VAL == NULL) un xattr.  Si el archivo no deja
++   escribir (0444, 0555), se le da permiso un instante.  */
++static long int
++xattr_escribir (const char *ruta, int nofollow, const char *nombre,
++		const char *val, size_t len)
++{
++  long int nr, r;
++  if (val != NULL)
++    nr = nofollow ? __NR_lsetxattr : __NR_setxattr;
++  else
++    nr = nofollow ? __NR_lremovexattr : __NR_removexattr;
++  r = raw (nr, (long int) ruta, (long int) nombre, (long int) val, len, 0, 0);
++  return con_permiso (AT_FDCWD, ruta, 0300, nofollow, r, nr, (long int) ruta,
++		      (long int) nombre, (long int) val, len, 0, 0);
++}
++
++/* R es el resultado del openat que ya se intentó como root.  */
+ static long int
+ abrir_root (long int a0, long int a1, long int a2, long int a3, long int r)
+ {
+-  if (r != -EACCES)
++  r = con_permiso (a0, (const char *) a1, 0600, 0, r, __NR_openat, a0, a1,
++		   a2, a3, 0, 0);
++  if (a2 & O_CREAT)
++    r = con_padres (a0, (const char *) a1, 0, NULL, r, __NR_openat, a0, a1,
++		    a2, a3, 0, 0);
++  return r;
++}
++
++/* faccessat de root: leer y escribir siempre, ejecutar si es carpeta o hay
++   algún bit x.  ROOT: el execve va a ser de root aunque el proceso aún no lo
++   sea.  */
++static long int
++acceso_root (long int a0, long int a1, long int a2, int root)
++{
++  long int r = raw (__NR_faccessat, a0, a1, a2, 0, 0, 0);
++  if (r != -EACCES || !(root || root_virtual ()))
+     return r;
+   struct stat st;
+-  if (RAW (__NR_newfstatat, a0, a1, &st, 0) != 0 || !S_ISREG (st.st_mode))
++  if (RAW (__NR_newfstatat, a0, a1, &st, 0) != 0)
+     return r;
+-  unsigned int modo = st.st_mode & 07777;
+-  if (RAW (__NR_fchmodat, a0, a1, modo | 0600) != 0)
++  if ((a2 & X_OK) && !S_ISDIR (st.st_mode) && !(st.st_mode & 0111))
+     return r;
+-  r = RAW (__NR_openat, a0, a1, a2, a3);
+-  RAW (__NR_fchmodat, a0, a1, modo);
+-  return r;
++  return 0;
+ }
+ 
+ /* Guarda el dueño virtual de RUTA (N bytes): en el xattr, o ninguno si
+@@ -890,6 +998,8 @@
+   struct stat st;
+   int existia = RAW (__NR_newfstatat, a0, a1, &st, AT_SYMLINK_NOFOLLOW) == 0;
+   long int r = raw (__NR_openat, a0, a1, a2, a3, 0, 0);
++  r = con_padres (a0, (const char *) a1, 0, NULL, r, __NR_openat, a0, a1, a2,
++		  a3, 0, 0);
+   if (r >= 0 && !existia)
+     dueno_nuevo (r, "", 0);
+   return r;
+@@ -1037,9 +1147,12 @@
+     return -ENAMETOOLONG;
+ 
+   int fd = RAW (__NR_openat, AT_FDCWD, t, O_RDONLY | O_CLOEXEC);
++  if (fd == -EACCES && (root || root_virtual ()))
++    fd = con_permiso (AT_FDCWD, t, 0400, 0, fd, __NR_openat, AT_FDCWD, (long int) t,
++		      O_RDONLY | O_CLOEXEC, 0, 0, 0);
+   if (fd < 0)
+     return fd;
+-  long int r = RAW (__NR_faccessat, AT_FDCWD, t, X_OK);
++  long int r = acceso_root (AT_FDCWD, (long int) t, X_OK, root);
+   if (r < 0)
+     {
+       RAW (__NR_close, fd);
+@@ -2858,6 +2971,15 @@
+ 
+     case __NR_chdir:
+     case __NR_truncate:
++      {
++	XLD (AT_FDCWD, a0, b1);
++	long int r = raw (nr, a0, a1, a2, a3, a4, a5);
++	if (r == -EACCES && root_virtual ())
++	  r = con_permiso (AT_FDCWD, (const char *) a0,
++			   nr == __NR_chdir ? 0100 : 0200, 0, r, nr, a0, a1, a2,
++			   a3, a4, a5);
++	return r;
++      }
+     case __NR_statfs:
+     case __NR_acct:
+     case __NR_setxattr:
+@@ -2878,7 +3000,7 @@
+       if (a3 == 0)
+ 	{
+ 	  XLD (a0, a1, b1);
+-	  return raw (__NR_faccessat, a0, a1, a2, 0, 0, 0);
++	  return acceso_root (a0, a1, a2, 0);
+ 	}
+       return -ENOSYS;
+     case __NR_fchmodat2:
+@@ -2900,14 +3022,13 @@
+ 	    return r;
+ 	}
+       {
+-	int escribe = root_virtual ()
+-		      && ((a2 & O_ACCMODE) != O_RDONLY || (a2 & O_TRUNC));
++	int root = root_virtual ();
+ 	if ((a2 & (O_CREAT | O_TMPFILE)) == O_CREAT && creador_distinto ())
+ 	  {
+ 	    long int r = abrir_creando (a0, a1, a2, a3);
+-	    return escribe ? abrir_root (a0, a1, a2, a3, r) : r;
++	    return root ? abrir_root (a0, a1, a2, a3, r) : r;
+ 	  }
+-	if (escribe)
++	if (root)
+ 	  return abrir_root (a0, a1, a2, a3,
+ 			     raw (nr, a0, a1, a2, a3, a4, a5));
+       }
+@@ -2953,13 +3074,23 @@
+       {
+ 	XLD (a0, a1, b1);
+ 	long int r = raw (nr, a0, a1, a2, a3, a4, a5);
++	r = con_padres (a0, (const char *) a1, 0, NULL, r, nr, a0, a1, a2, a3,
++			a4, a5);
+ 	if (r == 0 && creador_distinto ())
+ 	  dueno_nuevo ((int) a0, (const char *) a1, 1);
+ 	return r;
+       }
+-    case __NR_openat2:
+     case __NR_faccessat:
++      XLD (a0, a1, b1);
++      return acceso_root (a0, a1, a2, 0);
+     case __NR_unlinkat:
++      {
++	XLD (a0, a1, b1);
++	long int r = raw (nr, a0, a1, a2, a3, a4, a5);
++	return con_padres (a0, (const char *) a1, 0, NULL, r, nr, a0, a1, a2,
++			   a3, a4, a5);
++      }
++    case __NR_openat2:
+     case __NR_fchmodat:
+     case __NR_utimensat:
+     case __NR_name_to_handle_at:
+@@ -2990,22 +3121,41 @@
+ 	XLD (a2, a3, b2);
+ 	long int r = raw (nr, a0, a1, a2, a3, a4, a5);
+ 	if (r == -EACCES || r == -EPERM)
+-	  r = link_copy (a0, (const char *) a1, a2, (const char *) a3, a4);
++	  {
++	    r = link_copy (a0, (const char *) a1, a2, (const char *) a3, a4);
++	    if (r == -EACCES && root_virtual ())
++	      {
++		struct padre p;
++		padre_dar (&p, a2, (const char *) a3, NULL);
++		if (p.dado)
++		  r = link_copy (a0, (const char *) a1, a2, (const char *) a3,
++				 a4);
++		padre_devolver (&p);
++	      }
++	  }
+ 	return r;
+       }
+ 
+     case __NR_renameat:
+     case __NR_renameat2:
+-      XLD (a0, a1, b1);
+-      XLD (a2, a3, b2);
+-      break;
++      {
++	XLD (a0, a1, b1);
++	XLD (a2, a3, b2);
++	long int r = raw (nr, a0, a1, a2, a3, a4, a5);
++	return con_padres (a0, (const char *) a1, a2, (const char *) a3, r, nr,
++			   a0, a1, a2, a3, a4, a5);
++      }
+ 
+     case __NR_symlinkat:
+       /* El destino absoluto también: lo resuelve el kernel.  readlinkat
+ 	 le quita el prefijo al leerlo.  */
+-      XL (a0, b1);
+-      XLD (a1, a2, b2);
+-      break;
++      {
++	XL (a0, b1);
++	XLD (a1, a2, b2);
++	long int r = raw (nr, a0, a1, a2, a3, a4, a5);
++	return con_padres (a1, (const char *) a2, 0, NULL, r, nr, a0, a1, a2,
++			   a3, a4, a5);
++      }
+ 
+     case __NR_readlinkat:
+       {

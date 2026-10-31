@@ -7,19 +7,21 @@ caso() { if eval "$2"; then echo "OK    $1"; else echo "FALLA $1"; fallas=$((fal
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 HUMO=$PWD/pruebas/humo/humo.sh
 
+# (el sudo falso usa unshare -r: root real en un user namespace, que salta los permisos como el de la capa)
 # Entorno nuevo: bin/ solo con las herramientas básicas (sin pacman ni apt-get del PC) y los falsos que cada caso agrega.
 entorno() {
   e=$(mktemp -d -p "$tmp"); mkdir "$e/bin"; : > "$e/log"
   mkdir -p "$e/raiz/usr/bin" "$e/raiz/usr/sbin" "$e/raiz/usr/lib"; for c in bin sbin lib; do ln -s usr/$c "$e/raiz/$c"; done
-  for c in bash env timeout grep cat mktemp rm sleep sed date mkdir touch wc tee head tr ls chmod printf stdbuf python3 pgrep readlink rmdir; do
+  for c in bash env timeout grep cat mktemp rm sleep sed date mkdir touch wc tee head tr ls chmod printf stdbuf python3 pgrep readlink rmdir unshare sh; do
     ln -s "$(command -v "$c")" "$e/bin/$c"
   done
   falso stat 'echo "755 root:root"'
-  falso sudo 'if [ "$1" = -n ] && [ "$2" = true ]; then exit 0; fi; [ "$1" = -n ] && shift; exec "$@"'
+  falso sudo 'if [ "$1" = -n ] && [ "$2" = true ]; then exit 0; fi; [ "$1" = -n ] && shift; exec unshare -r "$@"'
 }
 falso() { rm -f "$e/bin/$1"; printf '#!/bin/sh\n%s\n' "$2" > "$e/bin/$1"; chmod +x "$e/bin/$1"; }
 # pacman falso: anota los argumentos; con $e/falla-una-vez la primera instalación dice "target not found".
 pacman_bueno() {
+  falso stat 'echo "555 root:root"'   # una Arch: su raíz es 555
   falso pacman 'echo "$*" >> '"$e"'/log
 if [ "$1" = -S ] && [ -e '"$e"'/falla-una-vez ]; then rm '"$e"'/falla-una-vez; echo "error: target not found: tree" >&2; exit 1; fi
 exit 0'
@@ -59,7 +61,7 @@ caso "tree previo: no se quita al terminar"  '! grep -q -- "^-R" "$e/log" && [ "
 # 6. sudo con contraseña (así es en las instancias): HUMO_CLAVE se pasa con `sudo -S`, sin ella `sudo -n` falla
 con_clave() { entorno; pacman_bueno
   falso sudo 'if [ "$1" != -S ]; then exit 1; fi; read -r c; [ "$c" = secreto ] || exit 1; shift; [ "$1" = -k ] && shift
-[ "$1" = true ] && exit 0; exec "$@"'; }
+[ "$1" = true ] && exit 0; exec unshare -r "$@"'; }
 con_clave; HUMO_CLAVE=secreto correr shell
 caso "sudo con clave: HUMO_CLAVE correcta, todo OK y sale con 0"  '[ "$rc" -eq 0 ] && linea OK "sudo" >/dev/null && linea OK "instala" >/dev/null'
 con_clave; HUMO_CLAVE=mala correr shell
@@ -76,7 +78,7 @@ caso "/usr unificado: /bin como carpeta real es FALLA y nombra /bin"  'linea FAL
 raiz_falsa; for c in bin sbin; do ln -s usr/$c "$e/raiz/$c"; done; ln -s ../tmp "$e/raiz/lib"; correr shell HUMO_RAIZ="$e/raiz"
 caso "/usr unificado: /lib que sale de /usr es FALLA"  'linea FALLA "usr unificado.*/lib" >/dev/null'
 
-# 6c. raíz (B47): dueño root:root y el modo de su distro (Debian 755; Arch 555, o 755 mientras TerminalService la sube hasta B95)
+# 6c. raíz (B47): dueño root:root y el modo de su distro (Debian 755; Arch 555)
 raiz_modo() { falso stat "echo '$1'"; correr shell; }
 entorno; falso apt-get 'exit 0'; raiz_modo '755 root:root'
 caso "raíz: Debian 755 root:root es OK"  'linea OK "raíz" >/dev/null'
@@ -84,10 +86,10 @@ entorno; falso apt-get 'exit 0'; raiz_modo '555 root:root'
 caso "raíz: Debian 555 es FALLA"  'linea FALLA "raíz" >/dev/null && [ "$rc" -ne 0 ]'
 entorno; falso apt-get 'exit 0'; raiz_modo '755 user:user'
 caso "raíz: Debian con dueño user:user es FALLA"  'linea FALLA "raíz" >/dev/null'
-for m in 555 755; do
-  entorno; pacman_bueno; raiz_modo "$m root:root"
-  caso "raíz: Arch $m root:root es OK"  'linea OK "raíz" >/dev/null'
-done
+entorno; pacman_bueno; raiz_modo '555 root:root'
+caso "raíz: Arch 555 root:root es OK"  'linea OK "raíz" >/dev/null'
+entorno; pacman_bueno; raiz_modo '755 root:root'
+caso "raíz: Arch 755 es FALLA"  'linea FALLA "raíz" >/dev/null'
 entorno; pacman_bueno; raiz_modo '700 root:root'
 caso "raíz: Arch 700 es FALLA"  'linea FALLA "raíz" >/dev/null'
 entorno; pacman_bueno; raiz_modo '555 user:user'

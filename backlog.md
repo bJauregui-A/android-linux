@@ -9,11 +9,6 @@ El detalle técnico de los ítems anteriores (B04–B61) está en `git show c268
 
 Ordenadas por cuánto destraban.
 
-- **B95** · root salta los permisos de archivos y carpetas, como en Linux
-  - Hoy el kernel revisa con el UID de la app y root virtual no tiene ventaja: `sudo mkdir` en una carpeta `555` o `sudo cat` de un `000` fallan.
-  - root lee, escribe, crea y borra aunque el modo no lo permita; ejecutar sigue pidiendo algún bit `x`.
-  - El modo del archivo queda como estaba.
-  - Comprobar con `sudo` sobre carpetas `555` y archivos `000` y `444`.
 - **B96** · Los permisos se aplican según el usuario virtual: dueño, grupo y otros
   - Hoy cuentan solo los bits del dueño, para todos: `user` crea en `/` sin `sudo` y `www-data` lee un `600` de `user`.
   - Decidir el acceso con el dueño virtual (0026, 0027), el modo y las credenciales del proceso (uid, gid y grupos extra) al abrir, crear, borrar, renombrar, ejecutar, entrar a carpetas y en `access`.
