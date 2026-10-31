@@ -192,7 +192,8 @@ public class TerminalService extends Service implements TerminalSessionClient {
             if (EJECUTAR_PRUEBA.equals(accion)) {
                 if (BuildConfig.DEBUG) {
                     ejecutarPrueba(intent.getStringExtra("id"), intent.getStringExtra("instancia"),
-                            intent.getStringExtra("script"), intent.getIntExtra("limite", 300));
+                            intent.getStringExtra("script"), intent.getIntExtra("limite", 300),
+                            intent.getStringExtra("clave"));
                 } else {
                     Log.w(TAG, "EJECUTAR_PRUEBA ignorada: no es una compilación de depuración");
                 }
@@ -210,7 +211,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
 
     // Corre `bash <script>` en la instancia, con su entorno completo y el seccomp real de la
     // app. Deja en files/pruebas/<id>/: salida.log, estado y, al final, codigo.
-    private void ejecutarPrueba(String id, String instancia, String script, int limite) {
+    private void ejecutarPrueba(String id, String instancia, String script, int limite, String clave) {
         if (id == null || !id.matches("[a-z0-9-]+") || !pruebasActivas.add(id)) {
             Log.w(TAG, "prueba ignorada (id inválido o repetido): " + id);
             return;
@@ -234,6 +235,7 @@ public class TerminalService extends Service implements TerminalSessionClient {
                     // timeout mata a todo el grupo (sleep, hijos) y devuelve 124.
                     ProcessBuilder pb = linuxPara(instancia, "/usr/bin/timeout", "-k", "2",
                             String.valueOf(tope), "/usr/bin/bash", script);
+                    ClavePrueba.ponerClave(pb.environment(), clave);
                     pb.redirectErrorStream(true);
                     pb.redirectOutput(new File(dir, "salida.log"));
                     Process p = pb.start();

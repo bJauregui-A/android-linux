@@ -31,7 +31,8 @@ public class ReceptorPruebas extends BroadcastReceiver {
                 .putExtra("instancia", instancia)
                 .putExtra("script", script)
                 .putExtra("id", id)
-                .putExtra("limite", limite);
+                .putExtra("limite", limite)
+                .putExtra("clave", intent.getStringExtra("clave"));   // base64; no se escribe en el log (B93)
         try {
             contexto.startForegroundService(servicio);
         } catch (RuntimeException e) {

@@ -3,6 +3,8 @@
 # instancia, desde el PC por adb. Imprime la salida y sale con el código del script.
 #   probar-en-telefono.sh [--conservar] [--abrir] [--] <instancia> <script-local> [limite-seg]
 # Códigos: los del script; 124 por límite de tiempo; 2 error de pedido; 3 no llegó al app.
+# HUMO_CLAVE=... probar-en-telefono.sh <instancia> <script>: la contraseña de sudo viaja en base64 en el broadcast y la app
+# la deja como HUMO_CLAVE en el entorno del script; este script no la imprime.
 # Requiere una APK de depuración con ReceptorPruebas. Solo escribe en la carpeta de la app:
 # <instancia>/tmp/prueba-<id>.sh y files/pruebas/<id>/ (se borran al terminar).
 APP=${APP:-dev.ben4shot.glibcprueba.sdk36}
@@ -34,7 +36,7 @@ adb shell "run-as $APP sh -c 'echo $b64 | base64 -d > files/instancias/$inst$rem
 disparar() {
   adb shell am broadcast -n "$APP/dev.ben4shot.glibcprueba.ReceptorPruebas" \
     -a dev.ben4shot.glibcprueba.PRUEBA --es instancia "$inst" --es script "$remoto" \
-    --es id "$id" --ei limite "$limite" 2>&1
+    --es id "$id" --ei limite "$limite" ${HUMO_CLAVE:+--es clave "$(printf %s "$HUMO_CLAVE" | base64 -w0)"} 2>&1
 }
 r=$(disparar)
 if ! grep -q "Broadcast completed" <<<"$r" || grep -qi "error\|exception\|not found" <<<"$r"; then
