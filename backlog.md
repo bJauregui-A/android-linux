@@ -120,7 +120,8 @@ Escritorios del instalador oficial que todavía no tenemos. Cada uno deja de ser
 - **B26b** · Una instancia no ve los archivos de Android ni los de las otras instancias
   - Hoy `/data`, `/system`, `/vendor` y otras pasan sin traducir: desde una instancia se lee `/data/user/0/<app>/files/instancias/<otra>`.
   - Dejar visible solo lo que la instancia necesita para correr (el cargador de la app, `/proc`, `/dev`, `/sys`) y la tabla de red (B86).
-  - Comprobar que desde una instancia no se lista ni se lee otra instancia ni `/data`.
+  - `/sdcard` cerrado por defecto; se abre solo en las instancias donde el usuario lo activa desde la app.
+  - Comprobar que desde una instancia no se lista ni se lee otra instancia ni `/data`, ni `/sdcard` si no está activado.
 - **B26c** · Una instancia solo ve y señala sus propios procesos (`ps`, `pgrep`, `htop`, `kill`)
   - Todas corren con el mismo usuario de Android y ven el `/proc` real; el kernel no tiene namespaces de usuario (`unshare -U` → `EINVAL`), así que el filtro va en nuestra glibc: es contra errores (como `pgrep -x pipewire` de otra instancia), no una barrera de seguridad.
   - Al listar `/proc`, mostrar solo los procesos de la instancia (por su ruta en cmdline o cwd, el criterio de `Pausa`), más `self` y lo que no es un pid.
@@ -158,7 +159,7 @@ Escritorios del instalador oficial que todavía no tenemos. Cada uno deja de ser
   - Darle a Xwayland DRI3 con buffers AHardwareBuffer, sobre `android_ahb_v1`, o llevar las apps X11 de esos escritorios al servidor X de la app.
 - **B37** · Cada ventana Linux es una ventana de Android (recientes, pantalla dividida, flotantes)
 - **B38** · Cursor de tamaño legible en el teléfono
-- **B39** · Notificaciones, abrir enlaces y `/sdcard` en todos los escritorios, no solo en sway
+- **B39** · Notificaciones, abrir enlaces y `/sdcard` (en las instancias que lo tienen activado) en todos los escritorios, no solo en sway (depende de B26b)
 
 ## Quizás — Solo si se corren los instaladores reales de cada distro
 
