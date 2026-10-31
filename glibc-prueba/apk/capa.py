@@ -112,6 +112,12 @@ class Salida:
         self.t.addfile(ti, io.BytesIO(data))
 
 
+def modo_publico(modo):
+    """Lo compilado en el teléfono sale de un proceso con umask 077 (700, 600): en Linux es legible por todos, y ejecutable
+    para todos si lo es para el dueño."""
+    return modo | 0o044 | (0o011 if modo & 0o100 else 0)
+
+
 def sin_simbolos(data):
     """Los .so compilados en el teléfono traen depuración (Turnip: 80 MB → ~15 MB)."""
     if not data.startswith(b"\x7fELF"):
@@ -157,6 +163,7 @@ def main():
             elif m.isfile():
                 data = sin_simbolos(t.extractfile(m).read()).replace(VIEJO, NUEVO)
                 m.size = len(data)
+                m.mode = modo_publico(m.mode)
                 out.t.addfile(m, io.BytesIO(data))
 
     listas = [(f"apk/{f}", f"{D}/{f}", 0o644)
