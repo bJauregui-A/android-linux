@@ -9,21 +9,6 @@ El detalle técnico de los ítems anteriores (B04–B61) está en `git show c268
 
 Ordenadas por cuánto destraban.
 
-- **B96** · Los permisos se aplican según el usuario virtual: dueño, grupo y otros
-  - Hoy cuentan solo los bits del dueño, para todos: `user` crea en `/` sin `sudo` y `www-data` lee un `600` de `user`.
-  - Decidir el acceso con el dueño virtual (0026, 0027), el modo y las credenciales del proceso (uid, gid y grupos extra) al abrir, crear, borrar, renombrar, ejecutar, entrar a carpetas y en `access`.
-  - El bit sticky de `/tmp`: solo el dueño borra lo suyo.
-  - Comprobar con `user`, `www-data` y root sobre `600`, `640`, `644`, `755` y `1777`.
-- **B99** · `stat` muestra el dueño real de los archivos que el dueño real no puede leer
-  - El dueño virtual vive en un xattr y el kernel no deja leerlo si el dueño real no puede leer el archivo (`044`, `000`): `stat` los muestra del usuario principal aunque sean de root. El acceso sí se decide bien (B96 concede la lectura solo al decidir un acceso).
-  - Guardar el dueño donde se pueda leer siempre, sin un `chmod` por cada `stat` (desataría `inotify` en los gestores de archivos), por ejemplo guardando también el modo virtual.
-  - Comprobar con `stat -c %U` sobre un `044` y un `000` de root.
-- **B100** · El primer arranque no aplana los modos de las carpetas del sistema
-  - `apk/primer-arranque.sh` pasa a `755` toda carpeta de `/usr`, `/etc`, `/var` y `/opt` hasta tres niveles (era por avisos de `pacman` cuando nacían en `700`), y deja abiertas las que en Linux son más cerradas (`/etc/ssl/private`, `/var/lib/private`, `/etc/sudoers.d`).
-  - Quitar la línea ahora que los procesos usan `umask 022` y comprobar que `pacman` y `apt` no avisan.
-- **B101** · El escritorio `xfce-x11` de Debian va lento
-  - Con la libc base (sin el parche de permisos) también va lento, y el XFCE de Arch (Wayland) va bien: no es B96.
-  - Medir dónde se va el tiempo (servidor X11 de la app, arranque de la sesión, `fontconfig`) y compararlo con `lxqt` de Debian.
 - **B92** · Los enlaces simbólicos absolutos se guardan como en Linux, sin la ruta real de Android
   - Hoy `symlinkat` guarda `/data/user/0/<app>/files/instancias/<id>/usr/...` y `readlinkat` le quita el prefijo al leer: si la instancia cambia de carpeta, se rompen (ya hay 4 rotos en `dev-6918`).
   - Que el enlace guarde el destino de Linux y se resuelva con el prefijo de la instancia donde está guardado.
@@ -115,7 +100,7 @@ Escritorios del instalador oficial que todavía no tenemos. Cada uno deja de ser
 ## P3 — Servicios y manejo de instancias
 
 - **B27a** · `sshd` corre como root con separación de privilegios, con la configuración oficial de OpenSSH (depende de B89)
-- **B27b** · Apache atiende con sus procesos como `www-data` (depende de B96)
+- **B27b** · Apache atiende con sus procesos como `www-data`
 - **B97** · Capacidades y límites de root virtuales
   - `capset`, `capget`, `PR_SET_KEEPCAPS` y `PR_CAPBSET_*` virtuales (hoy `setpriv --reuid` exige bajar primero el gid).
   - `setrlimit` respeta el tope duro que recuerda el proceso.

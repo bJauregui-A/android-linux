@@ -528,7 +528,7 @@
        /* Como el kernel: #!intérprete [un solo argumento]  */
        hdr[n] = '\0';
        char *s = hdr + 2;
-@@ -2512,6 +2922,239 @@
+@@ -2512,6 +2922,241 @@
    return out_len;
  }
  
@@ -543,7 +543,9 @@
 +  unsigned int pedido = ((a2 & O_ACCMODE) == O_RDONLY ? 4
 +			 : (a2 & O_ACCMODE) == O_WRONLY ? 2 : 6)
 +			| (a2 & O_TRUNC ? 2 : 0);
-+  int comprobar = !root && !(a2 & (O_PATH | O_TMPFILE))
++  /* O_TMPFILE incluye el bit de O_DIRECTORY: se compara completo, o no se
++     comprobaría ningún opendir.  */
++  int comprobar = !root && !(a2 & O_PATH) && (a2 & O_TMPFILE) != O_TMPFILE
 +		  && (a2 & (O_CREAT | O_EXCL)) != (O_CREAT | O_EXCL);
 +#if IS_IN (rtld)
 +  /* El cargador abre el programa y las bibliotecas para mapearlos: un ELF que
@@ -768,7 +770,7 @@
  long int
  __android_path_syscall (long int nr, long int a0, long int a1, long int a2,
  			long int a3, long int a4, long int a5)
-@@ -2973,12 +3616,14 @@
+@@ -2973,12 +3618,14 @@
      case __NR_truncate:
        {
  	XLD (AT_FDCWD, a0, b1);
@@ -789,7 +791,7 @@
        }
      case __NR_statfs:
      case __NR_acct:
-@@ -2990,8 +3635,11 @@
+@@ -2990,8 +3637,11 @@
      case __NR_llistxattr:
      case __NR_removexattr:
      case __NR_lremovexattr:
@@ -803,7 +805,7 @@
  
      /* Bloqueadas por el seccomp de apps (bionic no las usa): ENOSYS sin
         llamar al kernel, así glibc usa su alternativa (faccessat/fchmodat,
-@@ -3000,7 +3648,11 @@
+@@ -3000,7 +3650,11 @@
        if (a3 == 0)
  	{
  	  XLD (a0, a1, b1);
@@ -816,7 +818,7 @@
  	}
        return -ENOSYS;
      case __NR_fchmodat2:
-@@ -3022,41 +3674,24 @@
+@@ -3022,41 +3676,24 @@
  	    return r;
  	}
        {
@@ -824,7 +826,7 @@
 -	if ((a2 & (O_CREAT | O_TMPFILE)) == O_CREAT && creador_distinto ())
 +	struct llamada_sys l = { nr, a0, a1, a2, a3, a4, a5 };
 +	unsigned int extra = 0;
-+	if ((a2 & O_CREAT) && !(a2 & O_TMPFILE))
++	if ((a2 & O_CREAT) && (a2 & O_TMPFILE) != O_TMPFILE)
  	  {
 -	    long int r = abrir_creando (a0, a1, a2, a3);
 -	    return root ? abrir_root (a0, a1, a2, a3, r) : r;
@@ -869,7 +871,7 @@
        }
      case __NR_fstat:
        {
-@@ -3073,67 +3708,57 @@
+@@ -3073,67 +3710,57 @@
      case __NR_mknodat:
        {
  	XLD (a0, a1, b1);
@@ -966,7 +968,7 @@
        }
  
      case __NR_renameat:
-@@ -3141,9 +3766,9 @@
+@@ -3141,9 +3768,9 @@
        {
  	XLD (a0, a1, b1);
  	XLD (a2, a3, b2);
@@ -979,7 +981,7 @@
        }
  
      case __NR_symlinkat:
-@@ -3152,9 +3777,9 @@
+@@ -3152,9 +3779,9 @@
        {
  	XL (a0, b1);
  	XLD (a1, a2, b2);
@@ -992,7 +994,7 @@
        }
  
      case __NR_readlinkat:
-@@ -3169,7 +3794,8 @@
+@@ -3169,7 +3796,8 @@
  	else
  	  {
  	    XLD (a0, a1, b1);

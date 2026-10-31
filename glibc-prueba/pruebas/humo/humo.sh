@@ -62,6 +62,17 @@ if grupo shell; then
     como_root sh -c "echo dos >> \"\$1\"" _ "$d/b" && [ "$(cat "$d/b")" = "$(printf "uno\ndos")" ] || { echo "  sudo no escribe en un 444" >&2; r=1; }
     como_root mkdir "$d/c/x" && [ -d "$d/c/x" ] || { echo "  sudo no crea en una 555" >&2; r=1; }
     chmod 755 "$d/c"; chmod 644 "$d/a"; rm -rf "$d"; [ $r -eq 0 ]'
+  # B96: los permisos se aplican según el usuario virtual (solo dentro de la app: en el PC el sudo y los usuarios son otros)
+  if [ -n "$GLIBC_PREFIX" ]; then
+    caso "shell: permisos: user no lee un 600 de root ni crea en /"  'd=$(mktemp -d) || exit 1
+      como_root sh -c "echo dato > \"\$1\"; chmod 600 \"\$1\"" _ "$d/r"
+      r=0
+      cat "$d/r" >/dev/null 2>&1 && { echo "  user lee un 600 de root" >&2; r=1; }
+      touch "${HUMO_RAIZ%/}/humo-permisos" 2>/dev/null && { rm -f "${HUMO_RAIZ%/}/humo-permisos"; echo "  user crea en /" >&2; r=1; }
+      como_root rm -rf "$d"; [ $r -eq 0 ]'
+    caso "shell: permisos: /tmp es de root y 1777"  '[ "$(stat -c "%a %U" /tmp)" = "1777 root" ]'
+  else salta "shell: permisos del usuario virtual (no es la app)"
+  fi
   caso "shell: /tmp escribe y lee"   'f=$(mktemp) && echo dato > "$f" && [ "$(cat "$f")" = dato ]; r=$?; rm -f "$f"; [ $r -eq 0 ]'
   # /usr unificado: /bin, /sbin y /lib son enlaces que resuelven dentro de /usr (HUMO_RAIZ cambia la raíz, para las pruebas)
   for c in bin sbin lib; do

@@ -193,6 +193,12 @@ caso "red: IP virtual que no es de la instancia es FALLA de servidor local"  'li
 red_entorno 0; rm "$e/bin/python3"; correr red HUMO_ESPEJO=https://espejo.test/ HUMO_VIRTUAL_IP="$e/ip"
 caso "red: sin python3 el servidor local es SALTA que lo nombra y sale con 0"  'linea SALTA "python3" >/dev/null && [ "$rc" -eq 0 ]'
 
+# B96: los permisos del usuario virtual solo se comprueban dentro de la app (GLIBC_PREFIX): en el PC el sudo y los usuarios son otros
+entorno; pacman_bueno; correr shell
+caso "permisos: fuera de la app se saltan"  'linea SALTA "permisos" >/dev/null && ! linea "(OK|FALLA)" "permisos" >/dev/null'
+entorno; pacman_bueno; correr shell GLIBC_PREFIX=/x
+caso "permisos: dentro de la app corren (OK o FALLA, no SALTA)"  'linea "(OK|FALLA)" "permisos" >/dev/null && ! linea SALTA "permisos" >/dev/null'
+
 # --- batería completa ---
 # todo falso en OK: shell y paquetes, gpu (sin escritorio), audio y red
 todo_entorno() { audio_entorno; pacman_bueno; vk 'Turnip Adreno (TM) 619'; falso con-gpu 'exec "$@"'; mkdir -p "$e/x11"
